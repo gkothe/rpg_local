@@ -3,6 +3,8 @@ import type { Campaign, Turn, ContextManifest } from './types.js';
 import { Problem } from '../errors.js';
 import { responseJsonSchema, memoryJsonSchema } from './schemas.js';
 import { CharacterType, SourceStatus, TurnStatus } from './options.js';
+import { diceResponseJsonSchema } from './diceResponse.js';
+import { DICE_NARRATOR } from './dice.js';
 // UTF-8 bytes is a deliberately pessimistic upper estimate: no raw text is assumed to compress.
 export const estimateTokens = (text: string) => Buffer.byteLength(text, 'utf8');
 export const uncovered = (c: Campaign, turns: Turn[]) =>
@@ -13,7 +15,22 @@ export const uncovered = (c: Campaign, turns: Turn[]) =>
       !(c.memory?.valid && c.memory.coveredTurnIds.includes(t.id))
   );
 const format = (turns: Turn[]) =>
-  turns.map((t) => ({ id: t.id, player: t.action, gm: t.narrative }));
+  turns.map((t) => ({
+    id: t.id,
+    player: t.action,
+    gm: t.narrative,
+    ...((t.rolls?.length ?? 0) > 0
+      ? {
+          dice: t.rolls!.map((roll) => ({
+            id: roll.id,
+            reason: roll.reason,
+            declaration: roll.declaration,
+            groups: roll.groups,
+          })),
+          interpretations: t.rollInterpretations ?? [],
+        }
+      : {}),
+  }));
 export const uncoveredHistoryTokens = (c: Campaign, turns: Turn[]) =>
   estimateTokens(JSON.stringify(format(uncovered(c, turns))));
 const instructions =
@@ -23,7 +40,8 @@ export function buildContext(
   turns: Turn[],
   action: string,
   rules: { id: string; version: number; text: string }[],
-  capacity: number
+  capacity: number,
+  trustedDice = false
 ): ContextManifest {
   const ceiling = Math.min(c.budgets.gameplay, capacity);
   const history = uncovered(c, turns);
@@ -51,7 +69,9 @@ export function buildContext(
       sceneTerms.includes(char.name.toLowerCase())
   );
   const base = {
-    instructions,
+    instructions: trustedDice
+      ? `${instructions.replace('No tools, file access, or external actions.', '')} ${DICE_NARRATOR}`
+      : instructions,
     campaignInstructions: c.instructions,
     description: c.description,
     pinnedFacts: c.pinnedFacts,
@@ -65,7 +85,7 @@ export function buildContext(
       description: char.description,
     })),
     state: c.state,
-    schema: responseJsonSchema,
+    schema: trustedDice ? diceResponseJsonSchema : responseJsonSchema,
     action,
   };
   if (

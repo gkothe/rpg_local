@@ -34,6 +34,7 @@ import {
   MAX_SOURCE_TEXT_CHARS,
 } from './domain/limits.js';
 import { SETTINGS_CONTRACT_VERSION } from './domain/versions.js';
+import { DICE_LIMITS } from './domain/dice.js';
 import {
   TURN_STATUS_OPTIONS,
   CHARACTER_TYPE_OPTIONS,
@@ -143,6 +144,7 @@ export function createApp(options: AppOptions) {
           audio: await audioDiagnostics(),
           lan: { enabled: options.lan ?? false },
           limits: { uploadBytes },
+          dice: { enabled: true, limits: DICE_LIMITS },
         },
       });
     })
@@ -422,6 +424,15 @@ export function createApp(options: AppOptions) {
     '/api/campaigns/:id/turns/:turnId',
     wrap(async (req, res) => {
       res.json({ data: await store!.turn(param(req, 'id'), param(req, 'turnId')) });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/turns/:turnId/retry',
+    wrap(async (req, res) => {
+      const input = turnInputSchema.omit({ action: true }).parse(req.body);
+      res
+        .status(202)
+        .json({ data: await turns!.retry(param(req, 'id'), param(req, 'turnId'), input) });
     })
   );
   app.post(

@@ -14,7 +14,9 @@ export const providerValid = (
   return !!(
     p?.available &&
     p.supported &&
+    p.dice?.supported !== false &&
     m &&
+    m.dice?.supported !== false &&
     (settings.effort === null || m.efforts.includes(settings.effort))
   );
 };

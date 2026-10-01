@@ -1,0 +1,50 @@
+# Trusted dice provider evidence
+
+Date: 2026-10-01. Shared gameplay, recovery, archive and chat integration is implemented. **Codex and Claude dice gameplay are enabled on the verified Windows versions below. Antigravity dice remains unsupported; all-provider release acceptance is incomplete.** No user campaigns or global MCP configurations were changed. No commit/push was made.
+
+## Codex 0.159.2
+
+The exec/MCP transport exposes resource/discovery helpers in addition to dice. The installed native executable confirmed that against an anonymous loopback Responses fixture. Guessed helper-disable switches were rejected and are not shipped. The pinned [official configuration schema](https://raw.githubusercontent.com/openai/codex/rust-v0.159.2/codex-rs/core/config.schema.json) also has no `model_max_output_tokens` option; an early assumption about that option was removed before enablement.
+
+Gameplay instead uses native app-server dynamic tools. Only `roll_dice` is advertised. After a native tool request, the application persists crypto faces and interrupts that native turn **without replying to the pending function request**. A new ephemeral process/thread receives the original frozen prompt and a bounded application-owned request/result transcript. This preserves only-dice access and prevents opaque provider continuation history from accumulating. It costs additional CLI startup time. Extraction and memory compaction retain the original no-tools exec path.
+
+Each phase accepts at most one native call. At most 24 requests plus a final phase are allowed, with a 32,000-byte assembled phase prompt, 8,192-byte dice transcript, aggregate 2,000,000-byte stdout/stderr allowance and 180-second overall attempt deadline. Models must advertise at least a 128,000-token native context window. Reported phase input usage is also checked. Intermediate model output is never carried into the next phase. No hidden auto-compaction or guessed output-token override supplies the bound.
+
+A fresh owned CODEX_HOME contains only a hardlinked native subscription auth file. Sanitized metadata and narrator instructions are generated in the owned temporary working directory. The selected empty home is essential: deliberately putting AGENTS.md inside that selected home makes native global rules load, even with project document bytes disabled. Production never copies global instructions/config there. The retained native fixture checks host/global canaries are absent, exactly one dice tool is exposed, two requests cause exactly three model inferences, and prior faces/IDs reach the next phase unchanged. This is native transport evidence, **not a model/subscription test**.
+
+Actual production-launcher subscription checks with `gpt-5.6-sol`, low effort made two dependent native dice calls and received the real crypto faces unchanged. Actual isolated PostgreSQL gameplay completed two turns with faces 6 and 3, corresponding stored IDs and complete version-2 interpretations. The first gameplay check exposed unspecified zero-based slot numbering; explicit per-action slot instructions fixed it, and both subsequent turns completed. No silent retry or fabricated replacement was used.
+
+## Claude Code 2.1.232
+
+Safe mode suppresses explicit MCP servers too, so it remains appropriate for no-tools extraction/compaction but cannot implement dice gameplay. Dice gameplay uses empty setting sources, explicit disabled hooks/plugins, no built-in tools, strict private MCP config, `dontAsk`, an allowlist containing only `mcp__dice__roll_dice`, no persisted session/Chrome/slash commands, and disabled CLAUDE.md/automatic/organization memory/plugin MCP sources. Init must report exactly the owned tool and connected server; extra tools reject the attempt.
+
+Verified [official environment controls](https://code.claude.com/docs/en/env-vars) bound outputs to 2,048 tokens and context to 128,000 tokens, disable automatic compaction, and suppress provider retry overrides. Native `--max-turns 25`, bounded app/tool transcript, output-byte and overall deadline controls apply before continuation. Final reported turn count and model context/output usage are checked; cumulative output across reported models cannot exceed the reserved allowance. Missing or unverifiable usage fails explicitly. Inherited API/auth/configuration overrides are stripped; native subscription authentication is retained.
+
+Actual subscription production-launcher checks made two dependent crypto calls and returned both faces unchanged. Latest check returned 4 and 1 and took **8.65 seconds** end to end for this small synthetic prompt, model Sonnet/low; this is a measured canary, not a latency promise. Actual isolated PostgreSQL gameplay completed two turns with faces 3 and 2, exact IDs and interpretations. An injected failure _after the real provider response_ followed by explicit Claude retry completed with the same saved ID/face 5. A live malicious host CLAUDE.md canary instructed the model to output a canary and call Bash; the isolated launcher instead made exactly two owned crypto calls and returned faces 3 and 6 with no canary text. This is live behavioral evidence of ignored host customization, distinct from the native Codex request inspection. Retained fixtures reject ambient tools, exhausted turn counts and insufficient context reports.
+
+## Cross-provider recovery
+
+A real Claude turn generated and stored face 4, then a test wrapper injected a post-provider failure. Explicit retry through real Codex `gpt-5.6-sol`/low completed with **the same roll UUID, face, groups, reason and declaration**. The frozen prompt remained 3,791 UTF-8 bytes. The failed attempt stayed intact; no game state committed on that failure. These checks used UUID-named isolated test schemas, deleted afterward, and no real player campaigns.
+
+## Antigravity 1.2.14 — blocked gate
+
+The [owned-agent documentation](https://antigravity.google/docs/subagents?tab=cli) advertises local `mcpServers` arrays but no complete attachment shape. An owned temporary agent with disabled inheritance/customizations and empty built-ins did not reach the listener with `{name,serverUrl,headers}`. An inline map alternative likewise returned UNAVAILABLE with zero calls. `mcp(dice/roll_dice)` failed component construction. Generic registry metadata listing MCP helpers is not proof of effective isolated exposure.
+
+One exploratory map canary reported 24,426 aggregate input tokens, exceeding the existing 16,000-token envelope; it is evidence against enabling that launcher, not proof that aggregate usage equals peak context. No further gameplay canaries were run after that result. Read-only CLI help inspection confirms `agy mcp add` offers global configuration, with no isolated scope/home option. No global server was added. Owned attachment and bounded continuation remain unproven. Antigravity is explicitly disabled for dice gameplay; its previous no-tools source/compaction implementation is retained. Resolving this gate may require a documented exclusive attachment interface or an explicit future scope decision, never ambient helpers or simulated randomness.
+
+## Shared implementation and limits
+
+- Crypto individual faces only, pre-reveal immutable declarations, strict input/byte limits and version-2 final references; AI applies rules/arithmetic.
+- Migration 0004, session/attempt ownership, transactional persistence before reveal, ordered exact specification replay, stale/cancelled-owner rejection and append-only audit.
+- Atomic final state commit only after every recorded roll is acknowledged; full undo retains dice.
+- Failed/cancelled/interrupted explicit recovery freezes action/context, checks revision/digest/latest attempt/provider capacity and rejects imported execution. Uncertain HTTP retries keep the same request identity.
+- Terminal views show only each attempt's received prefix; running turns show no partial dice. Failed rolls remain visible even without narration. Every face/declaration/interpretation/correction is accessible chat text; drafts survive polling/retry/undo.
+- Archive v2 validates/remaps canonical records/session/attempt/character/reroll references; v1 remains readable. Malformed faces and references reject before import. Imported audit is visible but non-executable; templates omit roll history.
+
+Trusted faces do not prove that the AI requested every rules-required roll, interpreted bonuses correctly or maintained perfect narrative consistency. Structured references and mutations are validated; free-form rules/narration remain AI interpretation. Only the tested versions/models/efforts above have live acceptance evidence; catalog entitlement is checked when each selected model is used.
+
+## Verification
+
+Current retained checks include isolated migration fresh/upgrade/idempotency, persistence/replay/stale owner, terminal failure/restart/cancellation/late result, cross-provider fixture replay, missing references, undo/archive roundtrip, malformed archives, no-tools compaction, native Codex exposure/fresh phases, Claude negative isolation/bounds, UI uncertain retry and terminal face rendering. Browser acceptance uses synthetic HTTP fixtures, separately labelled from live subscriptions. Latest full run: **57 backend cases passed, 3 unrelated opt-in skips** (1,000-service-turn PostgreSQL soak, OCR and audio runtime); both native offline Codex tests were explicitly enabled and passed. **27 frontend unit cases passed**. **5 Windows Chrome browser fixture cases passed**, including terminal dice, correction, draft-preserving retry, undo audit, export/import audit, source correction, existing play/setup and layout. These fixture browser checks are not real subscription/browser gameplay. Typecheck, lint, production build, formatting and whitespace checks passed. Public audit passed: **172 public files, 2 built bundles, 5 existing commits, zero findings**. No new commit/push was made.
+
+Android remains on hold; macOS/Linux are excluded. All-provider release completion must stay open while Antigravity's gate is unresolved.

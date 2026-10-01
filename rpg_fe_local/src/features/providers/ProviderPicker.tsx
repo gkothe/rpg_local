@@ -18,7 +18,9 @@ export default function ProviderPicker({
   const [refreshing, setRefreshing] = useState(false);
   const provider = providers.find((p) => p.id === value.provider),
     model = provider?.models.find((m) => m.id === value.model);
-  const readyProviders = providers.filter((p) => p.available && p.supported && p.models.length);
+  const readyProviders = providers.filter(
+    (p) => p.available && p.supported && p.dice?.supported !== false && p.models.length
+  );
   return (
     <div className="provider-picker">
       <Field label="AI CLI">
@@ -27,7 +29,7 @@ export default function ProviderPicker({
           value={value.provider}
           onChange={(e) => {
             const p = providers.find((p) => p.id === e.target.value),
-              m = p?.models[0];
+              m = p?.models.find((model) => model.dice?.supported !== false);
             onChange({ provider: p?.id || '', model: m?.id || '', effort: m?.efforts[0] || null });
           }}
         >
@@ -36,12 +38,14 @@ export default function ProviderPicker({
             <option
               key={p.id}
               value={p.id}
-              disabled={!p.available || !p.supported || !p.models.length}
+              disabled={
+                !p.available || !p.supported || p.dice?.supported === false || !p.models.length
+              }
             >
               {p.name}
               {!p.available
                 ? ' — not detected'
-                : !p.supported || !p.models.length
+                : !p.supported || p.dice?.supported === false || !p.models.length
                   ? ' — installed, gameplay disabled'
                   : ''}
             </option>
@@ -52,7 +56,11 @@ export default function ProviderPicker({
         <select
           value={value.model}
           disabled={
-            disabled || !provider?.available || !provider.supported || !provider.models.length
+            disabled ||
+            !provider?.available ||
+            !provider.supported ||
+            provider.dice?.supported === false ||
+            !provider.models.length
           }
           onChange={(e) => {
             const m = provider?.models.find((m) => m.id === e.target.value);
@@ -61,7 +69,7 @@ export default function ProviderPicker({
         >
           <option value="">Select a model</option>
           {provider?.models.map((m) => (
-            <option key={m.id} value={m.id}>
+            <option key={m.id} value={m.id} disabled={m.dice?.supported === false}>
               {m.label}
             </option>
           ))}
@@ -71,7 +79,12 @@ export default function ProviderPicker({
         <select
           value={value.effort || ''}
           disabled={
-            disabled || !provider?.available || !provider.supported || !model?.efforts.length
+            disabled ||
+            !provider?.available ||
+            !provider.supported ||
+            provider.dice?.supported === false ||
+            model?.dice?.supported === false ||
+            !model?.efforts.length
           }
           onChange={(e) => onChange({ ...value, effort: e.target.value || null })}
         >
@@ -82,6 +95,9 @@ export default function ProviderPicker({
         </select>
       </Field>
       {provider?.reason && <small className="provider-reason">{provider.reason}</small>}
+      {model?.dice?.supported === false && (
+        <small className="provider-reason">{model.dice.reason}</small>
+      )}
       <div className="provider-reason stack">
         {!value.provider && (
           <small className="muted">
@@ -96,10 +112,12 @@ export default function ProviderPicker({
           </small>
         )}
         {providers
-          .filter((p) => !p.available || !p.supported || !p.models.length)
+          .filter(
+            (p) => !p.available || !p.supported || p.dice?.supported === false || !p.models.length
+          )
           .map((p) => (
             <small key={p.id} className="muted">
-              {p.name}: {p.reason || 'No usable model catalog is available.'}
+              {p.name}: {p.dice?.reason || p.reason || 'No usable model catalog is available.'}
             </small>
           ))}
         {onRefresh && (

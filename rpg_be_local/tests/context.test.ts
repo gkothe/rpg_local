@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { buildContext, compactionBatch, estimateTokens } from '../src/domain/context.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import type { Turn } from '../src/domain/types.js';
+import { TurnStatus } from '../src/domain/options.js';
 const turn = (id: string, narrative: string): Turn => ({
   id,
   campaignId: 'c',
@@ -17,6 +18,28 @@ const turn = (id: string, narrative: string): Turn => ({
   context: null,
   createdAt: '',
   completedAt: '',
+});
+
+test('trusted context includes completed roll evidence but excludes failed and undone dice history', () => {
+  const c = newCampaign({ name: 'Dice context' });
+  const completed = turn('completed', 'Saved outcome');
+  completed.rolls = [
+    {
+      id: 'record',
+      reason: 'Check',
+      declaration: 'Target 4',
+      groups: [{ label: 'Check', sides: 6, faces: [5] }],
+    },
+  ] as Turn['rolls'];
+  const failed = { ...turn('failed', 'FAILED_CANARY'), status: TurnStatus.Failed };
+  const undone = { ...turn('undone', 'UNDONE_CANARY'), undone: true };
+  const context = buildContext(c, [completed, failed, undone], 'Next', [], 16000, true);
+  assert.match(context.prompt, /rollInterpretations/);
+  assert.match(context.prompt, /faces/);
+  assert.doesNotMatch(context.prompt, /FAILED_CANARY|UNDONE_CANARY/);
+  assert.deepEqual(context.historyIds, ['completed']);
+  assert.ok(context.estimatedTokens <= 16000);
+  assert.doesNotMatch(compactionBatch(c, [completed], 16000).prompt, /roll_dice/);
 });
 test('never silently drops uncovered turns, enforces final serialized ceiling and keeps pinned facts', () => {
   const c = newCampaign({ name: 'A' });

@@ -6,6 +6,47 @@ import PlayPage from '../src/pages/Play';
 import SettingsPage from '../src/pages/Settings';
 import { LanContext } from '../src/features/connections/LanContext';
 import { fixtureCampaign, fixtureTurn, options, providers } from './fixtures';
+import ProviderPicker from '../src/features/providers/ProviderPicker';
+
+it('provider picker excludes unverified dice models and selects a verified model', () => {
+  const onChange = vi.fn();
+  const verified = {
+    ...providers[0],
+    dice: { supported: true, reason: null },
+    models: [
+      {
+        id: 'blocked',
+        label: 'Blocked model',
+        efforts: ['low'],
+        inputTokens: 8000,
+        dice: { supported: false, reason: 'Budget not verified' },
+      },
+      {
+        id: 'verified',
+        label: 'Verified model',
+        efforts: ['low'],
+        inputTokens: 8000,
+        dice: { supported: true, reason: null },
+      },
+    ],
+  };
+  render(
+    <ProviderPicker
+      providers={[verified]}
+      value={{ provider: verified.id, model: 'blocked', effort: 'low' }}
+      onChange={onChange}
+    />
+  );
+  expect(
+    (screen.getByRole('option', { name: 'Blocked model' }) as HTMLOptionElement).disabled
+  ).toBe(true);
+  fireEvent.change(screen.getByLabelText('AI CLI'), { target: { value: verified.id } });
+  expect(onChange).toHaveBeenCalledWith({
+    provider: verified.id,
+    model: 'verified',
+    effort: 'low',
+  });
+});
 
 afterEach(() => vi.unstubAllGlobals());
 

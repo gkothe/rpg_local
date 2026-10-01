@@ -13,6 +13,7 @@ import Journal from '../features/journal/Journal';
 import { useTurn } from '../features/play/useTurn';
 import { ReadAloud } from '../features/audio/ReadAloud';
 import { Dictation } from '../features/audio/Dictation';
+import { DiceRolls } from '../features/play/DiceRolls';
 export default function PlayPage() {
   const { id } = useParams();
   const [search] = useSearchParams();
@@ -190,7 +191,16 @@ export default function PlayPage() {
               </Empty>
             )}
             {campaign.turns
-              .filter((t) => showAudit || (isCompleted(t, settings.data) && !t.undone))
+              .filter(
+                (t) =>
+                  showAudit ||
+                  (!t.undone &&
+                    (isCompleted(t, settings.data) ||
+                      t.diceRetry ||
+                      ((t.rolls?.length ?? 0) > 0 &&
+                        settings.data?.turnStatusOptions.find((option) => option.id === t.status)
+                          ?.terminal)))
+              )
               .map((t, index) => (
                 <article className="turn" key={t.id}>
                   <div className="folio">{String(index + 1).padStart(2, '0')}</div>
@@ -215,7 +225,41 @@ export default function PlayPage() {
                         <ReadAloud text={t.narrative} />
                       )}
                     </div>
-                    {t.error && showAudit && <ErrorNotice message={t.error} />}
+                    <DiceRolls
+                      turn={t}
+                      characters={campaign.characters}
+                      terminal={
+                        !!settings.data?.turnStatusOptions.find((option) => option.id === t.status)
+                          ?.terminal
+                      }
+                    />
+                    {t.error && <ErrorNotice message={t.error} />}
+                    {t.diceRetry && (
+                      <div className="dice-retry">
+                        {t.diceRetry.available ? (
+                          <>
+                            <p className="muted">
+                              Retry continues the original action and keeps its saved dice. The
+                              composer draft stays unchanged.
+                            </p>
+                            <button
+                              disabled={
+                                game.busy ||
+                                saving ||
+                                !playable ||
+                                game.uncertainAction !== null ||
+                                game.uncertainDiceRetry
+                              }
+                              onClick={() => void game.retryDice(t)}
+                            >
+                              Retry with saved dice
+                            </button>
+                          </>
+                        ) : (
+                          <p className="muted">{t.diceRetry.reason}</p>
+                        )}
+                      </div>
+                    )}
                     {showAudit &&
                       settings.data?.turnStatusOptions.find((o) => o.id === t.status)?.terminal &&
                       !isCompleted(t, settings.data) && (
@@ -231,7 +275,7 @@ export default function PlayPage() {
                             setDraft(t.action);
                           }}
                         >
-                          Restore action to composer
+                          Use as a new action (new dice)
                         </button>
                       )}
                     {t.changes.length > 0 && (
@@ -281,6 +325,17 @@ export default function PlayPage() {
         </div>
         <section className="composer panel">
           <ErrorNotice message={game.error} />
+          {game.uncertainDiceRetry && (
+            <div className="notice">
+              <p>
+                The dice retry may have reached the server. Check the same request before starting
+                another action.
+              </p>
+              <button disabled={game.busy} onClick={() => void game.retryDice()}>
+                Check original dice retry
+              </button>
+            </div>
+          )}
           {game.uncertainAction !== null && (
             <div className="notice">
               <p>

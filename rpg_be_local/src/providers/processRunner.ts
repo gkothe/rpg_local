@@ -8,6 +8,13 @@ export type RunOptions = {
   timeoutMs?: number;
   maxOutputBytes?: number;
   captureDiagnosticOutput?: boolean;
+  /** Byte accounting only; never exposes raw diagnostic content. */
+  onOutputBytes?: (bytes: number) => void;
+  /** Owned duplex protocols only; lines are delivered in order. */
+  protocol?: {
+    start(send: (value: unknown) => void, end: (text?: string) => void): void;
+    line(value: unknown, send: (value: unknown) => void, end: () => void): Promise<void>;
+  };
 };
 export function runProcess(
   binary: string,
@@ -35,6 +42,11 @@ export function runProcess(
     let failure: Error | undefined;
     const outputDecoder = new StringDecoder('utf8');
     const errorDecoder = new StringDecoder('utf8');
+    let pending = '';
+    let protocolWork = Promise.resolve();
+    const send = (value: unknown) => {
+      if (!failure && !settled) child.stdin.write(JSON.stringify(value) + '\n');
+    };
     const kill = () => {
       if (!child.pid) return;
       if (process.platform === 'win32') {
@@ -81,18 +93,49 @@ export function runProcess(
     );
     child.stdout.on('data', (chunk: Buffer) => {
       bytes += chunk.length;
+      options.onOutputBytes?.(chunk.length);
       if (bytes > (options.maxOutputBytes ?? 2_000_000))
         stop(new Problem(502, 'provider_output', 'Local process exceeded output limit'));
-      else output += outputDecoder.write(chunk);
+      else {
+        const decoded = outputDecoder.write(chunk);
+        output += decoded;
+        if (options.protocol) {
+          pending += decoded;
+          let newline: number;
+          while ((newline = pending.indexOf('\n')) >= 0) {
+            const line = pending.slice(0, newline);
+            pending = pending.slice(newline + 1);
+            if (!line.trim()) continue;
+            protocolWork = protocolWork
+              .then(async () => {
+                if (failure || settled) return;
+                await options.protocol!.line(JSON.parse(line), send, () => child.stdin.end());
+              })
+              .catch((error: unknown) =>
+                stop(
+                  error instanceof Problem
+                    ? error
+                    : new Problem(
+                        502,
+                        'provider_protocol',
+                        'Local CLI returned an invalid protocol message'
+                      )
+                )
+              );
+          }
+        }
+      }
     });
     // Never return raw stderr: it can include local paths, prompts or credentials.
     child.stderr.on('data', (chunk: Buffer) => {
       bytes += chunk.length;
+      options.onOutputBytes?.(chunk.length);
       if (bytes > (options.maxOutputBytes ?? 2_000_000))
         stop(new Problem(502, 'provider_output', 'Local process exceeded output limit'));
       else stderr += errorDecoder.write(chunk);
     });
-    child.on('close', (code) => {
+    child.on('close', async (code) => {
+      await protocolWork;
       output += outputDecoder.end();
       stderr += errorDecoder.end();
       finish(
@@ -109,6 +152,12 @@ export function runProcess(
       );
     });
     child.stdin.on('error', () => {});
-    child.stdin.end(input);
+    if (options.protocol) {
+      try {
+        options.protocol.start(send, (text) => child.stdin.end(text));
+      } catch {
+        stop(new Problem(502, 'provider_protocol', 'Local CLI protocol could not be initialized'));
+      }
+    } else child.stdin.end(input);
   });
 }

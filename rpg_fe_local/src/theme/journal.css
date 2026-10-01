@@ -653,3 +653,23 @@ hr {
     animation: none !important;
   }
 }
+
+.dice-rolls {
+  margin-block: 1.5rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+}
+.dice-roll {
+  padding-block: 0.5rem;
+}
+.dice-roll + .dice-roll {
+  border-top: 1px solid var(--line);
+}
+.dice-faces {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.dice-retry {
+  margin-block: 1rem;
+}

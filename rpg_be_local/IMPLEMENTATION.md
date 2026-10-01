@@ -18,3 +18,19 @@ the application JSON in `payload_json`; decoding still precedes unchanged domain
 Claude receives the same application constraints without the unsupported draft meta-schema
 annotation. Ten provider regressions, native Codex isolation, 36 isolated-DB/backend cases and 24
 frontend cases passed. Full evidence and known setup limits: `../docs/reviews/live-codex-claude.md`.
+
+Trusted dice integration (2026-10-01): generic crypto faces, version-2 GM validation,
+migration 0004 and append-only persistence/replay are now connected to gameplay. Terminal
+roll hydration, frozen-context retry, cancellation/lease/undo audit, v2 export/import with
+v1 normalization, derived retry reasons and accessible chat rendering are implemented.
+Source extraction and compaction remain no-tools. Current verified production dice path:
+Claude 2.1.232 with CLI model aliases, explicit output/turn/context controls and disabled
+opaque auto-compaction. Actual isolated PostgreSQL gameplay checks completed two Claude
+turns and retained every roll reference. Browser and fixture evidence covers failed retry,
+provider switching, undo and archive preservation. Codex dynamic-tool transport now interrupts before native tool replies and uses fresh bounded
+application-owned phases. Native only-dice/fresh-phase evidence and two actual gameplay
+turns passed; a real Claude-to-Codex retry preserved the identical stored roll/face.
+No ignored max-output override is used. Antigravity owned-tool attachment remains
+unsupported. This is not all-provider release completion. Latest evidence and gates:
+`../docs/reviews/dice-provider-capabilities.md`. No real user campaigns or shared CLI/MCP
+configuration were altered; no commit/push was made.

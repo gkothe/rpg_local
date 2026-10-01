@@ -9,6 +9,8 @@ test('HTTP boundary serves backend-owned capabilities, rejects foreign Host/Orig
   const { app } = createApp({ store: null });
   const options = await request(app).get('/api/settings').set('Host', 'localhost:4100').expect(200);
   assert.equal(options.body.data.defaults.characterType, 'player');
+  assert.equal(options.body.data.dice.enabled, true);
+  assert.equal(options.body.data.dice.limits.requestsPerAttempt, 24);
   assert.equal(
     options.body.data.turnStatusOptions.find((o: { id: string }) => o.id === 'running').active,
     true

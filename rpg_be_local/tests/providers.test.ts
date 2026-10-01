@@ -4,6 +4,42 @@ import { providerArgs, parseProviderOutput } from '../src/providers/adapters.js'
 import { runProcess } from '../src/providers/processRunner.js';
 import { agentDefinition, parseModelCatalog, modelSlug } from '../src/providers/antigravity.js';
 import { responseJsonSchema } from '../src/domain/schemas.js';
+import { ProviderService, type Provider } from '../src/providers/service.js';
+
+test('gameplay rejects provider and model dice gates without disabling no-tools capacity', async () => {
+  class FixtureProviders extends ProviderService {
+    provider: Provider = {
+      id: 'codex',
+      name: 'Fixture',
+      available: true,
+      supported: true,
+      reason: null,
+      version: 'fixture',
+      catalogProvenance: 'Fixture',
+      dice: { supported: false, reason: 'Unverified dice' },
+      models: [
+        {
+          id: 'fixture',
+          label: 'Fixture',
+          efforts: ['low'],
+          inputTokens: 8000,
+          dice: { supported: false, reason: 'Unverified model' },
+        },
+      ],
+    };
+    override async list() {
+      return [this.provider];
+    }
+  }
+  const service = new FixtureProviders();
+  const settings = { provider: 'codex', model: 'fixture', effort: 'low' };
+  assert.equal(await service.capacity(settings), 4800);
+  await assert.rejects(service.gameplayCapacity(settings), /Unverified dice/);
+  service.provider.dice = { supported: true, reason: null };
+  await assert.rejects(service.gameplayCapacity(settings), /Unverified model/);
+  service.provider.models[0]!.dice = { supported: true, reason: null };
+  assert.equal(await service.gameplayCapacity(settings), 4800);
+});
 test('Claude invocation retains subscription auth, disables tools/customization and session reuse', () => {
   const a = providerArgs(
     'claude',

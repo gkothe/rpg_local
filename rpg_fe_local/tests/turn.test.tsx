@@ -12,6 +12,31 @@ const settings = { provider: 'claude', model: 'fixture', effort: null };
 const campaign = { id: 'campaign', revision: 3, turns: [], settings } as unknown as CampaignDetail;
 afterEach(() => vi.unstubAllGlobals());
 describe('turn lifecycle', () => {
+  it('preserves the dice retry identity after an uncertain response and blocks a new action', async () => {
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('Lost connection'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { id: 'retry', status: 'pending' } }), { status: 202 })
+      );
+    vi.stubGlobal('fetch', fetcher);
+    const { result } = renderHook(() => useTurn(campaign, vi.fn(), options));
+    const failed = { id: 'failed', diceRetry: { available: true, reason: null } } as Turn;
+    await act(async () => {
+      expect(await result.current.retryDice(failed)).toBe(false);
+    });
+    expect(result.current.uncertainDiceRetry).toBe(true);
+    await act(async () => {
+      expect(await result.current.send('New action', settings)).toBe(false);
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      expect(await result.current.retryDice()).toBe(true);
+    });
+    expect(fetcher.mock.calls[1][0]).toBe(fetcher.mock.calls[0][0]);
+    expect(fetcher.mock.calls[1][1].body).toBe(fetcher.mock.calls[0][1].body);
+    expect(result.current.uncertainDiceRetry).toBe(false);
+  });
   it('reuses the exact request after an uncertain reply and blocks a different action', async () => {
     const fetcher = vi
       .fn()

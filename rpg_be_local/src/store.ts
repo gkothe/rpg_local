@@ -5,6 +5,8 @@ import { databaseUrl } from './config.js';
 import { conflict, Problem } from './errors.js';
 import type { Campaign, Turn, Memory, Snapshot } from './domain/types.js';
 import { SourceStatus, TurnStatus } from './domain/options.js';
+import { gameplayDigest } from './domain/diceContext.js';
+import type { DiceRecord } from './domain/dice.js';
 export class Store {
   readonly pool: pg.Pool;
   constructor(url = databaseUrl()) {
@@ -54,21 +56,27 @@ export class Store {
       'SELECT document FROM turns WHERE campaign_id=$1 ORDER BY created_at,id LIMIT $2 OFFSET $3',
       [campaignId, limit, offset]
     );
-    return r.rows.map((x) => x.document);
+    return this.hydrateTurns(
+      r.rows.map((x) => x.document),
+      client
+    );
   }
   async activeTurns(campaignId: string, client?: PoolClient): Promise<Turn[]> {
     const r = await (client ?? this.pool).query(
       "SELECT document FROM turns WHERE campaign_id=$1 AND status=$2 AND NOT (document->>'undone')::boolean ORDER BY created_at,id",
       [campaignId, TurnStatus.Completed]
     );
-    return r.rows.map((x) => x.document);
+    return this.hydrateTurns(
+      r.rows.map((x) => x.document),
+      client
+    );
   }
   async recentTurns(campaignId: string, limit = 100): Promise<Turn[]> {
     const r = await this.pool.query(
       'SELECT document FROM turns WHERE campaign_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2',
       [campaignId, limit]
     );
-    return r.rows.map((x) => x.document as Turn).reverse();
+    return this.hydrateTurns(r.rows.map((x) => x.document as Turn).reverse());
   }
   async turn(campaignId: string, id: string, client?: PoolClient, lock = false): Promise<Turn> {
     const r = await (client ?? this.pool).query(
@@ -76,10 +84,83 @@ export class Store {
       [campaignId, id]
     );
     if (!r.rows[0]) throw new Problem(404, 'not_found', 'Turn not found');
-    return r.rows[0].document;
+    return (await this.hydrateTurns([r.rows[0].document], client))[0]!;
+  }
+  private async hydrateTurns(turns: Turn[], client?: PoolClient): Promise<Turn[]> {
+    const terminal = turns.filter(
+      (turn) =>
+        turn.diceSessionId &&
+        ![TurnStatus.Pending, TurnStatus.Running].includes(turn.status as TurnStatus)
+    );
+    if (!terminal.length) return turns;
+    const db = client ?? this.pool;
+    const records = await db.query(
+      "SELECT record.*,attempt_turn.id AS attempt_turn_id FROM dice_records record JOIN turns attempt_turn ON (attempt_turn.document->>'diceSessionId')::uuid=record.session_id AND attempt_turn.campaign_id=record.campaign_id LEFT JOIN dice_attempts attempt ON attempt.turn_id=attempt_turn.id WHERE attempt_turn.id=ANY($1::uuid[]) AND record.slot<COALESCE(attempt.next_slot,jsonb_array_length(COALESCE(attempt_turn.document->'rolls','[]'::jsonb))) ORDER BY record.slot",
+      [terminal.map((turn) => turn.id)]
+    );
+    const byTurn = new Map<string, DiceRecord[]>();
+    for (const row of records.rows) {
+      const group = byTurn.get(row.attempt_turn_id) ?? [];
+      group.push({
+        ...row.input,
+        id: row.id,
+        sessionId: row.session_id,
+        campaignId: row.campaign_id,
+        groups: row.groups,
+        createdAt: new Date(row.created_at).toISOString(),
+      });
+      byTurn.set(row.attempt_turn_id, group);
+    }
+    for (const turn of terminal) {
+      turn.rolls = byTurn.get(turn.id) ?? [];
+      turn.rollInterpretations ??= [];
+    }
+    const failures = terminal.filter((turn) =>
+      [TurnStatus.Failed, TurnStatus.Cancelled, TurnStatus.Interrupted].includes(
+        turn.status as TurnStatus
+      )
+    );
+    if (!failures.length) return turns;
+    // Every Store turn collection belongs to one campaign. Derived retry state is never persisted.
+    const campaignId = failures[0]!.campaignId;
+    const sessions = await db.query(
+      'SELECT id,imported,context_digest FROM dice_sessions WHERE id=ANY($1::uuid[]) AND campaign_id=$2',
+      [failures.map((turn) => turn.diceSessionId), campaignId]
+    );
+    const latest = await db.query(
+      'SELECT id FROM turns WHERE campaign_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',
+      [campaignId]
+    );
+    const history = await db.query(
+      "SELECT document FROM turns WHERE campaign_id=$1 AND status=$2 AND NOT (document->>'undone')::boolean ORDER BY created_at,id",
+      [campaignId, TurnStatus.Completed]
+    );
+    const digest = gameplayDigest(
+      await this.campaign(campaignId, client),
+      history.rows.map((row) => row.document)
+    );
+    for (const turn of failures) {
+      const session = sessions.rows.find((row) => row.id === turn.diceSessionId);
+      const reason =
+        !session || session.imported
+          ? 'Imported dice are preserved for audit and cannot be executed'
+          : latest.rows[0]?.id !== turn.id
+            ? 'A later action superseded this attempt'
+            : session.context_digest !== digest
+              ? 'Game context changed; start a new action'
+              : null;
+      turn.diceRetry = { available: reason === null, reason };
+    }
+    return turns;
   }
   async saveTurn(t: Turn, client: PoolClient): Promise<void> {
-    await client.query('UPDATE turns SET document=$2,status=$3 WHERE id=$1', [t.id, t, t.status]);
+    const document = { ...t };
+    delete document.diceRetry;
+    await client.query('UPDATE turns SET document=$2,status=$3 WHERE id=$1', [
+      t.id,
+      document,
+      t.status,
+    ]);
   }
   async assertIdle(id: string, client: PoolClient): Promise<void> {
     const r = await client.query(
@@ -117,7 +198,7 @@ export class Store {
         TurnStatus.Interrupted,
         TurnStatus.Pending,
         TurnStatus.Running,
-        'The app restarted during this turn; submit a new request to retry',
+        'The app restarted during this turn; use Retry to preserve its recorded dice',
       ]
     );
     return r.rowCount ?? 0;

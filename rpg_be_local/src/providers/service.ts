@@ -13,6 +13,10 @@ import { parseProviderOutput, providerArgs } from './adapters.js';
 import { Problem } from '../errors.js';
 import type { ProviderSettings } from '../domain/types.js';
 import { z } from 'zod';
+import { generateCodexDice } from './codexDice.js';
+import { CLAUDE_DICE_VERSION, generateClaudeDice } from './claudeDice.js';
+import { DICE_CLI_LIMITS, type RollCallback } from './diceProtocol.js';
+import { DICE_LIMITS } from '../domain/dice.js';
 import {
   ANTIGRAVITY_ISOLATED_VERSION,
   generateAntigravity,
@@ -27,7 +31,13 @@ import {
   PROVIDER_IDS,
   type ProviderId,
 } from './options.js';
-export type ModelOption = { id: string; label: string; efforts: string[]; inputTokens: number };
+export type ModelOption = {
+  id: string;
+  label: string;
+  efforts: string[];
+  inputTokens: number;
+  dice?: { supported: boolean; reason: string | null };
+};
 const CLAUDE_CLI_INPUT_TOKENS = 8000;
 export type Provider = {
   id: ProviderId;
@@ -38,6 +48,7 @@ export type Provider = {
   version: string | null;
   models: ModelOption[];
   catalogProvenance: string;
+  dice?: { supported: boolean; reason: string | null };
 };
 export interface Generator {
   generate(
@@ -47,6 +58,13 @@ export interface Generator {
     signal?: AbortSignal
   ): Promise<unknown>;
   capacity(settings: ProviderSettings, ceiling?: number): Promise<number>;
+  generateGameplay?(
+    settings: ProviderSettings,
+    prompt: string,
+    roll: RollCallback,
+    signal?: AbortSignal
+  ): Promise<unknown>;
+  gameplayCapacity?(settings: ProviderSettings, ceiling?: number): Promise<number>;
 }
 const configSchema = z.array(
   z.object({
@@ -120,6 +138,23 @@ export class ProviderService implements Generator {
         discoveryFailure = error instanceof Problem ? error.message : 'CLI discovery failed';
       }
       let codexModels: ModelOption[] = [];
+      const codexDiceModels = new Set<string>();
+      let claudeDiceVerified = false;
+      if (id === PROVIDER_ID.Claude && executable && !discoveryFailure) {
+        try {
+          version = (
+            await runProcess(executable.binary, [...executable.prefix, '--version'], '', {
+              timeoutMs: 8000,
+              maxOutputBytes: 10000,
+            })
+          )
+            .trim()
+            .split(/\s/)[0]!;
+          claudeDiceVerified = version === CLAUDE_DICE_VERSION;
+        } catch {
+          claudeDiceVerified = false;
+        }
+      }
       let codexIsolated = false;
       if (id === PROVIDER_ID.Codex && executable && !discoveryFailure) {
         try {
@@ -136,6 +171,13 @@ export class ProviderService implements Generator {
           const inspected = await inspectCodex(executable);
           version = inspected.version;
           codexModels = inspected.models;
+          const metadata = inspected.metadata as {
+            models: { slug: string; context_window?: number }[];
+          };
+          for (const model of metadata.models) {
+            if ((model.context_window ?? 0) >= DICE_CLI_LIMITS.contextTokens)
+              codexDiceModels.add(model.slug);
+          }
           codexIsolated = true;
         } catch (error) {
           discoveryFailure =
@@ -215,6 +257,28 @@ export class ProviderService implements Generator {
             : !models.length
               ? 'Configure verified models in RPG_MODEL_CATALOG before gameplay'
               : null);
+      const diceModels = models.map((model) => {
+        const supported =
+          isolated &&
+          ((id === PROVIDER_ID.Claude &&
+            claudeDiceVerified &&
+            parseClaudeHelpCatalog(help).some((alias) => alias.id === model.id)) ||
+            (id === PROVIDER_ID.Codex && codexDiceModels.has(model.id)));
+        return {
+          ...model,
+          dice: {
+            supported,
+            reason: supported
+              ? null
+              : id === PROVIDER_ID.Claude
+                ? claudeDiceVerified
+                  ? 'Trusted dice is verified only for current CLI model aliases'
+                  : `Trusted dice requires verified Claude CLI ${CLAUDE_DICE_VERSION}`
+                : 'Trusted dice isolation or context budget is not verified for this model',
+          },
+        };
+      });
+      const diceSupported = diceModels.some((model) => model.dice.supported);
       result.push({
         id,
         name,
@@ -222,7 +286,21 @@ export class ProviderService implements Generator {
         supported: isolated && models.length > 0,
         reason,
         version,
-        models,
+        models: diceModels,
+        dice: {
+          supported: diceSupported,
+          reason: diceSupported
+            ? null
+            : id === PROVIDER_ID.Antigravity
+              ? 'Trusted dice is unavailable: exclusive native dice-tool attachment is not verified on this CLI'
+              : id === PROVIDER_ID.Codex
+                ? (reason ??
+                  'Trusted dice requires a verified account model with a sufficient context window')
+                : (reason ??
+                  (!claudeDiceVerified
+                    ? `Trusted dice requires verified Claude CLI ${CLAUDE_DICE_VERSION}`
+                    : null)),
+        },
         catalogProvenance:
           id === PROVIDER_ID.Antigravity
             ? `Installed CLI model catalog; verified minimal agent on ${ANTIGRAVITY_ISOLATED_VERSION}; individual model entitlement is checked when used`
@@ -312,6 +390,81 @@ export class ProviderService implements Generator {
                 { cwd: dir, env, signal, timeoutMs: 180000, maxOutputBytes: 2_000_000 }
               );
       return parseProviderOutput(settings.provider, output);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+  async gameplayCapacity(
+    settings: ProviderSettings,
+    ceiling = MAX_PROVIDER_INPUT_TOKENS
+  ): Promise<number> {
+    const capacity = await this.capacity(settings, ceiling);
+    const provider = (await this.list()).find((option) => option.id === settings.provider)!;
+    if (!provider.dice?.supported)
+      throw new Problem(
+        503,
+        'dice_provider',
+        provider.dice?.reason ?? 'Trusted dice is unavailable for this CLI'
+      );
+    const model = provider.models.find((model) => model.id === settings.model)!;
+    if (!model.dice?.supported)
+      throw new Problem(
+        503,
+        'dice_model',
+        model.dice?.reason ?? 'Trusted dice is unavailable for this model'
+      );
+    if (settings.provider === PROVIDER_ID.Claude) {
+      const executable = this.locations.get(settings.provider)!;
+      const version = await runProcess(executable.binary, [...executable.prefix, '--version'], '', {
+        timeoutMs: 8000,
+        maxOutputBytes: 10000,
+      });
+      if (!version.startsWith(CLAUDE_DICE_VERSION + ' '))
+        throw new Problem(
+          503,
+          'claude_dice_version',
+          `Claude trusted dice requires verified CLI ${CLAUDE_DICE_VERSION}`
+        );
+    }
+    return capacity;
+  }
+  async generateGameplay(
+    settings: ProviderSettings,
+    prompt: string,
+    roll: RollCallback,
+    signal?: AbortSignal
+  ): Promise<unknown> {
+    const capacity = await this.gameplayCapacity(settings);
+    if (Buffer.byteLength(prompt, 'utf8') > capacity + DICE_LIMITS.transcriptBytes)
+      throw new Problem(
+        422,
+        'context_overflow',
+        'Gameplay prompt exceeds its reserved input budget'
+      );
+    const executable = this.locations.get(settings.provider)!;
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-dice-cli-'));
+    try {
+      if (settings.provider === PROVIDER_ID.Codex)
+        return await generateCodexDice(
+          executable,
+          settings,
+          prompt,
+          dir,
+          process.env,
+          roll,
+          signal
+        );
+      if (settings.provider === PROVIDER_ID.Claude)
+        return await generateClaudeDice(
+          executable,
+          settings,
+          prompt,
+          dir,
+          process.env,
+          roll,
+          signal
+        );
+      throw new Problem(503, 'dice_provider', 'Trusted dice is unavailable for this CLI');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

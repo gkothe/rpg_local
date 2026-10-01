@@ -10,8 +10,15 @@ export interface Provider {
   supported: boolean;
   reason: string | null;
   version: string | null;
-  models: { id: string; label: string; efforts: string[]; inputTokens: number }[];
+  models: {
+    id: string;
+    label: string;
+    efforts: string[];
+    inputTokens: number;
+    dice?: { supported: boolean; reason: string | null };
+  }[];
   catalogProvenance: string;
+  dice?: { supported: boolean; reason: string | null };
 }
 export interface Character {
   id: string;
@@ -35,6 +42,27 @@ export interface Source {
   originalAvailable?: boolean;
 }
 export interface Turn {
+  diceSessionId?: string;
+  retryOfTurnId?: string;
+  diceRetry?: { available: boolean; reason: string | null };
+  rolls?: {
+    id: string;
+    sessionId: string;
+    campaignId: string;
+    slot: number;
+    reason: string;
+    declaration: string;
+    actorId?: string;
+    targetId?: string;
+    rerollOf?: { rollId: string; reason: string };
+    groups: { label: string; sides: number; faces: number[] }[];
+    createdAt: string;
+  }[];
+  rollInterpretations?: {
+    rollId: string;
+    explanation: string;
+    corrections?: { explanation: string }[];
+  }[];
   id: string;
   campaignId: string;
   requestId: string;
@@ -129,4 +157,5 @@ export interface Settings {
   audio: { available: boolean; reason: string | null; maxSeconds: number };
   lan: { enabled: boolean };
   limits: { uploadBytes: number };
+  dice?: { enabled: boolean; limits: Record<string, number> };
 }

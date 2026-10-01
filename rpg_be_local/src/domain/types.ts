@@ -11,6 +11,8 @@ import type {
   ARCHIVE_FORMAT_VERSION,
   GM_RESPONSE_SCHEMA_VERSION,
 } from './versions.js';
+import type { DiceRecord, DiceSession } from './dice.js';
+import type { RollInterpretation } from './diceResponse.js';
 
 export type JsonObject = Record<string, unknown>;
 export type ProviderSettings = { provider: string; model: string; effort: string | null };
@@ -69,6 +71,11 @@ export type Campaign = {
   updatedAt: string;
 };
 export type Turn = {
+  diceSessionId?: string;
+  retryOfTurnId?: string;
+  rolls?: DiceRecord[];
+  rollInterpretations?: RollInterpretation[];
+  diceRetry?: { available: boolean; reason: string | null };
   id: string;
   campaignId: string;
   requestId: string;
@@ -129,6 +136,8 @@ export type Snapshot = {
   }[];
 };
 export type Archive = {
+  diceSessions?: DiceSession[];
+  diceRecords?: DiceRecord[];
   format: typeof ARCHIVE_FORMAT_ID;
   version: typeof ARCHIVE_FORMAT_VERSION;
   campaign: Campaign;

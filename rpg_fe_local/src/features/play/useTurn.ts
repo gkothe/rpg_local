@@ -11,6 +11,11 @@ export function useTurn(
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [uncertainAction, setUncertainAction] = useState<string | null>(null);
+  const [uncertainDiceRetry, setUncertainDiceRetry] = useState(false);
+  const pendingDiceRetry = useRef<{
+    turnId: string;
+    input: { revision: number; requestId: string; settings: ProviderSettings };
+  } | null>(null);
   const alive = useRef(true),
     guard = useRef(false),
     epoch = useRef(0),
@@ -34,6 +39,8 @@ export function useTurn(
     setError('');
     pendingRequest.current = null;
     setUncertainAction(null);
+    pendingDiceRetry.current = null;
+    setUncertainDiceRetry(false);
     return invalidate;
   }, [campaignId, invalidate]);
   useEffect(() => {
@@ -70,6 +77,10 @@ export function useTurn(
   const send = useCallback(
     async (action: string, settings: ProviderSettings) => {
       if (!campaign || guard.current || (turn && activeTurn(turn, options))) return false;
+      if (pendingDiceRetry.current) {
+        setError('Resolve the uncertain dice retry before sending a new action.');
+        return false;
+      }
       if (
         pendingRequest.current &&
         (pendingRequest.current.action !== action ||
@@ -142,6 +153,50 @@ export function useTurn(
       guard.current = false;
     }
   }
+  async function retryDice(attempt?: Turn) {
+    if (!campaign || guard.current || (turn && activeTurn(turn, options)) || pendingRequest.current)
+      return false;
+    if (!pendingDiceRetry.current) {
+      if (!attempt?.diceRetry?.available) return false;
+      pendingDiceRetry.current = {
+        turnId: attempt.id,
+        input: {
+          revision: campaign.revision,
+          requestId: crypto.randomUUID(),
+          settings: { ...campaign.settings },
+        },
+      };
+    }
+    const pending = pendingDiceRetry.current;
+    const captured = epoch.current;
+    guard.current = true;
+    setSubmitting(true);
+    setError('');
+    try {
+      const result = await request<Turn>(
+        `/campaigns/${campaign.id}/turns/${pending.turnId}/retry`,
+        json('POST', pending.input)
+      );
+      if (!alive.current || captured !== epoch.current) return false;
+      setTurn(result);
+      pendingDiceRetry.current = null;
+      setUncertainDiceRetry(false);
+      if (!activeTurn(result, options)) await refresh.current();
+      return true;
+    } catch (e) {
+      if (alive.current && captured === epoch.current) {
+        if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+          pendingDiceRetry.current = null;
+          setUncertainDiceRetry(false);
+        } else setUncertainDiceRetry(true);
+        setError(errorMessage(e));
+      }
+      return false;
+    } finally {
+      guard.current = false;
+      if (alive.current && captured === epoch.current) setSubmitting(false);
+    }
+  }
   async function undo() {
     if (!campaign || guard.current) return;
     guard.current = true;
@@ -173,6 +228,8 @@ export function useTurn(
     cancel,
     undo,
     uncertainAction,
+    uncertainDiceRetry,
+    retryDice,
     retryOriginal: () =>
       pendingRequest.current
         ? send(pendingRequest.current.action, pendingRequest.current.settings)

@@ -22,7 +22,15 @@ import {
   MAX_SOURCE_PAGES,
   MAX_SOURCE_TEXT_CHARS,
 } from '../domain/limits.js';
-import { ARCHIVE_FORMAT_ID, ARCHIVE_FORMAT_VERSION } from '../domain/versions.js';
+import {
+  ARCHIVE_FORMAT_ID,
+  ARCHIVE_FORMAT_VERSION,
+  LEGACY_ARCHIVE_FORMAT_VERSION,
+  DICE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+} from '../domain/versions.js';
+import { DICE_LIMITS, diceRecordSchema, diceSessionSchema } from '../domain/dice.js';
+import { rollInterpretationSchema, validateRollInterpretations } from '../domain/diceResponse.js';
+import { diceDigest } from './dice.js';
 const uuid = z.uuid();
 const object = z.record(z.string(), z.unknown());
 const character = z
@@ -132,6 +140,10 @@ const context = z
   .strict();
 const turn = z
   .object({
+    diceSessionId: uuid.optional(),
+    retryOfTurnId: uuid.optional(),
+    rolls: z.array(diceRecordSchema).max(DICE_LIMITS.slots).optional(),
+    rollInterpretations: z.array(rollInterpretationSchema).max(DICE_LIMITS.slots).optional(),
     id: uuid,
     campaignId: uuid,
     requestId: uuid,
@@ -170,7 +182,12 @@ const snapshot = z
 const archiveSchema = z
   .object({
     format: z.literal(ARCHIVE_FORMAT_ID),
-    version: z.literal(ARCHIVE_FORMAT_VERSION),
+    version: z.union([z.literal(LEGACY_ARCHIVE_FORMAT_VERSION), z.literal(ARCHIVE_FORMAT_VERSION)]),
+    diceSessions: z.array(diceSessionSchema).max(MAX_ARCHIVE_TURNS).optional(),
+    diceRecords: z
+      .array(diceRecordSchema)
+      .max(MAX_ARCHIVE_TURNS * DICE_LIMITS.slots)
+      .optional(),
     campaign,
     turns: z.array(turn).max(MAX_ARCHIVE_TURNS),
     snapshots: z.array(snapshot),
@@ -178,7 +195,26 @@ const archiveSchema = z
   })
   .strict();
 export function remapArchive(raw: unknown): Archive {
-  const archive = archiveSchema.parse(raw) as Archive;
+  const parsed = archiveSchema.parse(raw);
+  if (
+    parsed.version === LEGACY_ARCHIVE_FORMAT_VERSION &&
+    ((parsed.diceSessions?.length ?? 0) ||
+      (parsed.diceRecords?.length ?? 0) ||
+      parsed.turns.some(
+        (turn) =>
+          turn.diceSessionId ||
+          turn.retryOfTurnId ||
+          turn.rolls?.length ||
+          turn.rollInterpretations?.length
+      ))
+  )
+    throw new Problem(422, 'archive_invalid', 'Legacy archives cannot contain dice sessions');
+  const archive: Archive = {
+    ...parsed,
+    version: ARCHIVE_FORMAT_VERSION,
+    diceSessions: parsed.diceSessions ?? [],
+    diceRecords: parsed.diceRecords ?? [],
+  };
   const old = archive.campaign;
   const ids = new Map<string, string>();
   const register = (id: string) => {
@@ -190,10 +226,19 @@ export function remapArchive(raw: unknown): Archive {
   old.sources.forEach((s) => register(s.id));
   archive.turns.forEach((t) => register(t.id));
   archive.memories.forEach((m) => register(m.id));
+  archive.diceSessions!.forEach((session) => register(session.id));
+  archive.diceRecords!.forEach((record) => register(record.id));
   const tids = new Set(archive.turns.map((t) => t.id));
   const sids = new Set(old.sources.map((s) => s.id));
   const mids = new Set(archive.memories.map((m) => m.id));
-  const nonCharacterIds = new Set([old.id, ...sids, ...tids, ...mids]);
+  const nonCharacterIds = new Set([
+    old.id,
+    ...sids,
+    ...tids,
+    ...mids,
+    ...archive.diceSessions!.map((session) => session.id),
+    ...archive.diceRecords!.map((record) => record.id),
+  ]);
   const activeIds = archive.turns
     .filter((t) => t.status === TurnStatus.Completed && !t.undone)
     .map((t) => t.id);
@@ -284,6 +329,116 @@ export function remapArchive(raw: unknown): Archive {
     throw new Problem(422, 'archive_invalid', 'Completed turn is missing its undo snapshot');
   const out = structuredClone(archive);
   const mapped = (id: string) => ids.get(id)!;
+  for (const session of archive.diceSessions!)
+    for (const id of session.characterIds) if (!ids.has(id)) ids.set(id, randomUUID());
+  for (const session of archive.diceSessions!) {
+    const root = archive.turns.find((turn) => turn.id === session.rootTurnId);
+    if (
+      session.campaignId !== old.id ||
+      !tids.has(session.rootTurnId) ||
+      root?.diceSessionId !== session.id ||
+      root.retryOfTurnId ||
+      new Set(session.characterIds).size !== session.characterIds.length ||
+      session.characterIds.some((id) => !ids.has(id) || nonCharacterIds.has(id))
+    )
+      throw new Problem(422, 'archive_invalid', 'Unresolved dice session references');
+    const records = archive
+      .diceRecords!.filter((record) => record.sessionId === session.id)
+      .sort((a, b) => a.slot - b.slot);
+    if (
+      records.length > DICE_LIMITS.slots ||
+      records.some((record, index) => record.slot !== index) ||
+      records.reduce(
+        (sum, record) =>
+          sum + record.groups.reduce((count, group) => count + group.faces.length, 0),
+        0
+      ) !== session.newFaces
+    )
+      throw new Problem(
+        422,
+        'archive_invalid',
+        'Dice session slots or face totals are inconsistent'
+      );
+  }
+  for (const record of archive.diceRecords!) {
+    const session = archive.diceSessions!.find((session) => session.id === record.sessionId);
+    if (
+      record.campaignId !== old.id ||
+      !session ||
+      [record.actorId, record.targetId].some((id) => id && !session.characterIds.includes(id)) ||
+      (record.rerollOf &&
+        !archive.diceRecords!.some(
+          (previous) =>
+            previous.id === record.rerollOf!.rollId &&
+            previous.sessionId === record.sessionId &&
+            previous.slot < record.slot
+        ))
+    )
+      throw new Problem(422, 'archive_invalid', 'Unresolved dice record references');
+  }
+  for (const turn of archive.turns) {
+    const session = archive.diceSessions!.find((session) => session.id === turn.diceSessionId);
+    const previous = archive.turns.find((previous) => previous.id === turn.retryOfTurnId);
+    if (
+      (turn.diceSessionId && !session) ||
+      (turn.retryOfTurnId &&
+        (!previous ||
+          previous.diceSessionId !== turn.diceSessionId ||
+          previous.createdAt >= turn.createdAt ||
+          ![TurnStatus.Failed, TurnStatus.Cancelled, TurnStatus.Interrupted].includes(
+            previous.status as TurnStatus
+          )))
+    )
+      throw new Problem(422, 'archive_invalid', 'Unresolved dice attempt references');
+    for (const [index, record] of (turn.rolls ?? []).entries()) {
+      const canonical = archive.diceRecords!.find((canonical) => canonical.id === record.id);
+      if (
+        !session ||
+        record.sessionId !== session.id ||
+        record.slot !== index ||
+        !canonical ||
+        JSON.stringify(diceRecordSchema.parse(record)) !==
+          JSON.stringify(diceRecordSchema.parse(canonical))
+      )
+        throw new Problem(
+          422,
+          'archive_invalid',
+          'Turn dice must match its canonical session prefix'
+        );
+    }
+    if (turn.status === TurnStatus.Completed && turn.diceSessionId)
+      validateRollInterpretations(
+        {
+          version: DICE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+          narrative: turn.narrative ?? '',
+          operations: [],
+          rollInterpretations: turn.rollInterpretations ?? [],
+        },
+        (turn.rolls ?? []).map((record) => record.id)
+      );
+    if (
+      (turn.rollInterpretations ?? []).some(
+        (entry) => !(turn.rolls ?? []).some((record) => record.id === entry.rollId)
+      )
+    )
+      throw new Problem(422, 'archive_invalid', 'Unresolved dice interpretation');
+  }
+  const remapRecord = (record: NonNullable<Archive['diceRecords']>[number]) => {
+    record.id = mapped(record.id);
+    record.sessionId = mapped(record.sessionId);
+    record.campaignId = mapped(record.campaignId);
+    if (record.actorId) record.actorId = mapped(record.actorId);
+    if (record.targetId) record.targetId = mapped(record.targetId);
+    if (record.rerollOf) record.rerollOf.rollId = mapped(record.rerollOf.rollId);
+  };
+  for (const session of out.diceSessions!) {
+    session.id = mapped(session.id);
+    session.campaignId = mapped(session.campaignId);
+    session.rootTurnId = mapped(session.rootTurnId);
+    session.characterIds = session.characterIds.map(mapped);
+    session.imported = true;
+  }
+  for (const record of out.diceRecords!) remapRecord(record);
   out.campaign.id = mapped(old.id);
   for (const c of out.campaign.characters) c.id = mapped(c.id);
   for (const source of out.campaign.sources) {
@@ -302,6 +457,12 @@ export function remapArchive(raw: unknown): Archive {
   if (out.campaign.memory) remapMemory(out.campaign.memory);
   for (const m of out.memories) remapMemory(m);
   for (const t of out.turns) {
+    t.rolls ??= [];
+    t.rollInterpretations ??= [];
+    if (t.diceSessionId) t.diceSessionId = mapped(t.diceSessionId);
+    if (t.retryOfTurnId) t.retryOfTurnId = mapped(t.retryOfTurnId);
+    for (const record of t.rolls ?? []) remapRecord(record);
+    for (const entry of t.rollInterpretations ?? []) entry.rollId = mapped(entry.rollId);
     t.id = mapped(t.id);
     t.campaignId = out.campaign.id;
     t.requestId = randomUUID();
@@ -383,15 +544,45 @@ export class LibraryService {
     return this.store.transaction(async (client) => {
       const c = await this.store.campaign(id, client, true);
       await this.store.assertIdle(id, client);
-      const turns = await this.store.turns(id, client, MAX_ARCHIVE_TURNS);
+      const turns = (await this.store.turns(id, client, MAX_ARCHIVE_TURNS)).map(
+        ({ diceRetry: _diceRetry, ...turn }) => turn
+      );
       const snaps = await client.query('SELECT document FROM snapshots WHERE campaign_id=$1', [id]);
       const memories = await client.query(
         'SELECT document FROM memories WHERE campaign_id=$1 ORDER BY created_at',
         [id]
       );
+      const sessions = await client.query(
+        'SELECT * FROM dice_sessions WHERE campaign_id=$1 ORDER BY created_at,id',
+        [id]
+      );
+      const records = await client.query(
+        'SELECT * FROM dice_records WHERE campaign_id=$1 ORDER BY session_id,slot',
+        [id]
+      );
       return {
         format: ARCHIVE_FORMAT_ID,
         version: ARCHIVE_FORMAT_VERSION,
+        diceSessions: sessions.rows.map((row) => ({
+          id: row.id,
+          campaignId: row.campaign_id,
+          rootTurnId: row.root_turn_id,
+          contextDigest: row.context_digest,
+          frozenPrompt: row.frozen_prompt,
+          frozenRevision: row.frozen_revision,
+          characterIds: row.character_ids,
+          imported: row.imported,
+          newFaces: row.new_faces,
+          createdAt: new Date(row.created_at).toISOString(),
+        })),
+        diceRecords: records.rows.map((row) => ({
+          ...row.input,
+          id: row.id,
+          campaignId: row.campaign_id,
+          sessionId: row.session_id,
+          groups: row.groups,
+          createdAt: new Date(row.created_at).toISOString(),
+        })),
         campaign: c,
         turns,
         snapshots: snaps.rows.map((r) => r.document as Snapshot),
@@ -420,6 +611,45 @@ export class LibraryService {
           archive.campaign.id,
           m,
         ]);
+      for (const session of archive.diceSessions ?? [])
+        await client.query(
+          'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9)',
+          [
+            session.id,
+            session.campaignId,
+            session.rootTurnId,
+            session.contextDigest,
+            session.frozenPrompt,
+            session.frozenRevision,
+            JSON.stringify(session.characterIds),
+            session.newFaces,
+            session.createdAt,
+          ]
+        );
+      for (const record of archive.diceRecords ?? []) {
+        const { id, sessionId, campaignId, createdAt, groups, ...base } = record;
+        const input = {
+          ...base,
+          groups: groups.map((group) => ({
+            label: group.label,
+            sides: group.sides,
+            count: group.faces.length,
+          })),
+        };
+        await client.query(
+          'INSERT INTO dice_records(id,campaign_id,session_id,slot,spec_digest,input,groups,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+          [
+            id,
+            campaignId,
+            sessionId,
+            record.slot,
+            diceDigest(input),
+            input,
+            JSON.stringify(groups),
+            createdAt,
+          ]
+        );
+      }
       await this.store.reindex(archive.campaign, client);
       return archive.campaign;
     });
