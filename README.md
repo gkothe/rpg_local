@@ -14,7 +14,7 @@ The local application is implemented. Antigravity 1.2.14 passed real GM generati
 - PDF import additionally needs the backend's Python conversion requirements and Tesseract language data for scanned pages.
 - Dictation additionally needs the local Faster-Whisper runtime and downloaded model weights. It has no API token allowance or cloud transcription fallback.
 
-Check the backend README for database/provider settings and [local runtime setup](docs/local-runtime.md) for scanned PDFs and dictation. Keep real settings and private data outside Git.
+Check the backend README for database/provider settings and [local runtime setup](docs/local-runtime.md) for scanned PDFs and dictation. For Windows dictation, run `setup-voice.cmd` once, then restart `start.cmd`; the setup installs local speech dependencies and downloads the model without any API key. Keep real settings and private data outside Git.
 
 ## Install and run
 

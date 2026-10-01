@@ -28,7 +28,7 @@ test('Codex/Antigravity machine outputs are parsed, malformed output rejected', 
   assert.deepEqual(
     parseProviderOutput(
       'codex',
-      '{"type":"item.completed","item":{"type":"agent_message","text":"{\\"text\\":\\"done\\"}"}}\n'
+      '{"type":"item.completed","item":{"type":"agent_message","text":"{\\"text\\":\\"done\\"}"}}\n{"type":"turn.completed","usage":{"input_tokens":1000}}\n'
     ),
     { text: 'done' }
   );

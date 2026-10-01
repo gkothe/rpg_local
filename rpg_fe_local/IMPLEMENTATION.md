@@ -55,3 +55,10 @@ Provider refresh in Setup, Play and Settings explicitly requests `/providers?ref
 bypass the backend diagnostic cache. Settings refresh runs providers and runtime settings
 sequentially with a synchronous guard. Three page-level regression checks verify the actual
 cache-bypassing request; the expanded frontend suite passes 23 tests.
+
+In-game provider selection is labeled Game master and explains that changes take effect next turn.
+A regression test switches an existing campaign between providers, preserves its unsent action and
+prior narrative, and verifies the next turn uses the updated settings and campaign revision. Settings
+and selectors distinguish a missing executable from an installed adapter whose gameplay is disabled.
+The frontend suite passes 24 tests; seven synthetic installed-Chrome scenarios pass. The dictation
+notice now points to the reusable setup-voice.cmd launcher instead of repeating typing instructions.

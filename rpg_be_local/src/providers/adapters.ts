@@ -1,4 +1,5 @@
 import { Problem } from '../errors.js';
+import { CODEX_INPUT_TOKENS } from './codex.js';
 import type { ProviderSettings } from '../domain/types.js';
 export function providerArgs(
   id: string,
@@ -85,11 +86,33 @@ export function parseProviderOutput(id: string, output: string): unknown {
         .trim()
         .split('\n')
         .map((line) => JSON.parse(line));
-      const message = events
-        .filter((e) => e.type === 'item.completed' && e.item?.type === 'agent_message')
-        .at(-1);
-      if (!message) throw new Error('missing');
-      return JSON.parse(message.item.text);
+      if (
+        events.some(
+          (event) =>
+            event.item && !['agent_message', 'reasoning', 'error'].includes(event.item.type)
+        )
+      )
+        throw new Problem(
+          502,
+          'provider_isolation',
+          'Codex returned unexpected tool activity; generation rejected'
+        );
+      if (events.some((event) => event.type === 'turn.failed' || event.type === 'error'))
+        throw new Problem(502, 'provider_failure', 'Codex reported a failed generation');
+      const completed = events.filter((event) => event.type === 'turn.completed');
+      const messages = events.filter(
+        (event) => event.type === 'item.completed' && event.item?.type === 'agent_message'
+      );
+      if (completed.length !== 1 || messages.length !== 1)
+        throw new Problem(502, 'provider_isolation', 'Codex did not complete one isolated GM turn');
+      const inputTokens = completed[0].usage?.input_tokens;
+      if (!Number.isInteger(inputTokens) || inputTokens < 0 || inputTokens > CODEX_INPUT_TOKENS)
+        throw new Problem(
+          502,
+          'provider_budget',
+          'Codex exceeded or did not report the verified input envelope'
+        );
+      return JSON.parse(messages[0].item.text);
     }
     const envelope = JSON.parse(output);
     if (envelope.is_error || envelope.error)

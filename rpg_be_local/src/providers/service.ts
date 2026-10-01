@@ -1,6 +1,12 @@
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import { locate } from './discovery.js';
+import {
+  inspectCodex,
+  generateCodex,
+  CODEX_INPUT_TOKENS,
+  CODEX_ISOLATED_VERSION,
+} from './codex.js';
 import path from 'node:path';
 import { runProcess } from './processRunner.js';
 import { parseProviderOutput, providerArgs } from './adapters.js';
@@ -105,6 +111,29 @@ export class ProviderService implements Generator {
       } catch (error) {
         discoveryFailure = error instanceof Problem ? error.message : 'CLI discovery failed';
       }
+      let codexModels: ModelOption[] = [];
+      let codexIsolated = false;
+      if (id === 'codex' && executable && !discoveryFailure) {
+        try {
+          if (
+            !['--ignore-user-config', '--ignore-rules', '--ephemeral', '--output-schema'].every(
+              (flag) => help.includes(flag)
+            )
+          )
+            throw new Problem(
+              503,
+              'codex_version',
+              'Installed Codex lacks required isolation flags'
+            );
+          const inspected = await inspectCodex(executable);
+          version = inspected.version;
+          codexModels = inspected.models;
+          codexIsolated = true;
+        } catch (error) {
+          discoveryFailure =
+            error instanceof Problem ? error.message : 'Codex isolation setup failed';
+        }
+      }
       let antigravityModels: ModelOption[] = [];
       let agyIsolated = false;
       if (id === 'agy' && executable && !discoveryFailure && help.includes('--agent')) {
@@ -140,14 +169,28 @@ export class ProviderService implements Generator {
       }
       const isolated =
         !discoveryFailure &&
-        (agyIsolated ||
+        (codexIsolated ||
+          agyIsolated ||
           (id === 'claude' &&
             ['--safe-mode', '--no-session-persistence', '--tools', '--json-schema'].every((flag) =>
               help.includes(flag)
             )));
+      const configuredModels = configured.find((x) => x.provider === id)?.models;
       const models =
-        configured.find((x) => x.provider === id)?.models ??
-        (id === 'claude' && !discoveryFailure ? parseClaudeHelpCatalog(help) : antigravityModels);
+        id === 'codex'
+          ? (configuredModels
+              ?.filter((option) => codexModels.some((model) => model.id === option.id))
+              .map((option) => ({
+                ...option,
+                inputTokens: Math.min(option.inputTokens, CODEX_INPUT_TOKENS),
+                efforts: option.efforts.filter((effort) =>
+                  codexModels.find((model) => model.id === option.id)!.efforts.includes(effort)
+                ),
+              })) ?? codexModels)
+          : (configuredModels ??
+            (id === 'claude' && !discoveryFailure
+              ? parseClaudeHelpCatalog(help)
+              : antigravityModels));
       const reason =
         discoveryFailure ??
         (!executable
@@ -172,9 +215,11 @@ export class ProviderService implements Generator {
             ? 'Installed CLI model catalog; verified minimal agent on 1.2.14; individual model entitlement is checked when used'
             : configured.some((entry) => entry.provider === id)
               ? 'Explicit local administrator catalog; CLI login and model entitlement require a real-turn test'
-              : id === 'claude'
-                ? 'Aliases and effort choices advertised by installed CLI help; model/effort entitlement is checked when used'
-                : 'Installed CLI; tool/customization isolation is not verified',
+              : id === 'codex'
+                ? `Installed account model metadata; verified empty-tool isolated CLI on ${CODEX_ISOLATED_VERSION}; subscription/model entitlement is checked when used`
+                : id === 'claude'
+                  ? 'Aliases and effort choices advertised by installed CLI help; model/effort entitlement is checked when used'
+                  : 'Installed CLI; tool/customization isolation is not verified',
       });
     }
     this.cache = result;
@@ -242,15 +287,17 @@ export class ProviderService implements Generator {
               env,
               signal
             )
-          : await runProcess(
-              executable.binary,
-              [
-                ...executable.prefix,
-                ...providerArgs(settings.provider, settings, schemaPath, schema),
-              ],
-              prompt,
-              { cwd: dir, env, signal, timeoutMs: 180000, maxOutputBytes: 2_000_000 }
-            );
+          : settings.provider === 'codex'
+            ? await generateCodex(executable, settings, prompt, schemaPath, dir, env, signal)
+            : await runProcess(
+                executable.binary,
+                [
+                  ...executable.prefix,
+                  ...providerArgs(settings.provider, settings, schemaPath, schema),
+                ],
+                prompt,
+                { cwd: dir, env, signal, timeoutMs: 180000, maxOutputBytes: 2_000_000 }
+              );
       return parseProviderOutput(settings.provider, output);
     } finally {
       await rm(dir, { recursive: true, force: true });

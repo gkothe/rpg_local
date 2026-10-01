@@ -5,7 +5,7 @@ import Setup from '../src/pages/Setup';
 import PlayPage from '../src/pages/Play';
 import SettingsPage from '../src/pages/Settings';
 import { LanContext } from '../src/features/connections/LanContext';
-import { fixtureCampaign, options, providers } from './fixtures';
+import { fixtureCampaign, fixtureTurn, options, providers } from './fixtures';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -50,4 +50,63 @@ describe('CLI diagnostic refresh', () => {
       );
     });
   }
+});
+
+it('switches providers in an existing game without losing its draft or history', async () => {
+  const campaign = fixtureCampaign();
+  campaign.turns = [fixtureTurn()];
+  const next = { provider: 'agy', model: 'other-model', effort: 'high' };
+  const available = [
+    ...providers,
+    {
+      ...providers[0],
+      id: 'agy',
+      name: 'Antigravity',
+      models: [{ id: next.model, label: 'Other model', efforts: ['high'], inputTokens: 16000 }],
+    },
+  ];
+  const fetcher = vi.fn().mockImplementation(async (path: string, init: RequestInit) => {
+    let data: unknown = campaign;
+    if (path.startsWith('/api/providers')) data = available;
+    else if (path === '/api/settings') data = options;
+    else if (init.method === 'PATCH') {
+      const payload = JSON.parse(String(init.body));
+      expect(payload.revision).toBe(campaign.revision);
+      campaign.settings = payload.settings;
+      campaign.revision++;
+    } else if (init.method === 'POST' && path.endsWith('/turns')) {
+      data = { ...fixtureTurn(), id: 'new-turn', status: 'pending' };
+    }
+    return new Response(JSON.stringify({ data }), { status: 200 });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(
+    <MemoryRouter initialEntries={[`/campaigns/${campaign.id}`]}>
+      <Routes>
+        <Route path="/campaigns/:id" element={<PlayPage />} />
+      </Routes>
+    </MemoryRouter>
+  );
+  const action = await screen.findByLabelText('Your action');
+  fireEvent.change(action, { target: { value: 'Speak to Marta' } });
+  await screen.findByRole('option', { name: 'Antigravity' });
+  fireEvent.change(screen.getByLabelText('AI CLI'), { target: { value: 'agy' } });
+  await screen.findByText('Game master settings saved.');
+  expect(action).toHaveValue('Speak to Marta');
+  expect(screen.getByText(fixtureTurn().narrative!)).toBeInTheDocument();
+  expect(campaign.characters[0].attributes.health).toBe(12);
+  expect(campaign.pinnedFacts).toEqual(['The northern bridge was destroyed.']);
+  expect(campaign.settings).toEqual(next);
+  fireEvent.submit(action.closest('form')!);
+  await waitFor(() => {
+    const sent = fetcher.mock.calls.find(
+      ([path, init]) => path.endsWith('/turns') && init.method === 'POST'
+    );
+    expect(sent).toBeDefined();
+    expect(JSON.parse(String(sent![1].body))).toMatchObject({
+      action: 'Speak to Marta',
+      revision: 2,
+      settings: next,
+    });
+  });
 });

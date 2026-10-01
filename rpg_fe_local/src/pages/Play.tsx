@@ -106,6 +106,11 @@ export default function PlayPage() {
       <ErrorNotice message={error || resource.error || providers.error} />
       {feedback && <p role="status">{feedback}</p>}
       <div className="panel provider-panel">
+        <h2>Game master</h2>
+        <p className="muted">
+          Change CLI, model or effort between turns. Your campaign, characters and saved context
+          stay with the game; the next turn uses your new selection.
+        </p>
         <ProviderPicker
           providers={providers.data || []}
           value={campaign.settings}
@@ -359,8 +364,8 @@ export default function PlayPage() {
             {settings.data && !settings.data.audio.available && (
               <small className="muted">
                 Dictation unavailable:{' '}
-                {settings.data.audio.reason || 'Local transcription is not configured.'} Typing is
-                always available.
+                {settings.data.audio.reason || 'Local transcription is not configured.'} Run
+                setup-voice.cmd on the game computer, then restart the game.
               </small>
             )}
           </form>

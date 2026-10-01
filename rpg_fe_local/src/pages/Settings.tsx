@@ -19,7 +19,11 @@ export default function SettingsPage() {
           <article key={p.id}>
             <h3>{p.name}</h3>
             <p>
-              {p.available && p.supported ? 'Available' : 'Unavailable'}
+              {p.available && p.supported
+                ? 'Ready for gameplay'
+                : p.available
+                  ? 'Installed — gameplay disabled'
+                  : 'Not detected'}
               {p.version ? ` · ${p.version}` : ''}
             </p>
             {p.reason && <p className="notice">{p.reason}</p>}

@@ -39,7 +39,11 @@ export default function ProviderPicker({
               disabled={!p.available || !p.supported || !p.models.length}
             >
               {p.name}
-              {!p.available || !p.supported || !p.models.length ? ' — unavailable' : ''}
+              {!p.available
+                ? ' — not detected'
+                : !p.supported || !p.models.length
+                  ? ' — installed, gameplay disabled'
+                  : ''}
             </option>
           ))}
         </select>
