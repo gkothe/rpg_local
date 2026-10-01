@@ -1,0 +1,9 @@
+# Windows launch and database setup verification
+
+The repository root provides `start.cmd`, `setup-database.cmd` and `setup-database.ps1`. Startup builds and serves the frontend through the backend; `start.cmd dev` runs live-editing servers. Scripts resolve their paths from their own directory.
+
+Database setup creates a dedicated `rpg_local` database and a restricted login role, then invokes the existing migration runner. It refuses to overwrite an existing role/database; an existing dedicated installation can use `setup-database.ps1 -ConfigureExisting`. Administrator credentials are used only for provisioning. The game URL is saved outside Git under `%LOCALAPPDATA%/LocalRPG/database.json`, encrypted with Windows DPAPI for the current account/computer. Explicit process environment settings take precedence. No PostgreSQL installation, service configuration or old database is modified.
+
+Verified on an isolated PostgreSQL 18 cluster: fresh database/role provisioning; all three SQL migrations applied; repeated setup skipped applied migrations; encrypted settings reloaded and connected; provisioning refused an existing database/role. PowerShell syntax parsing and root script ESLint passed. The production launcher served HTTP 200 and healthy database diagnostics. Batch wrappers reset inherited PowerShell module paths so Windows PowerShell can load its DPAPI module when launched from PowerShell 7. The public source contains no connection password.
+
+Schema updates add a new ordered SQL file in `rpg_be_local/migrationssql`. The existing runner serializes migrations with a PostgreSQL advisory lock, applies pending files transactionally and records filenames in `migration_history`. Rerun database setup after upgrading. Do not edit applied migrations. Migration errors roll back that run and are not marked applied.

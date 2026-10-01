@@ -1,0 +1,36 @@
+{
+  "name": "rpg-local",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "rpg_be_local",
+    "rpg_fe_local"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build --workspaces",
+    "lint": "eslint scripts eslint.config.mjs --max-warnings 0 && npm run lint --workspaces",
+    "lint:fix": "eslint scripts eslint.config.mjs --fix && npm run lint:fix --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run test --workspaces",
+    "test:clean-install": "node scripts/test-clean-install.mjs",
+    "audit:public": "node scripts/audit-public.mjs",
+    "start": "npm run start --workspace rpg-be-local",
+    "migrate": "npm run migrate --workspace rpg-be-local"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.6.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^16.4.0",
+    "prettier": "^3.6.2",
+    "typescript-eslint": "^8.62.1"
+  }
+}

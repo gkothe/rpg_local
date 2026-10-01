@@ -1,0 +1,16 @@
+node_modules/
+**/node_modules/
+**/dist/
+**/coverage/
+**/playwright-report/
+**/test-results/
+**/.venv/
+**/__pycache__/
+**/.data/
+**/uploads/
+**/logs/
+**/certs/
+**/.env
+**/.env.*
+package-lock.json
+docs/plans/

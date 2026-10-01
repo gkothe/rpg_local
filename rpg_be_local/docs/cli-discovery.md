@@ -1,0 +1,11 @@
+# Local CLI discovery
+
+The Windows detector resolves native executables and known JavaScript entrypoints directly, without running `.cmd`, `.bat` or PowerShell wrappers. It searches PATH, the current Node installation, the user's npm directory and native user install directory. Codex desktop version directories are also checked because Explorer-launched apps may not inherit the PATH entries injected by the Codex desktop app.
+
+The installed Claude npm distribution uses `node_modules/@anthropic-ai/claude-code/bin/claude.exe`. The previous detector only understood `cli.js`, so its existing `claude.cmd` was incorrectly reported as missing. Both distribution layouts are now supported. Codex supports its desktop native executable and the npm `bin/codex.js` entrypoint.
+
+Custom installations can use an absolute `RPG_CLAUDE_BIN`, `RPG_CODEX_BIN` or `RPG_AGY_BIN` path to a native executable or JavaScript entrypoint. Shell wrapper overrides are rejected. Restart the app after changing environment settings; refreshing diagnostics rescans the process's current environment and known locations.
+
+Finding an executable does not establish working gameplay. Diagnostics separately report an invalid override, a failed help inspection, unverified isolation and missing verified model configuration. Refresh clears old executable locations. Codex gameplay remains disabled pending isolation verification. When installed Claude help advertises aliases and effort levels, those choices are exposed with a conservative input budget. They establish accepted CLI options; individual model/effort entitlement is checked when used. An explicit `RPG_MODEL_CATALOG` still overrides these choices. No full model version is guessed.
+
+Verification on Windows: actual installed Claude and Codex help commands succeeded without model calls. Codex also resolved with an empty PATH. Four regression tests cover both Claude npm layouts, wrapper avoidance, native/desktop locations, invalid overrides and refresh after help failure. Backend typecheck and lint passed; default backend tests passed 22 cases with 11 database/runtime cases skipped because their explicit fixtures were not configured for this check.

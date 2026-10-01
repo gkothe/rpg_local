@@ -1,0 +1,103 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { providerArgs, parseProviderOutput } from '../src/providers/adapters.js';
+import { runProcess } from '../src/providers/processRunner.js';
+import { agentDefinition, parseModelCatalog, modelSlug } from '../src/providers/antigravity.js';
+test('Claude invocation retains subscription auth, disables tools/customization and session reuse', () => {
+  const a = providerArgs(
+    'claude',
+    { provider: 'claude', model: 'sonnet', effort: 'high' },
+    '/tmp/schema.json',
+    {}
+  );
+  assert.ok(a.includes('--safe-mode'));
+  assert.ok(a.includes('--no-session-persistence'));
+  assert.ok(a.includes('--tools'));
+  assert.equal(a[a.indexOf('--tools') + 1], '');
+  assert.ok(!a.includes('--bare'));
+  assert.ok(!a.includes('--continue'));
+  assert.deepEqual(
+    parseProviderOutput(
+      'claude',
+      JSON.stringify({ structured_output: { version: 1, narrative: 'Hi', operations: [] } })
+    ),
+    { version: 1, narrative: 'Hi', operations: [] }
+  );
+});
+test('Codex/Antigravity machine outputs are parsed, malformed output rejected', () => {
+  assert.deepEqual(
+    parseProviderOutput(
+      'codex',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"{\\"text\\":\\"done\\"}"}}\n'
+    ),
+    { text: 'done' }
+  );
+  assert.throws(
+    () => parseProviderOutput('claude', '{"is_error":true,"result":"login"}'),
+    /CLI reported/
+  );
+  assert.throws(() => parseProviderOutput('agy', 'not json'), /JSON/);
+});
+test('runner streams prompt through stdin with bounded output, no shell interpolation and cancellation', async () => {
+  const output = await runProcess(
+    process.execPath,
+    ['-e', 'process.stdin.pipe(process.stdout)'],
+    '$(do not execute)',
+    { timeoutMs: 1000, maxOutputBytes: 1000 }
+  );
+  assert.equal(output, '$(do not execute)');
+  await assert.rejects(
+    runProcess(process.execPath, ['-e', 'process.stdout.write("x".repeat(2000))'], '', {
+      timeoutMs: 2000,
+      maxOutputBytes: 100,
+    }),
+    /output limit/
+  );
+  const ctl = new AbortController();
+  const pending = runProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], '', {
+    timeoutMs: 3000,
+    signal: ctl.signal,
+  });
+  ctl.abort();
+  await assert.rejects(pending, /cancelled/);
+});
+
+test('Antigravity excludes ambient customizations and parses only one bounded isolated result', () => {
+  const definition = agentDefinition('local-rpg-fixture');
+  assert.ok(definition.includes('inheritCustomizations: false'));
+  assert.ok(definition.includes('excludeDefaultComponents: true'));
+  assert.ok(definition.includes('tools: []'));
+  assert.ok(definition.includes('subagent: false'));
+  const catalog = parseModelCatalog(
+    'Fetching available models...\ngemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n'
+  );
+  assert.deepEqual(catalog[0]?.efforts, ['low']);
+  assert.equal(catalog[0]?.id, 'gemini-3.8-flash');
+  assert.equal(
+    modelSlug({ provider: 'agy', model: 'gemini-3.8-flash', effort: 'low' }, [
+      'high',
+      'medium',
+      'low',
+    ]),
+    'gemini-3.8-flash-low'
+  );
+  const init = { event: 'init', init: { agent: 'local-rpg-fixture' } };
+  const result = {
+    status: 'SUCCESS',
+    num_turns: 1,
+    usage: { input_tokens: 1000 },
+    response: '```json\n{"text":"done"}\n```',
+  };
+  const output = (value: unknown) =>
+    JSON.stringify(init) + '\n' + JSON.stringify({ event: 'result', result: value });
+  assert.deepEqual(parseProviderOutput('agy', output(result)), { text: 'done' });
+  assert.throws(() => parseProviderOutput('agy', output({ ...result, num_turns: 2 })), /isolated/);
+  assert.throws(
+    () => parseProviderOutput('agy', output({ ...result, usage: { input_tokens: 16001 } })),
+    /envelope/
+  );
+  assert.throws(
+    () => parseProviderOutput('agy', output({ ...result, status: 'ERROR' })),
+    /isolated/
+  );
+});

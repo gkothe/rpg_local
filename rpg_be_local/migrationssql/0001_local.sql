@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS campaigns (id uuid PRIMARY KEY, document jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS turns (id uuid PRIMARY KEY, campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE, request_id uuid NOT NULL, payload_hash text NOT NULL, status text NOT NULL CHECK (status IN ('pending','running','completed','failed','cancelled','interrupted')), document jsonb NOT NULL, owner uuid, lease_until timestamptz, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(campaign_id,request_id));
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_turn ON turns(campaign_id) WHERE status IN ('pending','running');
+CREATE TABLE IF NOT EXISTS snapshots (turn_id uuid PRIMARY KEY REFERENCES turns(id) ON DELETE CASCADE, campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE, document jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS memories (id uuid PRIMARY KEY, campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE, document jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS source_chunks (campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE, source_id uuid NOT NULL, version integer NOT NULL, ordinal integer NOT NULL, content text NOT NULL, search tsvector GENERATED ALWAYS AS (to_tsvector('simple',content)) STORED, PRIMARY KEY(source_id,version,ordinal));
+CREATE INDEX IF NOT EXISTS source_chunks_search ON source_chunks USING gin(search);
+CREATE TABLE IF NOT EXISTS templates (id uuid PRIMARY KEY, document jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now());

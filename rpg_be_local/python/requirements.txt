@@ -1,0 +1,6 @@
+markitdown[pdf]>=0.1.2,<0.2
+pypdfium2>=4.30,<6
+Pillow>=11,<13
+faster-whisper>=1.1,<2
+# Faster-Whisper 1.2 passes metadata_errors to av.open; PyAV 19 removed it.
+av>=11,<17
