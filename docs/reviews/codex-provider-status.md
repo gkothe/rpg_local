@@ -10,7 +10,14 @@ Authentication refresh was checked independently of any real account: official `
 
 The maintained `codex.runtime.test.ts` uses an anonymous loopback Responses fixture, never an AI service. On the actual CLI it verified two distinct fresh thread IDs, two model selections/effort choices, preserved saved campaign context, empty tool definitions, no AGENTS/skills/parent instructions and no Authorization header. Both responses passed strict parsing: exactly one successful completed turn and one final message, reported input within 8000 tokens, no tool activity or failed-turn events. A separate boundary test verifies native auth hardlinks and cleanup; parser cases cover missing completion, excessive usage, multiple messages/turns, errors and tools.
 
-Verification: four Codex boundary/unit tests and the actual native offline runtime test passed. No Codex model call was made, so these checks establish local adapter isolation and protocol behavior, not model quality or account/model entitlement. Live model testing remains Antigravity-only as requested.
+Initial verification used four Codex boundary/unit tests and the actual native offline runtime
+test; those checks established isolation/protocol behavior only. The owner subsequently authorized
+live Codex/Claude testing: three real Codex turns, three real Claude turns and two Codex memory
+checkpoints passed with saved context and character-state continuity. This exposed a strict-schema
+compatibility bug missed by the simplified fixture. Codex now transports application JSON in a
+strict `payload_json` envelope and decodes before unchanged domain validation. The native test pins
+that real transport schema. See [the live exchange](live-codex-claude.md) for the selected models,
+failures/fixes and complete evidence; other models/efforts remain entitlement-dependent.
 
 References: installed `codex exec --help` and `features list`, [official configuration schema](https://github.com/openai/codex/blob/main/codex-rs/core/config.schema.json), [global instruction loading](https://github.com/openai/codex/blob/main/codex-rs/codex-home/src/instructions/mod.rs), and [native authentication storage](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/storage.rs). Investigation scratch files stay outside Git.
 

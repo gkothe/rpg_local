@@ -1,5 +1,5 @@
 import { Problem } from '../errors.js';
-import { CODEX_INPUT_TOKENS } from './codex.js';
+import { CODEX_INPUT_TOKENS, parseCodexPayload } from './codex.js';
 import type { ProviderSettings } from '../domain/types.js';
 import { MAX_PROVIDER_INPUT_TOKENS, PROVIDER_ID } from './options.js';
 export function providerArgs(
@@ -8,7 +8,11 @@ export function providerArgs(
   schemaPath: string,
   schema: unknown
 ): string[] {
-  if (id === PROVIDER_ID.Claude)
+  if (id === PROVIDER_ID.Claude) {
+    // Claude's schema validator does not register Zod's draft-2020-12 meta-schema.
+    // The emitted constraints used here also work without this dialect annotation.
+    const cliSchema = { ...(schema as Record<string, unknown>) };
+    delete cliSchema.$schema;
     return [
       '-p',
       '--safe-mode',
@@ -23,13 +27,14 @@ export function providerArgs(
       '--output-format',
       'json',
       '--json-schema',
-      JSON.stringify(schema),
+      JSON.stringify(cliSchema),
       '--model',
       settings.model,
       ...(settings.effort ? ['--effort', settings.effort] : []),
       '--system-prompt',
       'You are a tabletop RPG narrator. The supplied JSON is the entire campaign context. No tools or outside context.',
     ];
+  }
   if (id === PROVIDER_ID.Codex)
     return [
       'exec',
@@ -116,7 +121,7 @@ export function parseProviderOutput(id: string, output: string): unknown {
           'provider_budget',
           'Codex exceeded or did not report the verified input envelope'
         );
-      return JSON.parse(messages[0].item.text);
+      return parseCodexPayload(messages[0].item.text);
     }
     const envelope = JSON.parse(output);
     if (envelope.is_error || envelope.error)

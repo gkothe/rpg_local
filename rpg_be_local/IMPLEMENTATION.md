@@ -10,3 +10,11 @@ text. This check used a separate test database/server, made no GM call and touch
 The previously running desktop server still needs a restart to load the newly saved runtime paths.
 
 Codex correction: version 0.159.2 now runs genuine isolated subscription CLI requests with native file-backed ChatGPT login. Fresh home/working directory, sanitized model metadata, disabled tools/customizations and stripped inherited variables are verified by the actual CLI against anonymous loopback fixtures. Two models/efforts preserve saved context with fresh thread IDs; native synthetic login proves auth hardlinks retain their inode under CLI writes. Four Codex boundary tests and the explicit native offline runtime test passed; no real Codex model call was made. Final provider service probe returns supported:true with current local account-cache models. Details: ../docs/reviews/codex-provider-status.md.
+
+Live verification now supersedes the earlier no-model-call limitation: three real Codex turns and
+three real Claude turns alternated in one saved campaign, with two automatic Codex memory
+checkpoints, correct character mutations and context retention. Codex's strict transport now wraps
+the application JSON in `payload_json`; decoding still precedes unchanged domain validation.
+Claude receives the same application constraints without the unsupported draft meta-schema
+annotation. Ten provider regressions, native Codex isolation, 36 isolated-DB/backend cases and 24
+frontend cases passed. Full evidence and known setup limits: `../docs/reviews/live-codex-claude.md`.

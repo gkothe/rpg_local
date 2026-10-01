@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { providerArgs, parseProviderOutput } from '../src/providers/adapters.js';
 import { runProcess } from '../src/providers/processRunner.js';
 import { agentDefinition, parseModelCatalog, modelSlug } from '../src/providers/antigravity.js';
+import { responseJsonSchema } from '../src/domain/schemas.js';
 test('Claude invocation retains subscription auth, disables tools/customization and session reuse', () => {
   const a = providerArgs(
     'claude',
@@ -24,11 +25,28 @@ test('Claude invocation retains subscription auth, disables tools/customization 
     { version: 1, narrative: 'Hi', operations: [] }
   );
 });
+test('Claude accepts the application schema without an unsupported meta-schema annotation', () => {
+  const args = providerArgs(
+    'claude',
+    { provider: 'claude', model: 'sonnet', effort: 'low' },
+    '/unused/schema.json',
+    responseJsonSchema
+  );
+  const actual = JSON.parse(args[args.indexOf('--json-schema') + 1]!);
+  const expected = { ...responseJsonSchema };
+  delete expected.$schema;
+  assert.deepEqual(actual, expected);
+  assert.equal(actual.$schema, undefined);
+  assert.ok(responseJsonSchema.$schema);
+});
 test('Codex/Antigravity machine outputs are parsed, malformed output rejected', () => {
   assert.deepEqual(
     parseProviderOutput(
       'codex',
-      '{"type":"item.completed","item":{"type":"agent_message","text":"{\\"text\\":\\"done\\"}"}}\n{"type":"turn.completed","usage":{"input_tokens":1000}}\n'
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: JSON.stringify({ payload_json: '{"text":"done"}' }) },
+      }) + '\n{"type":"turn.completed","usage":{"input_tokens":1000}}\n'
     ),
     { text: 'done' }
   );

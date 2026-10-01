@@ -10,6 +10,7 @@ import {
   isolatedCodexArgs,
   isolatedCodexConfig,
   parseCodexCatalog,
+  CODEX_TRANSPORT_SCHEMA,
 } from '../src/providers/codex.js';
 import { runProcess } from '../src/providers/processRunner.js';
 import { parseProviderOutput } from '../src/providers/adapters.js';
@@ -28,12 +29,13 @@ test(
       assert.equal(req.url, '/responses');
       assert.equal(req.headers.authorization, undefined);
       requests.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      const transportText = JSON.stringify({ payload_json: '{"text":"fixture"}' });
       const item = {
         id: 'message-fixture',
         type: 'message',
         status: 'completed',
         role: 'assistant',
-        content: [{ type: 'output_text', text: '{"text":"fixture"}', annotations: [] }],
+        content: [{ type: 'output_text', text: transportText, annotations: [] }],
       };
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       for (const event of [
@@ -52,7 +54,7 @@ test(
           item_id: item.id,
           output_index: 0,
           content_index: 0,
-          delta: '{"text":"fixture"}',
+          delta: transportText,
         },
         { type: 'response.output_item.done', output_index: 0, item },
         {
@@ -116,15 +118,7 @@ test(
           instructionsPath,
           'You are a tabletop RPG narrator. Only supplied campaign JSON is authoritative.'
         );
-        await writeFile(
-          schemaPath,
-          JSON.stringify({
-            type: 'object',
-            properties: { text: { type: 'string' } },
-            required: ['text'],
-            additionalProperties: false,
-          })
-        );
+        await writeFile(schemaPath, JSON.stringify(CODEX_TRANSPORT_SCHEMA));
         const config = {
           ...isolatedCodexConfig(catalogPath, instructionsPath),
           model_provider: 'rpg_fixture',
@@ -159,9 +153,11 @@ test(
         );
         const request = requests[index] as {
           model: string;
+          text: { format: { schema: unknown } };
           input: { type: string; role?: string; tools?: unknown[]; content?: { text: string }[] }[];
         };
         assert.equal(request.model, model.id);
+        assert.deepEqual(request.text.format.schema, CODEX_TRANSPORT_SCHEMA);
         for (const input of request.input)
           if (input.type === 'additional_tools') assert.deepEqual(input.tools, []);
         const content = JSON.stringify(request.input);

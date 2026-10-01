@@ -12,7 +12,20 @@ import { MODEL_EFFORTS } from './options.js';
 export const CODEX_ISOLATED_VERSION = '0.159.2';
 export const CODEX_INPUT_TOKENS = 8000;
 const narrator =
-  'You are a tabletop RPG narrator. The supplied JSON is the entire campaign context. No tools or outside context.';
+  'You are a tabletop RPG narrator. The supplied JSON is the entire campaign context. No tools or outside context. Return only the transport object with payload_json: a string encoding the complete JSON response matching the application schema inside the supplied context. Do not omit operations or change that application schema.';
+// OpenAI strict output schemas cannot represent arbitrary character dictionaries or oneOf.
+// The transport encodes the application object; domain validation still runs after decoding.
+export const CODEX_TRANSPORT_SCHEMA = {
+  type: 'object',
+  properties: { payload_json: { type: 'string' } },
+  required: ['payload_json'],
+  additionalProperties: false,
+} as const;
+const transportEnvelope = z.object({ payload_json: z.string() }).strict();
+export function parseCodexPayload(text: string): unknown {
+  const envelope = transportEnvelope.parse(JSON.parse(text));
+  return JSON.parse(envelope.payload_json);
+}
 const metadataSchema = z.object({
   models: z
     .array(
@@ -200,7 +213,7 @@ export async function generateCodex(
   executable: Executable,
   settings: ProviderSettings,
   prompt: string,
-  schemaPath: string,
+  _schemaPath: string,
   cwd: string,
   env: NodeJS.ProcessEnv,
   signal?: AbortSignal
@@ -231,15 +244,17 @@ export async function generateCodex(
     }
     const catalogPath = path.join(cwd, 'codex-models.json');
     const instructionsPath = path.join(cwd, 'codex-instructions.txt');
+    const transportSchemaPath = path.join(cwd, 'codex-response.schema.json');
     await writeFile(catalogPath, JSON.stringify(inspected.metadata), 'utf8');
     await writeFile(instructionsPath, narrator, 'utf8');
+    await writeFile(transportSchemaPath, JSON.stringify(CODEX_TRANSPORT_SCHEMA), 'utf8');
     return await runProcess(
       executable.binary,
       [
         ...executable.prefix,
         ...isolatedCodexArgs(
           settings,
-          schemaPath,
+          transportSchemaPath,
           isolatedCodexConfig(catalogPath, instructionsPath)
         ),
       ],

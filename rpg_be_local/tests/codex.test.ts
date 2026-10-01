@@ -8,8 +8,11 @@ import {
   generateCodex,
   isolatedCodexConfig,
   parseCodexCatalog,
+  CODEX_TRANSPORT_SCHEMA,
+  parseCodexPayload,
 } from '../src/providers/codex.js';
 import { parseProviderOutput } from '../src/providers/adapters.js';
+import { responseSchema } from '../src/domain/schemas.js';
 
 const metadata = {
   models: [
@@ -78,7 +81,7 @@ test('Codex launch links native auth into a fresh home, streams context and clea
         const source=await fs.stat(path.join(process.env.RPG_TEST_ORIGINAL_HOME,'auth.json'));
         const linked=await fs.stat(path.join(process.env.CODEX_HOME,'auth.json'));
         await fs.writeFile(process.env.RPG_TEST_PROOF,JSON.stringify({prompt,args,home:process.env.CODEX_HOME,cwd:process.cwd(),linked:source.ino===linked.ino&&source.dev===linked.dev,parent:process.env.CODEX_THREAD_ID}));
-        console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'{"text":"done"}'}}));
+        console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:JSON.stringify({payload_json:JSON.stringify({text:'done'})})}}));
         console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:1000}}));
       }
     `
@@ -108,6 +111,8 @@ test('Codex launch links native auth into a fresh home, streams context and clea
     assert.ok(result.args.includes('--ignore-user-config'));
     assert.ok(result.args.includes('--ignore-rules'));
     assert.ok(result.args.includes('--ephemeral'));
+    const transportPath = result.args[result.args.indexOf('--output-schema') + 1];
+    assert.deepEqual(JSON.parse(await readFile(transportPath, 'utf8')), CODEX_TRANSPORT_SCHEMA);
     assert.deepEqual((await readdir(home)).sort(), ['auth.json', 'models_cache.json']);
     await assert.rejects(
       generateCodex(
@@ -129,7 +134,7 @@ test('Codex launch links native auth into a fresh home, streams context and clea
 test('Codex output rejects tool events and a failed turn despite an agent message', () => {
   const narrative = JSON.stringify({
     type: 'item.completed',
-    item: { type: 'agent_message', text: '{"text":"done"}' },
+    item: { type: 'agent_message', text: JSON.stringify({ payload_json: '{"text":"done"}' }) },
   });
   assert.throws(
     () =>
@@ -150,7 +155,7 @@ test('Codex output rejects tool events and a failed turn despite an agent messag
 test('Codex final output requires one successful turn and a bounded reported input budget', () => {
   const message = JSON.stringify({
     type: 'item.completed',
-    item: { type: 'agent_message', text: '{"text":"done"}' },
+    item: { type: 'agent_message', text: JSON.stringify({ payload_json: '{"text":"done"}' }) },
   });
   const complete = (input_tokens: number) =>
     JSON.stringify({ type: 'turn.completed', usage: { input_tokens } });
@@ -168,4 +173,17 @@ test('Codex final output requires one successful turn and a bounded reported inp
     () => parseProviderOutput('codex', message + '\n' + complete(1000) + '\n' + complete(1000)),
     /complete one/
   );
+});
+
+test('Codex strict transport preserves arbitrary sheet values without bypassing domain validation', () => {
+  const response = {
+    version: 1,
+    narrative: 'Mira heals.',
+    operations: [{ op: 'state', expected: {}, value: { arbitrary: ['north', { clue: 47 }] } }],
+  };
+  const decoded = parseCodexPayload(JSON.stringify({ payload_json: JSON.stringify(response) }));
+  assert.deepEqual(responseSchema.parse(decoded), response);
+  assert.throws(() => parseCodexPayload('{"payload_json":"not JSON"}'));
+  assert.throws(() => parseCodexPayload('{"payload_json":"{}","unexpected":true}'));
+  assert.throws(() => responseSchema.parse(parseCodexPayload('{"payload_json":"{}"}')));
 });

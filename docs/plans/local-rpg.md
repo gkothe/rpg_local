@@ -1,7 +1,7 @@
 # Local RPG — migration and redesign plan
 
 Status: implemented and converged, 2026-10-01. See `../reviews/completion.md` for current validation evidence and explicit device/provider limits.
-Mode: implementation. Fresh local Git repository initialized; no GitHub publication.
+Mode: delivered. Published at `https://github.com/gkothe/rpg_local` after the owner's explicit request. Historical planning notes below are superseded by the dated implementation reconciliation and current completion review.
 
 ## Summary
 
@@ -31,7 +31,7 @@ The app owns durable campaign context and state. A CLI supplies a proposed turn 
 - Scanned PDFs must work in v1, using a local/key-free OCR pipeline.
 - AI character/inventory/state changes apply automatically, with a visible change list and full undo; this extends automatic mutations to the player sheet as well as NPCs.
 - Context uses recent turns, automatically updated campaign memory and relevant retrieved rule sections; retain full transcripts and inspectable memory.
-- English interface; Windows is the tested/release target. Keep portable boundaries where practical, but mark macOS/Linux unverified until tested.
+- English interface; Windows is the tested/release target. macOS/Linux validation is outside the owner's current scope (2026-10-01).
 - Reusable campaign/character templates and new-version campaign export/import are included in v1.
 - Scanned PDF extraction may require preview and text correction before AI-assisted sheet parsing; this review step is accepted.
 
@@ -446,4 +446,10 @@ Additional delivered work:
 - [x] T093 Antigravity canary, synthetic tool-denial, grouped model/effort, real narrative/memory generation and PostgreSQL state/undo checks.
 - [x] T094 Fresh-source/lockfile installation and public-source/built-bundle/history scan tooling; evidence recorded in completion review.
 
-Physical Android certificate installation, microphone permission and installed voice availability require that device and remain explicit setup validation steps. macOS/Linux are unverified. Publishing on GitHub is outside the authorized work. These are not represented as completed live checks.
+Physical Android certificate installation, microphone permission and installed voice availability require that device; the owner placed those checks on hold (2026-10-01). macOS/Linux validation is outside the current scope. GitHub publication was subsequently authorized and completed. These platform checks are not represented as completed live checks.
+
+Live provider verification (2026-10-01) supersedes the earlier Codex/Claude fixture-only status:
+six completed alternating turns passed, three with each provider, including canonical sheet changes,
+two real Codex memory checkpoints and saved-context continuity. The run exposed and corrected
+Codex strict-schema transport and Claude meta-schema compatibility bugs. See
+`../reviews/live-codex-claude.md` for the exact models, evidence and limitations.
