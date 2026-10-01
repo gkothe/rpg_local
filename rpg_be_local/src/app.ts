@@ -23,8 +23,17 @@ import {
   characterInput,
   idSchema,
   turnInputSchema,
+  ocrLanguageSchema,
+  transcriptionLanguageSchema,
 } from './domain/schemas.js';
 import { accessBoundary, LanAccess } from './security.js';
+import {
+  MAX_ENTITY_NAME_CHARS,
+  MAX_LONG_TEXT_CHARS,
+  MAX_MEMORY_TEXT_CHARS,
+  MAX_SOURCE_TEXT_CHARS,
+} from './domain/limits.js';
+import { SETTINGS_CONTRACT_VERSION } from './domain/versions.js';
 import {
   TURN_STATUS_OPTIONS,
   CHARACTER_TYPE_OPTIONS,
@@ -33,6 +42,8 @@ import {
   OCR_LANGUAGE_OPTIONS,
   TRANSCRIPTION_LANGUAGE_OPTIONS,
   CONTEXT_DEFAULTS,
+  CharacterType,
+  OCR_LANGUAGE_CODES,
 } from './domain/options.js';
 const revisionSchema = z.object({ revision: z.number().int().nonnegative() }).strict();
 const page = (req: Request) => ({
@@ -113,7 +124,7 @@ export function createApp(options: AppOptions) {
     wrap(async (_req, res) => {
       res.json({
         data: {
-          version: 1,
+          version: SETTINGS_CONTRACT_VERSION,
           turnStatuses: TURN_STATUS_OPTIONS.map((x) => x.id),
           sourceKinds: SOURCE_KIND_OPTIONS.map((x) => x.id),
           characterTypes: CHARACTER_TYPE_OPTIONS.map((x) => x.id),
@@ -124,9 +135,9 @@ export function createApp(options: AppOptions) {
           ocrLanguageOptions: OCR_LANGUAGE_OPTIONS,
           transcriptionLanguageOptions: TRANSCRIPTION_LANGUAGE_OPTIONS,
           defaults: {
-            characterType: 'player',
-            ocrLanguage: 'eng',
-            transcriptionLanguage: 'auto',
+            characterType: CharacterType.Player,
+            ocrLanguage: OCR_LANGUAGE_OPTIONS[0].id,
+            transcriptionLanguage: TRANSCRIPTION_LANGUAGE_OPTIONS[0].id,
             budgets: CONTEXT_DEFAULTS,
           },
           audio: await audioDiagnostics(),
@@ -184,7 +195,10 @@ export function createApp(options: AppOptions) {
     upload.single('file'),
     wrap(async (req, res) => {
       if (!req.file) throw new Problem(422, 'upload_required', 'Choose an audio recording');
-      res.json({ data: await transcribe(req.file.buffer, String(req.body.language ?? 'auto')) });
+      const language = transcriptionLanguageSchema
+        .default(TRANSCRIPTION_LANGUAGE_OPTIONS[0].id)
+        .parse(req.body.language);
+      res.json({ data: await transcribe(req.file.buffer, language) });
     })
   );
   const requireDb: RequestHandler = (_req, _res, next) => {
@@ -257,7 +271,10 @@ export function createApp(options: AppOptions) {
     '/api/campaigns/:id/notes',
     wrap(async (req, res) => {
       const input = z
-        .object({ notes: z.string().max(100000), notesRevision: z.number().int().nonnegative() })
+        .object({
+          notes: z.string().max(MAX_LONG_TEXT_CHARS),
+          notesRevision: z.number().int().nonnegative(),
+        })
         .strict()
         .parse(req.body);
       const c = await campaigns!.notes(param(req, 'id'), input);
@@ -303,8 +320,8 @@ export function createApp(options: AppOptions) {
       const { revision, name, text } = z
         .object({
           revision: z.number().int().nonnegative(),
-          name: z.string().min(1).max(200),
-          text: z.string().max(10 * 1024 * 1024),
+          name: z.string().min(1).max(MAX_ENTITY_NAME_CHARS),
+          text: z.string().max(MAX_SOURCE_TEXT_CHARS),
         })
         .strict()
         .parse(req.body);
@@ -318,12 +335,12 @@ export function createApp(options: AppOptions) {
     wrap(async (req, res) => {
       const id = param(req, 'id');
       const revision = z.coerce.number().int().nonnegative().parse(req.body.revision);
-      const language = z.enum(['eng', 'por', 'eng+por']).default('eng').parse(req.body.language);
+      const language = ocrLanguageSchema.default(OCR_LANGUAGE_CODES[0]).parse(req.body.language);
       const source = req.file
         ? await extractFile(req.file.buffer, req.file.originalname, language)
         : await extractGoogle(
             z.string().max(2000).parse(req.body.url),
-            z.string().max(200).optional().parse(req.body.name)
+            z.string().max(MAX_ENTITY_NAME_CHARS).optional().parse(req.body.name)
           );
       const c = await sources!.add(id, revision, source, req.file?.buffer);
       res.status(201).json({ data: c });
@@ -335,11 +352,8 @@ export function createApp(options: AppOptions) {
       const input = z
         .object({
           revision: z.number().int().nonnegative(),
-          text: z
-            .string()
-            .min(1)
-            .max(10 * 1024 * 1024),
-          name: z.string().min(1).max(200).optional(),
+          text: z.string().min(1).max(MAX_SOURCE_TEXT_CHARS),
+          name: z.string().min(1).max(MAX_ENTITY_NAME_CHARS).optional(),
           confirmed: z.boolean(),
         })
         .strict()
@@ -468,7 +482,7 @@ export function createApp(options: AppOptions) {
       const input = z
         .object({
           revision: z.number().int().nonnegative(),
-          text: z.string().trim().min(1).max(16000),
+          text: z.string().trim().min(1).max(MAX_MEMORY_TEXT_CHARS),
           coveredTurnIds: z.array(idSchema),
           confirm: z.literal(true),
         })
@@ -499,7 +513,7 @@ export function createApp(options: AppOptions) {
     wrap(async (req, res) => {
       const input = z
         .object({
-          name: z.string().min(1).max(200),
+          name: z.string().min(1).max(MAX_ENTITY_NAME_CHARS),
           campaignId: idSchema,
           characterId: idSchema,
           revision: z.number().int().nonnegative(),
@@ -549,7 +563,7 @@ export function createApp(options: AppOptions) {
     wrap(async (req, res) => {
       const input = z
         .object({
-          name: z.string().min(1).max(200),
+          name: z.string().min(1).max(MAX_ENTITY_NAME_CHARS),
           campaignId: idSchema,
           revision: z.number().int().nonnegative(),
         })
@@ -572,7 +586,7 @@ export function createApp(options: AppOptions) {
     '/api/templates/:id/campaigns',
     wrap(async (req, res) => {
       const { name } = z
-        .object({ name: z.string().min(1).max(200).optional() })
+        .object({ name: z.string().min(1).max(MAX_ENTITY_NAME_CHARS).optional() })
         .strict()
         .parse(req.body);
       res.status(201).json({ data: await library!.instantiate(param(req, 'id'), name) });

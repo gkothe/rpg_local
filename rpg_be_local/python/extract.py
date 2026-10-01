@@ -13,6 +13,7 @@ MAX_PAGES = 300
 MAX_TEXT_BYTES = 10 * 1024 * 1024
 MAX_RENDER_PIXELS = 30_000_000
 OCR_SCALE = 300 / 72
+OCR_LANGUAGE_CODES = ("eng", "por", "eng+por")
 
 
 def ocr_page(page, language):
@@ -77,7 +78,7 @@ def extract_page(pdf, number, language, digest):
 
 def extract(filename, language):
     import pypdfium2 as pdfium
-    if language not in ("eng", "por", "eng+por"):
+    if language not in OCR_LANGUAGE_CODES:
         raise ValueError("Unsupported OCR language")
     with open(filename, "rb") as source:
         digest = hashlib.file_digest(source, "sha256").hexdigest()

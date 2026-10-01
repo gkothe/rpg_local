@@ -1,7 +1,26 @@
 import { z } from 'zod';
+import {
+  CHARACTER_MUTABLE_FIELDS,
+  CharacterType,
+  CONTEXT_BUDGET_LIMITS,
+  OPERATION_KIND,
+  SourceKind,
+  SourceStatus,
+  TurnStatus,
+  OCR_LANGUAGE_CODES,
+  TRANSCRIPTION_LANGUAGE_CODES,
+} from './options.js';
+import {
+  MAX_ENTITY_NAME_CHARS,
+  MAX_JSON_OBJECT_CHARS,
+  MAX_LONG_TEXT_CHARS,
+  MAX_MEMORY_TEXT_CHARS,
+  MAX_TURN_TEXT_CHARS,
+} from './limits.js';
+import { GM_RESPONSE_SCHEMA_VERSION } from './versions.js';
 const object = z
   .record(z.string(), z.unknown())
-  .refine((v) => JSON.stringify(v).length <= 100_000, 'Object exceeds 100KB');
+  .refine((v) => JSON.stringify(v).length <= MAX_JSON_OBJECT_CHARS, 'Object exceeds 100KB');
 export const idSchema = z.uuid();
 export const settingsSchema = z
   .object({
@@ -12,35 +31,42 @@ export const settingsSchema = z
   .strict();
 export const characterInput = z
   .object({
-    name: z.string().trim().min(1).max(200),
-    type: z.enum(['player', 'npc']).default('player'),
+    name: z.string().trim().min(1).max(MAX_ENTITY_NAME_CHARS),
+    type: z.enum(CharacterType).default(CharacterType.Player),
     attributes: object.default({}),
     inventory: object.default({}),
     description: object.default({}),
-    notes: z.string().max(100_000).default(''),
+    notes: z.string().max(MAX_LONG_TEXT_CHARS).default(''),
   })
   .strict();
 export const operationSchema = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('create'), character: characterInput.omit({ notes: true }) }).strict(),
   z
     .object({
-      op: z.literal('set'),
+      op: z.literal(OPERATION_KIND.Create),
+      character: characterInput.omit({ notes: true }),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal(OPERATION_KIND.Set),
       characterId: idSchema,
-      field: z.enum(['name', 'attributes', 'inventory', 'description']),
+      field: z.enum(CHARACTER_MUTABLE_FIELDS),
       expected: z.unknown(),
       value: z.unknown(),
     })
     .strict(),
-  z.object({ op: z.literal('state'), expected: object, value: object }).strict(),
+  z.object({ op: z.literal(OPERATION_KIND.State), expected: object, value: object }).strict(),
 ]);
 export const responseSchema = z
   .object({
-    version: z.literal(1),
-    narrative: z.string().trim().min(1).max(40_000),
+    version: z.literal(GM_RESPONSE_SCHEMA_VERSION),
+    narrative: z.string().trim().min(1).max(MAX_TURN_TEXT_CHARS),
     operations: z.array(operationSchema).max(100),
   })
   .strict();
-export const memorySchema = z.object({ text: z.string().trim().min(1).max(16_000) }).strict();
+export const memorySchema = z
+  .object({ text: z.string().trim().min(1).max(MAX_MEMORY_TEXT_CHARS) })
+  .strict();
 export const draftSchema = characterInput.omit({ notes: true });
 // Pass the same strict contract to the model and validate again locally.
 export const responseJsonSchema = z.toJSONSchema(responseSchema);
@@ -48,18 +74,18 @@ export const memoryJsonSchema = z.toJSONSchema(memorySchema);
 export const draftJsonSchema = z.toJSONSchema(draftSchema);
 export const campaignCreateSchema = z
   .object({
-    name: z.string().trim().min(1).max(200),
-    description: z.string().max(100_000).default(''),
-    instructions: z.string().max(100_000).default(''),
+    name: z.string().trim().min(1).max(MAX_ENTITY_NAME_CHARS),
+    description: z.string().max(MAX_LONG_TEXT_CHARS).default(''),
+    instructions: z.string().max(MAX_LONG_TEXT_CHARS).default(''),
     settings: settingsSchema.optional(),
   })
   .strict();
 export const campaignPatchSchema = z
   .object({
     revision: z.number().int().nonnegative(),
-    name: z.string().trim().min(1).max(200).optional(),
-    description: z.string().max(100_000).optional(),
-    instructions: z.string().max(100_000).optional(),
+    name: z.string().trim().min(1).max(MAX_ENTITY_NAME_CHARS).optional(),
+    description: z.string().max(MAX_LONG_TEXT_CHARS).optional(),
+    instructions: z.string().max(MAX_LONG_TEXT_CHARS).optional(),
     settings: settingsSchema.optional(),
     pinnedFacts: z.array(z.string().max(4000)).max(100).optional(),
     pinnedSourceIds: z.array(idSchema).max(100).optional(),
@@ -77,9 +103,21 @@ export const campaignPatchSchema = z
       .optional(),
     budgets: z
       .object({
-        gameplay: z.number().int().min(2000).max(16000),
-        compaction: z.number().int().min(2000).max(8000),
-        memory: z.number().int().min(200).max(2000),
+        gameplay: z
+          .number()
+          .int()
+          .min(CONTEXT_BUDGET_LIMITS.gameplay.min)
+          .max(CONTEXT_BUDGET_LIMITS.gameplay.max),
+        compaction: z
+          .number()
+          .int()
+          .min(CONTEXT_BUDGET_LIMITS.compaction.min)
+          .max(CONTEXT_BUDGET_LIMITS.compaction.max),
+        memory: z
+          .number()
+          .int()
+          .min(CONTEXT_BUDGET_LIMITS.memory.min)
+          .max(CONTEXT_BUDGET_LIMITS.memory.max),
       })
       .strict()
       .optional(),
@@ -90,7 +128,13 @@ export const turnInputSchema = z
   .object({
     revision: z.number().int().nonnegative(),
     requestId: idSchema,
-    action: z.string().trim().min(1).max(40_000),
+    action: z.string().trim().min(1).max(MAX_TURN_TEXT_CHARS),
     settings: settingsSchema.optional(),
   })
   .strict();
+
+export const turnStatusSchema = z.enum(TurnStatus);
+export const sourceStatusSchema = z.enum(SourceStatus);
+export const sourceKindSchema = z.enum(SourceKind);
+export const ocrLanguageSchema = z.enum(OCR_LANGUAGE_CODES);
+export const transcriptionLanguageSchema = z.enum(TRANSCRIPTION_LANGUAGE_CODES);

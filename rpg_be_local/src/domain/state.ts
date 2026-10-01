@@ -3,6 +3,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { Problem, conflict } from '../errors.js';
 import type { Campaign, GMResponse, Snapshot, Character } from './types.js';
 import { responseSchema } from './schemas.js';
+import { CHARACTER_FIELD, OPERATION_KIND } from './options.js';
+import { MAX_ENTITY_NAME_CHARS, MAX_JSON_OBJECT_CHARS } from './limits.js';
 const canonical = (c: Character) => ({
   name: c.name,
   type: c.type,
@@ -21,7 +23,7 @@ export function applyResponse(
   const changedFields = new Map<string, Set<'name' | 'attributes' | 'inventory' | 'description'>>();
   const changes: string[] = [];
   for (const op of response.operations) {
-    if (op.op === 'create') {
+    if (op.op === OPERATION_KIND.Create) {
       const char: Character = {
         ...op.character,
         id: randomUUID(),
@@ -31,7 +33,7 @@ export function applyResponse(
       c.characters.push(char);
       touched.add(char.id);
       changes.push(`${char.name}: introduced`);
-    } else if (op.op === 'set') {
+    } else if (op.op === OPERATION_KIND.Set) {
       const char = c.characters.find((x) => x.id === op.characterId);
       if (!char) throw new Problem(422, 'invalid_operation', 'Character is not in this campaign');
       if (!isDeepStrictEqual(char[op.field], op.expected))
@@ -40,8 +42,12 @@ export function applyResponse(
           'invalid_operation',
           `${char.name}: expected prior ${op.field} does not match`
         );
-      if (op.field === 'name') {
-        if (typeof op.value !== 'string' || !op.value.trim() || op.value.length > 200)
+      if (op.field === CHARACTER_FIELD.Name) {
+        if (
+          typeof op.value !== 'string' ||
+          !op.value.trim() ||
+          op.value.length > MAX_ENTITY_NAME_CHARS
+        )
           throw new Problem(422, 'invalid_operation', 'Invalid character name');
         char.name = op.value;
       } else {
@@ -49,7 +55,7 @@ export function applyResponse(
           op.value === null ||
           Array.isArray(op.value) ||
           typeof op.value !== 'object' ||
-          JSON.stringify(op.value).length > 100000
+          JSON.stringify(op.value).length > MAX_JSON_OBJECT_CHARS
         )
           throw new Problem(
             422,
@@ -116,7 +122,7 @@ export function undoSnapshot(original: Campaign, snapshot: Snapshot): Campaign {
       if (fields) {
         const current = c.characters[index]!;
         for (const field of fields) {
-          if (field === 'name') current.name = before.name;
+          if (field === CHARACTER_FIELD.Name) current.name = before.name;
           else current[field] = structuredClone(before[field]);
         }
         current.revision = c.revision + 1;

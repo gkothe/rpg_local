@@ -3,6 +3,7 @@ import os from 'node:os';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { Problem } from '../errors.js';
+import { PROVIDER_ID, type ProviderId } from './options.js';
 
 export type Executable = { binary: string; prefix: string[] };
 type DiscoveryContext = {
@@ -14,7 +15,7 @@ type DiscoveryContext = {
 
 // Resolve known native/JS entrypoints directly. Never execute or parse shell wrappers.
 export async function locate(
-  name: string,
+  name: ProviderId,
   context: DiscoveryContext = {
     platform: process.platform,
     env: process.env,
@@ -50,8 +51,8 @@ export async function locate(
   if (windows) {
     directories.push(path.dirname(context.node), path.join(context.home, '.local', 'bin'));
     if (context.env.APPDATA) directories.push(path.join(context.env.APPDATA, 'npm'));
-    if (name === 'claude') directories.push(path.join(context.home, '.claude', 'local'));
-    if (name === 'codex' && context.env.LOCALAPPDATA) {
+    if (name === PROVIDER_ID.Claude) directories.push(path.join(context.home, '.claude', 'local'));
+    if (name === PROVIDER_ID.Codex && context.env.LOCALAPPDATA) {
       const root = path.join(context.env.LOCALAPPDATA, 'OpenAI', 'Codex', 'bin');
       try {
         const versions = [];
@@ -71,14 +72,14 @@ export async function locate(
     const candidates: Executable[] = [
       { binary: path.join(dir, windows ? `${name}.exe` : name), prefix: [] },
     ];
-    if (windows && name === 'claude') {
+    if (windows && name === PROVIDER_ID.Claude) {
       const root = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code');
       candidates.push(
         { binary: path.join(root, 'bin', 'claude.exe'), prefix: [] },
         { binary: context.node, prefix: [path.join(root, 'cli.js')] }
       );
     }
-    if (windows && name === 'codex')
+    if (windows && name === PROVIDER_ID.Codex)
       candidates.push({
         binary: context.node,
         prefix: [path.join(dir, 'node_modules', '@openai', 'codex', 'bin', 'codex.js')],

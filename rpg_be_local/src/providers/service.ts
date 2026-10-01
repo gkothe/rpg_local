@@ -13,10 +13,24 @@ import { parseProviderOutput, providerArgs } from './adapters.js';
 import { Problem } from '../errors.js';
 import type { ProviderSettings } from '../domain/types.js';
 import { z } from 'zod';
-import { generateAntigravity, parseModelCatalog, modelSlug } from './antigravity.js';
+import {
+  ANTIGRAVITY_ISOLATED_VERSION,
+  generateAntigravity,
+  parseModelCatalog,
+  modelSlug,
+} from './antigravity.js';
+import {
+  MAX_PROVIDER_INPUT_TOKENS,
+  MODEL_EFFORTS,
+  PROVIDERS,
+  PROVIDER_ID,
+  PROVIDER_IDS,
+  type ProviderId,
+} from './options.js';
 export type ModelOption = { id: string; label: string; efforts: string[]; inputTokens: number };
+const CLAUDE_CLI_INPUT_TOKENS = 8000;
 export type Provider = {
-  id: string;
+  id: ProviderId;
   name: string;
   available: boolean;
   supported: boolean;
@@ -36,13 +50,13 @@ export interface Generator {
 }
 const configSchema = z.array(
   z.object({
-    provider: z.enum(['claude', 'codex', 'agy']),
+    provider: z.enum(PROVIDER_IDS),
     models: z.array(
       z.object({
         id: z.string().regex(/^[\w./:-]{1,120}$/),
         label: z.string().max(100),
-        efforts: z.array(z.enum(['low', 'medium', 'high', 'xhigh', 'max'])),
-        inputTokens: z.number().int().min(2000).max(16000),
+        efforts: z.array(z.enum(MODEL_EFFORTS)),
+        inputTokens: z.number().int().min(2000).max(MAX_PROVIDER_INPUT_TOKENS),
       })
     ),
   })
@@ -58,14 +72,12 @@ export function parseClaudeHelpCatalog(help: string): ModelOption[] {
       .match(/\(([a-z,\s]+)\)/)?.[1]
       ?.split(',')
       .map((level) => level.trim()) ?? [];
-  const efforts = levels.filter((level) =>
-    ['low', 'medium', 'high', 'xhigh', 'max'].includes(level)
-  );
+  const efforts = levels.filter((level) => (MODEL_EFFORTS as readonly string[]).includes(level));
   return [...aliases.matchAll(/'([\w./:-]{1,120})'/g)].map((match) => ({
     id: match[1]!,
     label: `${match[1]![0]!.toUpperCase()}${match[1]!.slice(1)} (CLI alias)`,
     efforts,
-    inputTokens: 8000,
+    inputTokens: CLAUDE_CLI_INPUT_TOKENS,
   }));
 }
 export class ProviderService implements Generator {
@@ -87,25 +99,21 @@ export class ProviderService implements Generator {
     }
     this.locations.clear();
     const result: Provider[] = [];
-    for (const [id, name] of [
-      ['claude', 'Claude Code'],
-      ['codex', 'Codex'],
-      ['agy', 'Antigravity'],
-    ]) {
+    for (const { id, name } of PROVIDERS) {
       let executable = null;
       let help = '';
       let version: string | null = null;
       let discoveryFailure: string | null = null;
       try {
-        executable = await locate(id!);
+        executable = await locate(id);
         if (executable) {
           help = await runProcess(
             executable.binary,
-            [...executable.prefix, ...(id === 'codex' ? ['exec', '--help'] : ['--help'])],
+            [...executable.prefix, ...(id === PROVIDER_ID.Codex ? ['exec', '--help'] : ['--help'])],
             '',
             { timeoutMs: 8000, maxOutputBytes: 100000, captureDiagnosticOutput: true }
           );
-          this.locations.set(id!, executable);
+          this.locations.set(id, executable);
           version = 'Installed CLI; flags inspected';
         }
       } catch (error) {
@@ -113,7 +121,7 @@ export class ProviderService implements Generator {
       }
       let codexModels: ModelOption[] = [];
       let codexIsolated = false;
-      if (id === 'codex' && executable && !discoveryFailure) {
+      if (id === PROVIDER_ID.Codex && executable && !discoveryFailure) {
         try {
           if (
             !['--ignore-user-config', '--ignore-rules', '--ephemeral', '--output-schema'].every(
@@ -136,7 +144,12 @@ export class ProviderService implements Generator {
       }
       let antigravityModels: ModelOption[] = [];
       let agyIsolated = false;
-      if (id === 'agy' && executable && !discoveryFailure && help.includes('--agent')) {
+      if (
+        id === PROVIDER_ID.Antigravity &&
+        executable &&
+        !discoveryFailure &&
+        help.includes('--agent')
+      ) {
         try {
           const notes = await runProcess(
             executable.binary,
@@ -154,7 +167,7 @@ export class ProviderService implements Generator {
             )
           );
           agyIsolated =
-            version === '1.2.14' &&
+            version === ANTIGRAVITY_ISOLATED_VERSION &&
             Array.isArray(hooks.command?.data?.hooks) &&
             hooks.command.data.hooks.length === 0;
           antigravityModels = parseModelCatalog(
@@ -171,13 +184,13 @@ export class ProviderService implements Generator {
         !discoveryFailure &&
         (codexIsolated ||
           agyIsolated ||
-          (id === 'claude' &&
+          (id === PROVIDER_ID.Claude &&
             ['--safe-mode', '--no-session-persistence', '--tools', '--json-schema'].every((flag) =>
               help.includes(flag)
             )));
       const configuredModels = configured.find((x) => x.provider === id)?.models;
       const models =
-        id === 'codex'
+        id === PROVIDER_ID.Codex
           ? (configuredModels
               ?.filter((option) => codexModels.some((model) => model.id === option.id))
               .map((option) => ({
@@ -188,14 +201,14 @@ export class ProviderService implements Generator {
                 ),
               })) ?? codexModels)
           : (configuredModels ??
-            (id === 'claude' && !discoveryFailure
+            (id === PROVIDER_ID.Claude && !discoveryFailure
               ? parseClaudeHelpCatalog(help)
               : antigravityModels));
       const reason =
         discoveryFailure ??
         (!executable
           ? 'CLI not found on PATH or known local installation paths; restart the app after installing or configure RPG_' +
-            id!.toUpperCase() +
+            id.toUpperCase() +
             '_BIN'
           : !isolated
             ? 'Installed, but tool/customization isolation is not verified; gameplay disabled'
@@ -203,21 +216,21 @@ export class ProviderService implements Generator {
               ? 'Configure verified models in RPG_MODEL_CATALOG before gameplay'
               : null);
       result.push({
-        id: id!,
-        name: name!,
+        id,
+        name,
         available: !!executable,
         supported: isolated && models.length > 0,
         reason,
         version,
         models,
         catalogProvenance:
-          id === 'agy'
-            ? 'Installed CLI model catalog; verified minimal agent on 1.2.14; individual model entitlement is checked when used'
+          id === PROVIDER_ID.Antigravity
+            ? `Installed CLI model catalog; verified minimal agent on ${ANTIGRAVITY_ISOLATED_VERSION}; individual model entitlement is checked when used`
             : configured.some((entry) => entry.provider === id)
               ? 'Explicit local administrator catalog; CLI login and model entitlement require a real-turn test'
-              : id === 'codex'
+              : id === PROVIDER_ID.Codex
                 ? `Installed account model metadata; verified empty-tool isolated CLI on ${CODEX_ISOLATED_VERSION}; subscription/model entitlement is checked when used`
-                : id === 'claude'
+                : id === PROVIDER_ID.Claude
                   ? 'Aliases and effort choices advertised by installed CLI help; model/effort entitlement is checked when used'
                   : 'Installed CLI; tool/customization isolation is not verified',
       });
@@ -225,7 +238,7 @@ export class ProviderService implements Generator {
     this.cache = result;
     return result;
   }
-  async capacity(settings: ProviderSettings, ceiling = 16000): Promise<number> {
+  async capacity(settings: ProviderSettings, ceiling = MAX_PROVIDER_INPUT_TOKENS): Promise<number> {
     const provider = (await this.list()).find((p) => p.id === settings.provider);
     if (!provider?.supported)
       throw new Problem(
@@ -269,7 +282,7 @@ export class ProviderService implements Generator {
           delete env[key];
       }
       const output =
-        settings.provider === 'agy'
+        settings.provider === PROVIDER_ID.Antigravity
           ? await generateAntigravity(
               executable,
               {
@@ -277,7 +290,7 @@ export class ProviderService implements Generator {
                 model: modelSlug(
                   settings,
                   (await this.list())
-                    .find((provider) => provider.id === 'agy')!
+                    .find((provider) => provider.id === PROVIDER_ID.Antigravity)!
                     .models.find((model) => model.id === settings.model)!.efforts
                 ),
               },
@@ -287,7 +300,7 @@ export class ProviderService implements Generator {
               env,
               signal
             )
-          : settings.provider === 'codex'
+          : settings.provider === PROVIDER_ID.Codex
             ? await generateCodex(executable, settings, prompt, schemaPath, dir, env, signal)
             : await runProcess(
                 executable.binary,

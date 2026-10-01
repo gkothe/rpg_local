@@ -1,9 +1,29 @@
+import type {
+  CHARACTER_MUTABLE_FIELDS,
+  CharacterType as CharacterTypeEnum,
+  SourceKind as SourceKindEnum,
+  SourceStatus as SourceStatusEnum,
+  TurnStatus as TurnStatusEnum,
+  OPERATION_KIND,
+} from './options.js';
+import type {
+  ARCHIVE_FORMAT_ID,
+  ARCHIVE_FORMAT_VERSION,
+  GM_RESPONSE_SCHEMA_VERSION,
+} from './versions.js';
+
 export type JsonObject = Record<string, unknown>;
 export type ProviderSettings = { provider: string; model: string; effort: string | null };
+export type CharacterType = `${CharacterTypeEnum}`;
+export type SourceKind = `${SourceKindEnum}`;
+export type SourceStatus = `${SourceStatusEnum}`;
+export type TurnStatus = `${TurnStatusEnum}`;
+export type OperationKind = (typeof OPERATION_KIND)[keyof typeof OPERATION_KIND];
+export type CharacterMutableField = (typeof CHARACTER_MUTABLE_FIELDS)[number];
 export type Character = {
   id: string;
   name: string;
-  type: 'player' | 'npc';
+  type: CharacterType;
   attributes: JsonObject;
   inventory: JsonObject;
   description: JsonObject;
@@ -13,9 +33,9 @@ export type Character = {
 export type Source = {
   id: string;
   name: string;
-  kind: 'text' | 'file' | 'pdf' | 'google-doc';
+  kind: SourceKind;
   text: string;
-  status: 'draft' | 'confirmed';
+  status: SourceStatus;
   version: number;
   pages: JsonObject[];
   warnings: string[];
@@ -48,8 +68,6 @@ export type Campaign = {
   createdAt: string;
   updatedAt: string;
 };
-export type TurnStatus =
-  'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
 export type Turn = {
   id: string;
   campaignId: string;
@@ -76,24 +94,28 @@ export type ContextManifest = {
 };
 export type Operation =
   | {
-      op: 'create';
+      op: typeof OPERATION_KIND.Create;
       character: {
         name: string;
-        type: 'player' | 'npc';
+        type: CharacterType;
         attributes: JsonObject;
         inventory: JsonObject;
         description: JsonObject;
       };
     }
   | {
-      op: 'set';
+      op: typeof OPERATION_KIND.Set;
       characterId: string;
-      field: 'name' | 'attributes' | 'inventory' | 'description';
+      field: CharacterMutableField;
       expected: unknown;
       value: unknown;
     }
-  | { op: 'state'; expected: JsonObject; value: JsonObject };
-export type GMResponse = { version: 1; narrative: string; operations: Operation[] };
+  | { op: typeof OPERATION_KIND.State; expected: JsonObject; value: JsonObject };
+export type GMResponse = {
+  version: typeof GM_RESPONSE_SCHEMA_VERSION;
+  narrative: string;
+  operations: Operation[];
+};
 export type Snapshot = {
   turnId: string;
   beforeCharacters: Character[];
@@ -103,12 +125,12 @@ export type Snapshot = {
   beforeMemory: Memory | null;
   changedFields?: {
     characterId: string;
-    fields: ('name' | 'attributes' | 'inventory' | 'description')[];
+    fields: CharacterMutableField[];
   }[];
 };
 export type Archive = {
-  format: 'local-rpg';
-  version: 1;
+  format: typeof ARCHIVE_FORMAT_ID;
+  version: typeof ARCHIVE_FORMAT_VERSION;
   campaign: Campaign;
   turns: Turn[];
   snapshots: Snapshot[];

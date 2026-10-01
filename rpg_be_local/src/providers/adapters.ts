@@ -1,13 +1,14 @@
 import { Problem } from '../errors.js';
 import { CODEX_INPUT_TOKENS } from './codex.js';
 import type { ProviderSettings } from '../domain/types.js';
+import { MAX_PROVIDER_INPUT_TOKENS, PROVIDER_ID } from './options.js';
 export function providerArgs(
   id: string,
   settings: ProviderSettings,
   schemaPath: string,
   schema: unknown
 ): string[] {
-  if (id === 'claude')
+  if (id === PROVIDER_ID.Claude)
     return [
       '-p',
       '--safe-mode',
@@ -29,7 +30,7 @@ export function providerArgs(
       '--system-prompt',
       'You are a tabletop RPG narrator. The supplied JSON is the entire campaign context. No tools or outside context.',
     ];
-  if (id === 'codex')
+  if (id === PROVIDER_ID.Codex)
     return [
       'exec',
       '--ignore-user-config',
@@ -48,13 +49,13 @@ export function providerArgs(
         : []),
       '-',
     ];
-  if (id === 'agy')
+  if (id === PROVIDER_ID.Antigravity)
     throw new Problem(422, 'provider_contract', 'Antigravity requires its isolated agent launcher');
   throw new Problem(422, 'provider_unknown', 'Unknown CLI provider');
 }
 export function parseProviderOutput(id: string, output: string): unknown {
   try {
-    if (id === 'agy') {
+    if (id === PROVIDER_ID.Antigravity) {
       const events = output
         .trim()
         .split(/\r?\n/)
@@ -71,7 +72,10 @@ export function parseProviderOutput(id: string, output: string): unknown {
           'provider_isolation',
           'Antigravity did not complete one isolated GM turn'
         );
-      if (!Number.isFinite(result.usage?.input_tokens) || result.usage.input_tokens > 16000)
+      if (
+        !Number.isFinite(result.usage?.input_tokens) ||
+        result.usage.input_tokens > MAX_PROVIDER_INPUT_TOKENS
+      )
         throw new Problem(
           502,
           'provider_budget',
@@ -81,7 +85,7 @@ export function parseProviderOutput(id: string, output: string): unknown {
       const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(response);
       return JSON.parse(fenced ? fenced[1]! : response);
     }
-    if (id === 'codex') {
+    if (id === PROVIDER_ID.Codex) {
       const events = output
         .trim()
         .split('\n')

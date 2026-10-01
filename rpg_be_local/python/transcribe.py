@@ -4,6 +4,9 @@ import os
 import sys
 
 MAX_SECONDS = 120
+AUTO_LANGUAGE = "auto"
+TRANSCRIPTION_LANGUAGE_CODES = ("en", "pt", AUTO_LANGUAGE)
+TRANSCRIPTION_BEAM_SIZE = 5
 
 
 def validate_audio(filename):
@@ -22,7 +25,7 @@ def validate_audio(filename):
 
 
 def transcribe(filename, language, model_path=None):
-    if language not in ("en", "pt", "auto"):
+    if language not in TRANSCRIPTION_LANGUAGE_CODES:
         raise ValueError("Unsupported transcription language")
     model_path = model_path or os.environ.get("RPG_WHISPER_MODEL_PATH", "")
     if not os.path.isdir(model_path) or not os.path.isfile(os.path.join(model_path, "model.bin")):
@@ -34,7 +37,8 @@ def transcribe(filename, language, model_path=None):
         compute_type="int8", local_files_only=True,
     )
     segments, _ = model.transcribe(
-        filename, language=None if language == "auto" else language, beam_size=5,
+        filename, language=None if language == AUTO_LANGUAGE else language,
+        beam_size=TRANSCRIPTION_BEAM_SIZE,
     )
     text = " ".join(segment.text.strip() for segment in segments).strip()
     if not text:

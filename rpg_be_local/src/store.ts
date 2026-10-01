@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { databaseUrl } from './config.js';
 import { conflict, Problem } from './errors.js';
 import type { Campaign, Turn, Memory, Snapshot } from './domain/types.js';
+import { SourceStatus, TurnStatus } from './domain/options.js';
 export class Store {
   readonly pool: pg.Pool;
   constructor(url = databaseUrl()) {
@@ -57,8 +58,8 @@ export class Store {
   }
   async activeTurns(campaignId: string, client?: PoolClient): Promise<Turn[]> {
     const r = await (client ?? this.pool).query(
-      "SELECT document FROM turns WHERE campaign_id=$1 AND status='completed' AND NOT (document->>'undone')::boolean ORDER BY created_at,id",
-      [campaignId]
+      "SELECT document FROM turns WHERE campaign_id=$1 AND status=$2 AND NOT (document->>'undone')::boolean ORDER BY created_at,id",
+      [campaignId, TurnStatus.Completed]
     );
     return r.rows.map((x) => x.document);
   }
@@ -82,8 +83,8 @@ export class Store {
   }
   async assertIdle(id: string, client: PoolClient): Promise<void> {
     const r = await client.query(
-      "SELECT id FROM turns WHERE campaign_id=$1 AND status IN ('pending','running')",
-      [id]
+      'SELECT id FROM turns WHERE campaign_id=$1 AND status IN ($2,$3)',
+      [id, TurnStatus.Pending, TurnStatus.Running]
     );
     if (r.rowCount) throw conflict('Wait for or cancel the active turn first');
   }
@@ -111,13 +112,19 @@ export class Store {
   }
   async recover(): Promise<number> {
     const r = await this.pool.query(
-      "UPDATE turns SET status='interrupted',document=jsonb_set(jsonb_set(document,'{status}','\"interrupted\"'),'{error}','\"The app restarted during this turn; submit a new request to retry\"'),owner=NULL,lease_until=NULL WHERE status IN ('pending','running') AND (lease_until IS NULL OR lease_until < now())"
+      "UPDATE turns SET status=$1,document=jsonb_set(jsonb_set(document,'{status}',to_jsonb($1::text)),'{error}',to_jsonb($4::text)),owner=NULL,lease_until=NULL WHERE status IN ($2,$3) AND (lease_until IS NULL OR lease_until < now())",
+      [
+        TurnStatus.Interrupted,
+        TurnStatus.Pending,
+        TurnStatus.Running,
+        'The app restarted during this turn; submit a new request to retry',
+      ]
     );
     return r.rowCount ?? 0;
   }
   async reindex(c: Campaign, client: PoolClient): Promise<void> {
     await client.query('DELETE FROM source_chunks WHERE campaign_id=$1', [c.id]);
-    for (const source of c.sources.filter((s) => s.status === 'confirmed')) {
+    for (const source of c.sources.filter((s) => s.status === SourceStatus.Confirmed)) {
       let ordinal = 0;
       const chunks = sourceSections(source).map((s) => s.text);
       for (const content of chunks)
@@ -165,7 +172,8 @@ export class Store {
     return r.rows
       .filter((x) =>
         c.sources.some(
-          (s) => s.id === x.source_id && s.version === x.version && s.status === 'confirmed'
+          (s) =>
+            s.id === x.source_id && s.version === x.version && s.status === SourceStatus.Confirmed
         )
       )
       .map((x) => ({ id: x.source_id, version: x.version, text: x.content }));

@@ -18,6 +18,11 @@ import {
   memorySchema,
 } from '../domain/schemas.js';
 import { applyResponse, undoSnapshot } from '../domain/state.js';
+import { TurnStatus } from '../domain/options.js';
+const TURN_LEASE_SECONDS = 45;
+const TURN_HEARTBEAT_INTERVAL_MS = 10_000;
+const AUTO_COMPACTION_HISTORY_THRESHOLD_TOKENS = 6_000;
+const CONTEXT_REBUILD_THRESHOLD = 0.8;
 export class TurnService {
   private aborts = new Map<string, AbortController>();
   constructor(
@@ -65,7 +70,7 @@ export class TurnService {
         id: randomUUID(),
         campaignId,
         requestId: input.requestId,
-        status: 'pending',
+        status: TurnStatus.Pending,
         action: input.action,
         narrative: null,
         changes: [],
@@ -95,8 +100,8 @@ export class TurnService {
         memoryId: c.memory?.id ?? null,
       };
       await client.query(
-        "INSERT INTO turns(id,campaign_id,request_id,payload_hash,status,document,owner,lease_until) VALUES($1,$2,$3,$4,$5,$6,$7,now()+interval '45 seconds')",
-        [t.id, c.id, t.requestId, hash, t.status, t, ownerId]
+        "INSERT INTO turns(id,campaign_id,request_id,payload_hash,status,document,owner,lease_until) VALUES($1,$2,$3,$4,$5,$6,$7,now()+($8 * interval '1 second'))",
+        [t.id, c.id, t.requestId, hash, t.status, t, ownerId, TURN_LEASE_SECONDS]
       );
       launch = true;
       return t;
@@ -114,7 +119,10 @@ export class TurnService {
     const campaign = await this.store.campaign(t.campaignId, client, true);
     const turn = await this.store.turn(t.campaignId, t.id, client, true);
     const owner = await client.query('SELECT owner FROM turns WHERE id=$1', [t.id]);
-    if (owner.rows[0]?.owner !== ownerId || !['pending', 'running'].includes(turn.status))
+    if (
+      owner.rows[0]?.owner !== ownerId ||
+      ![TurnStatus.Pending, TurnStatus.Running].includes(turn.status as TurnStatus)
+    )
       throw new Problem(409, 'cancelled', 'Turn is no longer active');
     if (campaign.revision !== t.context!.revision)
       throw conflict('Campaign was edited during generation; output was discarded');
@@ -126,24 +134,24 @@ export class TurnService {
     const heartbeat = setInterval(() => {
       void this.store.pool
         .query(
-          "UPDATE turns SET lease_until=now()+interval '45 seconds' WHERE id=$1 AND owner=$2 AND status IN ('pending','running')",
-          [t.id, ownerId]
+          "UPDATE turns SET lease_until=now()+($4 * interval '1 second') WHERE id=$1 AND owner=$2 AND status IN ($3,$5)",
+          [t.id, ownerId, TurnStatus.Pending, TURN_LEASE_SECONDS, TurnStatus.Running]
         )
         .catch(() => ctl.abort());
-    }, 10000);
+    }, TURN_HEARTBEAT_INTERVAL_MS);
     try {
       await this.store.transaction(async (client) => {
         const { turn } = await this.lockedOwned(t, client);
-        turn.status = 'running';
+        turn.status = TurnStatus.Running;
         await this.store.saveTurn(turn, client);
       });
       let c = await this.store.campaign(t.campaignId);
       let history = await this.store.activeTurns(c.id);
       const capacity = await this.generator.capacity(t.settings, c.budgets.gameplay);
       let needs =
-        uncoveredHistoryTokens(c, history) > 6000 ||
+        uncoveredHistoryTokens(c, history) > AUTO_COMPACTION_HISTORY_THRESHOLD_TOKENS ||
         !t.context?.prompt ||
-        t.context.estimatedTokens > capacity * 0.8;
+        t.context.estimatedTokens > capacity * CONTEXT_REBUILD_THRESHOLD;
       // Each bounded batch covers a consecutive prefix; never recursively summarizes the full transcript.
       while (needs && uncovered(c, history).length > 1) {
         const compactionCapacity = await this.generator.capacity(t.settings, c.budgets.compaction);
@@ -179,7 +187,7 @@ export class TurnService {
         });
         c = await this.store.campaign(c.id);
         history = await this.store.activeTurns(c.id);
-        needs = uncoveredHistoryTokens(c, history) > 6000;
+        needs = uncoveredHistoryTokens(c, history) > AUTO_COMPACTION_HISTORY_THRESHOLD_TOKENS;
       }
       // A failure to compact never removes uncovered history. Rebuild must fit or fail explicitly.
       await this.store.transaction(async (client) => {
@@ -199,7 +207,7 @@ export class TurnService {
         applied.campaign.revision++;
         turn.narrative = response.narrative;
         turn.changes = applied.changes;
-        turn.status = 'completed';
+        turn.status = TurnStatus.Completed;
         turn.completedAt = new Date().toISOString();
         await client.query('INSERT INTO snapshots(turn_id,campaign_id,document) VALUES($1,$2,$3)', [
           t.id,
@@ -214,8 +222,8 @@ export class TurnService {
         .transaction(async (client) => {
           await this.store.campaign(t.campaignId, client, true);
           const turn = await this.store.turn(t.campaignId, t.id, client, true);
-          if (!['pending', 'running'].includes(turn.status)) return;
-          turn.status = ctl.signal.aborted ? 'cancelled' : 'failed';
+          if (![TurnStatus.Pending, TurnStatus.Running].includes(turn.status as TurnStatus)) return;
+          turn.status = ctl.signal.aborted ? TurnStatus.Cancelled : TurnStatus.Failed;
           turn.error =
             e instanceof Problem
               ? e.message
@@ -232,8 +240,8 @@ export class TurnService {
     const turn = await this.store.transaction(async (client) => {
       await this.store.campaign(campaignId, client, true);
       const t = await this.store.turn(campaignId, id, client, true);
-      if (['pending', 'running'].includes(t.status)) {
-        t.status = 'cancelled';
+      if ([TurnStatus.Pending, TurnStatus.Running].includes(t.status as TurnStatus)) {
+        t.status = TurnStatus.Cancelled;
         t.error = 'Cancelled by player';
         await this.store.saveTurn(t, client);
       }

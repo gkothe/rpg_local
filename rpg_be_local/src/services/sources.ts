@@ -7,37 +7,50 @@ import { runProcess } from '../providers/processRunner.js';
 import { Problem } from '../errors.js';
 import { appRoot, uploadBytes } from '../config.js';
 import type { Source } from '../domain/types.js';
+import { OCR_LANGUAGE_CODES, SourceKind, SourceStatus } from '../domain/options.js';
+import { ocrLanguageSchema, transcriptionLanguageSchema } from '../domain/schemas.js';
+import {
+  MAX_SOURCE_PAGES,
+  MAX_SOURCE_TEXT_BYTES,
+  MAX_SOURCE_TEXT_CHARS,
+} from '../domain/limits.js';
+const MAX_AUDIO_SECONDS = 120;
 const extractionSchema = z.object({
-  text: z
-    .string()
-    .min(1)
-    .max(10 * 1024 * 1024),
-  pages: z.array(z.record(z.string(), z.unknown())).max(300),
+  text: z.string().min(1).max(MAX_SOURCE_TEXT_CHARS),
+  pages: z.array(z.record(z.string(), z.unknown())).max(MAX_SOURCE_PAGES),
   warnings: z.array(z.string()),
 });
-export function textSource(name: string, text: string, kind: Source['kind'] = 'text'): Source {
+export function textSource(
+  name: string,
+  text: string,
+  kind: Source['kind'] = SourceKind.Text
+): Source {
   if (!text.trim()) throw new Problem(422, 'source_empty', 'Source contains no text');
-  if (Buffer.byteLength(text) > 10 * 1024 * 1024)
+  if (Buffer.byteLength(text) > MAX_SOURCE_TEXT_BYTES)
     throw new Problem(413, 'source_limit', 'Extracted text exceeds 10MiB');
   return {
     id: randomUUID(),
     name,
     kind,
     text,
-    status: 'draft',
+    status: SourceStatus.Draft,
     version: 1,
     pages: [],
     warnings: [],
   };
 }
-export async function extractFile(bytes: Buffer, name: string, language = 'eng'): Promise<Source> {
-  if (!['eng', 'por', 'eng+por'].includes(language))
+export async function extractFile(
+  bytes: Buffer,
+  name: string,
+  language: (typeof OCR_LANGUAGE_CODES)[number] = OCR_LANGUAGE_CODES[0]
+): Promise<Source> {
+  if (!ocrLanguageSchema.safeParse(language).success)
     throw new Problem(422, 'ocr_language', 'Choose English, Portuguese, or both');
   if (bytes.length > uploadBytes) throw new Problem(413, 'upload_limit', 'File exceeds20MiB');
   const extension = path.extname(name).toLowerCase();
   if (['.txt', '.md', '.markdown'].includes(extension)) {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    return textSource(name, text, 'file');
+    return textSource(name, text, SourceKind.File);
   }
   if (extension !== '.pdf' || bytes.subarray(0, 5).toString() !== '%PDF-')
     throw new Problem(415, 'source_format', 'Use UTF-8 text, Markdown or a valid PDF');
@@ -56,7 +69,7 @@ export async function extractFile(bytes: Buffer, name: string, language = 'eng')
       )
     );
     return {
-      ...textSource(name, result.text, 'pdf'),
+      ...textSource(name, result.text, SourceKind.Pdf),
       pages: result.pages,
       warnings: result.warnings,
     };
@@ -122,14 +135,14 @@ export async function extractGoogle(url: string, name = 'Google document'): Prom
       const { done, value } = await reader.read();
       if (done) break;
       size += value.length;
-      if (size > 10 * 1024 * 1024)
+      if (size > MAX_SOURCE_TEXT_BYTES)
         throw new Problem(413, 'source_limit', 'Google document exceeds10MiB');
       chunks.push(Buffer.from(value));
     }
   } finally {
     await reader.cancel();
   }
-  return textSource(name, Buffer.concat(chunks).toString('utf8'), 'google-doc');
+  return textSource(name, Buffer.concat(chunks).toString('utf8'), SourceKind.GoogleDoc);
 }
 export async function audioDiagnostics(): Promise<{
   available: boolean;
@@ -141,7 +154,7 @@ export async function audioDiagnostics(): Promise<{
       available: false,
       reason:
         'Configure local Faster-Whisper and a pre-downloaded RPG_WHISPER_MODEL_PATH; typing remains available',
-      maxSeconds: 120,
+      maxSeconds: MAX_AUDIO_SECONDS,
     };
   try {
     for (const file of ['model.bin', 'config.json', 'tokenizer.json'])
@@ -152,17 +165,18 @@ export async function audioDiagnostics(): Promise<{
       '',
       { timeoutMs: 10000, maxOutputBytes: 1000 }
     );
-    return { available: true, reason: null, maxSeconds: 120 };
+    return { available: true, reason: null, maxSeconds: MAX_AUDIO_SECONDS };
   } catch {
     return {
       available: false,
       reason: 'Local Python/Faster-Whisper/model setup is unavailable',
-      maxSeconds: 120,
+      maxSeconds: MAX_AUDIO_SECONDS,
     };
   }
 }
 export async function transcribe(bytes: Buffer, language: string): Promise<{ text: string }> {
-  if (!['en', 'pt', 'auto'].includes(language))
+  const parsedLanguage = transcriptionLanguageSchema.safeParse(language);
+  if (!parsedLanguage.success)
     throw new Problem(422, 'audio_language', 'Choose English, Portuguese or Auto');
   if (!(await audioDiagnostics()).available)
     throw new Problem(
@@ -176,7 +190,7 @@ export async function transcribe(bytes: Buffer, language: string): Promise<{ tex
     await writeFile(file, bytes);
     const output = await runProcess(
       process.env.RPG_PYTHON_BIN ?? 'python',
-      [path.join(appRoot, 'python', 'transcribe.py'), file, language],
+      [path.join(appRoot, 'python', 'transcribe.py'), file, parsedLanguage.data],
       '',
       { timeoutMs: 180000, maxOutputBytes: 100000 }
     );

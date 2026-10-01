@@ -6,13 +6,30 @@ import type { Campaign, Archive, Snapshot, Memory } from '../domain/types.js';
 import { Problem, conflict } from '../errors.js';
 import { estimateTokens } from '../domain/context.js';
 import { sourceSections } from '../domain/sourceSections.js';
+import {
+  ARCHIVE_TURN_STATUSES,
+  CHARACTER_MUTABLE_FIELDS,
+  CharacterType,
+  CONTEXT_BUDGET_LIMITS,
+  SourceKind,
+  SourceStatus,
+  TurnStatus,
+} from '../domain/options.js';
+import {
+  MAX_ARCHIVE_TURNS,
+  MAX_ENTITY_NAME_CHARS,
+  MAX_MEMORY_TEXT_CHARS,
+  MAX_SOURCE_PAGES,
+  MAX_SOURCE_TEXT_CHARS,
+} from '../domain/limits.js';
+import { ARCHIVE_FORMAT_ID, ARCHIVE_FORMAT_VERSION } from '../domain/versions.js';
 const uuid = z.uuid();
 const object = z.record(z.string(), z.unknown());
 const character = z
   .object({
     id: uuid,
-    name: z.string().min(1).max(200),
-    type: z.enum(['player', 'npc']),
+    name: z.string().min(1).max(MAX_ENTITY_NAME_CHARS),
+    type: z.enum(CharacterType),
     attributes: object,
     inventory: object,
     description: object,
@@ -23,7 +40,7 @@ const character = z
 const memory = z
   .object({
     id: uuid,
-    text: z.string().max(16000),
+    text: z.string().max(MAX_MEMORY_TEXT_CHARS),
     coveredTurnIds: z.array(uuid),
     valid: z.boolean(),
     createdAt: z.iso.datetime(),
@@ -39,7 +56,7 @@ const settings = z
 const campaign = z
   .object({
     id: uuid,
-    name: z.string().min(1).max(200),
+    name: z.string().min(1).max(MAX_ENTITY_NAME_CHARS),
     description: z.string(),
     instructions: z.string(),
     revision: z.number().int().nonnegative(),
@@ -52,11 +69,11 @@ const campaign = z
           .object({
             id: uuid,
             name: z.string(),
-            kind: z.enum(['text', 'file', 'pdf', 'google-doc']),
-            text: z.string().max(10 * 1024 * 1024),
-            status: z.enum(['draft', 'confirmed']),
+            kind: z.enum(SourceKind),
+            text: z.string().max(MAX_SOURCE_TEXT_CHARS),
+            status: z.enum(SourceStatus),
             version: z.number().int().positive(),
-            pages: z.array(object).max(300),
+            pages: z.array(object).max(MAX_SOURCE_PAGES),
             warnings: z.array(z.string()),
             originalAvailable: z.boolean().optional(),
           })
@@ -79,9 +96,21 @@ const campaign = z
       .optional(),
     budgets: z
       .object({
-        gameplay: z.number().int().min(2000).max(16000),
-        compaction: z.number().int().min(2000).max(8000),
-        memory: z.number().int().min(200).max(2000),
+        gameplay: z
+          .number()
+          .int()
+          .min(CONTEXT_BUDGET_LIMITS.gameplay.min)
+          .max(CONTEXT_BUDGET_LIMITS.gameplay.max),
+        compaction: z
+          .number()
+          .int()
+          .min(CONTEXT_BUDGET_LIMITS.compaction.min)
+          .max(CONTEXT_BUDGET_LIMITS.compaction.max),
+        memory: z
+          .number()
+          .int()
+          .min(CONTEXT_BUDGET_LIMITS.memory.min)
+          .max(CONTEXT_BUDGET_LIMITS.memory.max),
       })
       .strict(),
     state: object,
@@ -106,7 +135,7 @@ const turn = z
     id: uuid,
     campaignId: uuid,
     requestId: uuid,
-    status: z.enum(['completed', 'failed', 'cancelled', 'interrupted']),
+    status: z.enum(ARCHIVE_TURN_STATUSES),
     action: z.string(),
     narrative: z.string().nullable(),
     changes: z.array(z.string()),
@@ -131,7 +160,7 @@ const snapshot = z
         z
           .object({
             characterId: uuid,
-            fields: z.array(z.enum(['name', 'attributes', 'inventory', 'description'])),
+            fields: z.array(z.enum(CHARACTER_MUTABLE_FIELDS)),
           })
           .strict()
       )
@@ -140,10 +169,10 @@ const snapshot = z
   .strict();
 const archiveSchema = z
   .object({
-    format: z.literal('local-rpg'),
-    version: z.literal(1),
+    format: z.literal(ARCHIVE_FORMAT_ID),
+    version: z.literal(ARCHIVE_FORMAT_VERSION),
     campaign,
-    turns: z.array(turn).max(100000),
+    turns: z.array(turn).max(MAX_ARCHIVE_TURNS),
     snapshots: z.array(snapshot),
     memories: z.array(memory),
   })
@@ -166,7 +195,7 @@ export function remapArchive(raw: unknown): Archive {
   const mids = new Set(archive.memories.map((m) => m.id));
   const nonCharacterIds = new Set([old.id, ...sids, ...tids, ...mids]);
   const activeIds = archive.turns
-    .filter((t) => t.status === 'completed' && !t.undone)
+    .filter((t) => t.status === TurnStatus.Completed && !t.undone)
     .map((t) => t.id);
   const requestIds = new Set<string>();
   for (const t of archive.turns) {
@@ -193,7 +222,7 @@ export function remapArchive(raw: unknown): Archive {
         (source) =>
           source.id === pin.sourceId &&
           source.version === pin.version &&
-          source.status === 'confirmed'
+          source.status === SourceStatus.Confirmed
       );
       return !source || !sourceSections(source)[pin.index];
     })
@@ -250,7 +279,7 @@ export function remapArchive(raw: unknown): Archive {
     if (snap.beforeMemory && !mids.has(snap.beforeMemory.id))
       throw new Problem(422, 'archive_invalid', 'Unresolved snapshot memory reference');
   }
-  const completed = archive.turns.filter((t) => t.status === 'completed' && !t.undone);
+  const completed = archive.turns.filter((t) => t.status === TurnStatus.Completed && !t.undone);
   if (completed.some((t) => !archive.snapshots.some((s) => s.turnId === t.id)))
     throw new Problem(422, 'archive_invalid', 'Completed turn is missing its undo snapshot');
   const out = structuredClone(archive);
@@ -354,15 +383,15 @@ export class LibraryService {
     return this.store.transaction(async (client) => {
       const c = await this.store.campaign(id, client, true);
       await this.store.assertIdle(id, client);
-      const turns = await this.store.turns(id, client, 100000);
+      const turns = await this.store.turns(id, client, MAX_ARCHIVE_TURNS);
       const snaps = await client.query('SELECT document FROM snapshots WHERE campaign_id=$1', [id]);
       const memories = await client.query(
         'SELECT document FROM memories WHERE campaign_id=$1 ORDER BY created_at',
         [id]
       );
       return {
-        format: 'local-rpg',
-        version: 1,
+        format: ARCHIVE_FORMAT_ID,
+        version: ARCHIVE_FORMAT_VERSION,
         campaign: c,
         turns,
         snapshots: snaps.rows.map((r) => r.document as Snapshot),

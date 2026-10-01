@@ -2,12 +2,13 @@ import { sourceSections } from './sourceSections.js';
 import type { Campaign, Turn, ContextManifest } from './types.js';
 import { Problem } from '../errors.js';
 import { responseJsonSchema, memoryJsonSchema } from './schemas.js';
+import { CharacterType, SourceStatus, TurnStatus } from './options.js';
 // UTF-8 bytes is a deliberately pessimistic upper estimate: no raw text is assumed to compress.
 export const estimateTokens = (text: string) => Buffer.byteLength(text, 'utf8');
 export const uncovered = (c: Campaign, turns: Turn[]) =>
   turns.filter(
     (t) =>
-      t.status === 'completed' &&
+      t.status === TurnStatus.Completed &&
       !t.undone &&
       !(c.memory?.valid && c.memory.coveredTurnIds.includes(t.id))
   );
@@ -27,11 +28,12 @@ export function buildContext(
   const ceiling = Math.min(c.budgets.gameplay, capacity);
   const history = uncovered(c, turns);
   const pinned = c.sources
-    .filter((s) => s.status === 'confirmed' && c.pinnedSourceIds.includes(s.id))
+    .filter((s) => s.status === SourceStatus.Confirmed && c.pinnedSourceIds.includes(s.id))
     .map((s) => ({ id: s.id, version: s.version, text: s.text }));
   for (const pin of c.pinnedSourceSections ?? []) {
     const source = c.sources.find(
-      (s) => s.id === pin.sourceId && s.version === pin.version && s.status === 'confirmed'
+      (s) =>
+        s.id === pin.sourceId && s.version === pin.version && s.status === SourceStatus.Confirmed
     );
     const section = source && sourceSections(source)[pin.index];
     if (section) pinned.push({ id: source!.id, version: source!.version, text: section.text });
@@ -40,11 +42,11 @@ export function buildContext(
     action,
     state: c.state,
     pinnedFacts: c.pinnedFacts,
-    recent: format(turns.filter((t) => t.status === 'completed' && !t.undone).slice(-3)),
+    recent: format(turns.filter((t) => t.status === TurnStatus.Completed && !t.undone).slice(-3)),
   }).toLowerCase();
   const relevantCharacters = c.characters.filter(
     (char) =>
-      char.type === 'player' ||
+      char.type === CharacterType.Player ||
       sceneTerms.includes(char.id.toLowerCase()) ||
       sceneTerms.includes(char.name.toLowerCase())
   );

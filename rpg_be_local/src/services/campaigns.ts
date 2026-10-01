@@ -7,6 +7,7 @@ import { campaignCreateSchema, campaignPatchSchema, characterInput } from '../do
 import { sourceSections } from '../domain/sourceSections.js';
 import type { Character } from '../domain/types.js';
 import type { Generator } from '../providers/service.js';
+import { SourceStatus } from '../domain/options.js';
 export class CampaignService {
   constructor(
     readonly store: Store,
@@ -27,7 +28,7 @@ export class CampaignService {
     return this.store.edit(id, revision, (c) => {
       if (
         patch.pinnedSourceIds?.some(
-          (id) => !c.sources.some((s) => s.id === id && s.status === 'confirmed')
+          (id) => !c.sources.some((s) => s.id === id && s.status === SourceStatus.Confirmed)
         )
       )
         throw new Problem(
@@ -38,7 +39,10 @@ export class CampaignService {
       if (
         patch.pinnedSourceSections?.some((pin) => {
           const source = c.sources.find(
-            (s) => s.id === pin.sourceId && s.version === pin.version && s.status === 'confirmed'
+            (s) =>
+              s.id === pin.sourceId &&
+              s.version === pin.version &&
+              s.status === SourceStatus.Confirmed
           );
           return !source || !sourceSections(source)[pin.index];
         })

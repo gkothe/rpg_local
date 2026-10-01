@@ -7,6 +7,7 @@ import type { ProviderSettings } from '../domain/types.js';
 import type { Executable } from './discovery.js';
 import type { ModelOption } from './service.js';
 import { runProcess } from './processRunner.js';
+import { MODEL_EFFORTS } from './options.js';
 
 export const CODEX_ISOLATED_VERSION = '0.159.2';
 export const CODEX_INPUT_TOKENS = 8000;
@@ -26,7 +27,6 @@ const metadataSchema = z.object({
     )
     .max(100),
 });
-const safeEfforts = ['low', 'medium', 'high', 'xhigh', 'max'];
 export function codexHome(env: NodeJS.ProcessEnv): string {
   return env.CODEX_HOME ? path.resolve(env.CODEX_HOME) : path.join(os.homedir(), '.codex');
 }
@@ -50,7 +50,7 @@ export function parseCodexCatalog(value: unknown): { models: ModelOption[]; meta
       label: model.display_name,
       efforts: model.supported_reasoning_levels
         .map((level) => level.effort)
-        .filter((effort) => safeEfforts.includes(effort)),
+        .filter((effort) => (MODEL_EFFORTS as readonly string[]).includes(effort)),
       inputTokens: CODEX_INPUT_TOKENS,
     }));
   return {

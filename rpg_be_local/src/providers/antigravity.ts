@@ -6,6 +6,13 @@ import { Problem } from '../errors.js';
 import type { ProviderSettings } from '../domain/types.js';
 import { runProcess } from './processRunner.js';
 import type { ModelOption } from './service.js';
+import { MAX_PROVIDER_INPUT_TOKENS } from './options.js';
+export const ANTIGRAVITY_ISOLATED_VERSION = '1.2.14';
+const ANTIGRAVITY_MODEL_EFFORTS = ['low', 'medium', 'high', 'max'] as const;
+const effortPattern = ANTIGRAVITY_MODEL_EFFORTS.join('|');
+const effortLabelPattern = ANTIGRAVITY_MODEL_EFFORTS.map(
+  (effort) => `${effort[0]!.toUpperCase()}${effort.slice(1)}`
+).join('|');
 
 export function agentDefinition(name: string): string {
   return `---
@@ -31,16 +38,16 @@ export function parseModelCatalog(output: string) {
   for (const line of output.split(/\r?\n/)) {
     const [id, label] = line.split('\t');
     if (!id || !label || !/^[\w.-]{1,120}$/.test(id)) continue;
-    const effort = /-(low|medium|high|max)$/.exec(id)?.[1];
+    const effort = new RegExp(`-(${effortPattern})$`).exec(id)?.[1];
     const modelId = effort ? id.slice(0, -(effort.length + 1)) : id;
     const existing = models.find((model) => model.id === modelId);
     if (existing && effort) existing.efforts.push(effort);
     else
       models.push({
         id: modelId,
-        label: label.replace(/\s*\((Low|Medium|High|Max)\)$/, '').trim(),
+        label: label.replace(new RegExp(`\\s*\\((${effortLabelPattern})\\)$`), '').trim(),
         efforts: effort ? [effort] : [],
-        inputTokens: 16000,
+        inputTokens: MAX_PROVIDER_INPUT_TOKENS,
       });
   }
   if (!models.length)
@@ -50,7 +57,7 @@ export function parseModelCatalog(output: string) {
 
 export function modelSlug(settings: ProviderSettings, efforts: string[]): string {
   const effort = settings.effort ?? efforts[0];
-  if (!effort || /-(low|medium|high|max)$/.test(settings.model)) return settings.model;
+  if (!effort || new RegExp(`-(${effortPattern})$`).test(settings.model)) return settings.model;
   return `${settings.model}-${effort}`;
 }
 
@@ -77,7 +84,7 @@ export async function generateAntigravity(
       'provider_isolation',
       'Antigravity hooks must be absent for isolated gameplay'
     );
-  // 1.2.14 discovers workspace agents but ignores them in an untrusted fresh directory.
+  // The verified runtime discovers global agents in an untrusted fresh directory.
   // A unique global definition is effective without changing trust or subscription settings.
   const name = `local-rpg-${randomUUID()}`;
   const parent = path.join(os.homedir(), '.gemini', 'config', 'agents');

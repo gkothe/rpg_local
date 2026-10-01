@@ -5,6 +5,7 @@ import { draftSchema, draftJsonSchema } from '../domain/schemas.js';
 import { estimateTokens } from '../domain/context.js';
 import { sourceSections } from '../domain/sourceSections.js';
 import type { Source } from '../domain/types.js';
+import { SourceKind, SourceStatus } from '../domain/options.js';
 export class SourceLibrary {
   constructor(readonly store: Store) {}
   async characterDraft(
@@ -14,7 +15,9 @@ export class SourceLibrary {
   ) {
     const c = await this.store.campaign(id);
     if (c.revision !== input.revision) throw conflict('Campaign changed');
-    const source = c.sources.find((s) => s.id === input.sourceId && s.status === 'confirmed');
+    const source = c.sources.find(
+      (s) => s.id === input.sourceId && s.status === SourceStatus.Confirmed
+    );
     if (!source)
       throw new Problem(422, 'source_review', 'Confirm extracted text before AI character parsing');
     const prompt = JSON.stringify({
@@ -45,10 +48,10 @@ export class SourceLibrary {
             id,
             source.id,
             original,
-            source.kind === 'pdf' ? 'application/pdf' : 'text/plain; charset=utf-8',
+            source.kind === SourceKind.Pdf ? 'application/pdf' : 'text/plain; charset=utf-8',
           ]
         );
-      if (source.status === 'confirmed') await this.store.reindex(c, client);
+      if (source.status === SourceStatus.Confirmed) await this.store.reindex(c, client);
     });
   }
   correct(
@@ -61,7 +64,7 @@ export class SourceLibrary {
       if (!source) throw new Problem(404, 'not_found', 'Source not found');
       source.text = input.text;
       if (input.name) source.name = input.name;
-      source.status = input.confirmed ? 'confirmed' : 'draft';
+      source.status = input.confirmed ? SourceStatus.Confirmed : SourceStatus.Draft;
       source.version++;
       c.pinnedSourceSections = (c.pinnedSourceSections ?? []).filter(
         (pin) => pin.sourceId !== sourceId
