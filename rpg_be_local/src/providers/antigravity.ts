@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { Problem } from '../errors.js';
 import type { ProviderSettings } from '../domain/types.js';
-import { runProcess } from './processRunner.js';
+import { runProcess, type RunOptions } from './processRunner.js';
+import type { GameplayMcpEndpoint } from './gameplayMcp.js';
 import type { ModelOption } from './service.js';
 import { MAX_PROVIDER_INPUT_TOKENS } from './options.js';
 export const ANTIGRAVITY_ISOLATED_VERSION = '1.2.14';
@@ -37,6 +38,9 @@ ${prompt ?? 'You are a tabletop RPG narrator. Use only the supplied campaign con
 }
 
 export type AntigravityLaunchOptions = {
+  ownedProfile?: string;
+  privateMcp?: { name: string; endpoint: GameplayMcpEndpoint };
+  protocol?: (agentName: string) => RunOptions['protocol'];
   agentPrompt?: string;
   timeoutMs?: number;
   deadlineMs?: number;
@@ -103,18 +107,29 @@ export async function generateAntigravity(
     );
   // The verified runtime discovers global agents in an untrusted fresh directory.
   // A unique global definition is effective without changing trust or subscription settings.
-  const name = `local-rpg-${randomUUID()}`;
-  const parent = path.join(os.homedir(), '.gemini', 'config', 'agents');
+  const name =
+    options.privateMcp && options.ownedProfile ? 'local-rpg-gameplay' : `local-rpg-${randomUUID()}`;
+  const parent = path.join(options.ownedProfile ?? os.homedir(), '.gemini', 'config', 'agents');
   await mkdir(parent, { recursive: true });
   const directory = path.join(parent, name);
   await mkdir(directory, { mode: 0o700 });
   const filename = path.join(directory, 'agent.md');
   let written = false;
   try {
-    await writeFile(filename, agentDefinition(name, options.agentPrompt), {
-      encoding: 'utf8',
-      flag: 'wx',
-    });
+    const definition = agentDefinition(name, options.agentPrompt);
+    await writeFile(
+      filename,
+      options.privateMcp
+        ? definition.replace(
+            'tools: []',
+            `tools: []\nmcpServers: ${JSON.stringify([{ name: options.privateMcp.name, serverUrl: options.privateMcp.endpoint.url, headers: options.privateMcp.endpoint.headers }])}`
+          )
+        : definition,
+      {
+        encoding: 'utf8',
+        flag: 'wx',
+      }
+    );
     written = true;
     if (!prompt.includes(JSON.stringify(schema)))
       throw new Problem(
@@ -159,6 +174,7 @@ export async function generateAntigravity(
         ),
         maxOutputBytes: options.maxOutputBytes ?? ANTIGRAVITY_PROCESS_OUTPUT_BYTES,
         onOutputBytes: options.onOutputBytes,
+        protocol: options.protocol?.(name),
       }
     );
   } finally {

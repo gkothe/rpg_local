@@ -13,7 +13,7 @@ import {
 } from '../src/providers/codex.js';
 import { DICE_NARRATOR } from '../src/providers/diceProtocol.js';
 test(
-  'native Codex exposes only dice and stops every tool phase before a hidden continuation',
+  'native Codex continues pending owned dice calls in one bounded ephemeral turn',
   { skip: !process.env.RPG_TEST_CODEX_BIN || !process.env.RPG_TEST_CODEX_MODELS },
   async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-codex-dice-native-'));
@@ -50,7 +50,14 @@ test(
               content: [
                 {
                   type: 'output_text',
-                  text: JSON.stringify({ payload_json: JSON.stringify({ received: [4, 5] }) }),
+                  text: JSON.stringify({
+                    payload_json: JSON.stringify({
+                      version: 2,
+                      narrative: 'Recorded faces 4,5',
+                      operations: [],
+                      rollInterpretations: [],
+                    }),
+                  }),
                   annotations: [],
                 },
               ],
@@ -138,7 +145,7 @@ test(
           };
         }
       );
-      assert.deepEqual(result, { received: [4, 5] });
+      assert.equal((result as { narrative: string }).narrative, 'Recorded faces 4,5');
       assert.equal(calls, 2);
       assert.equal(requests.length, 3);
       for (const request of requests) {
@@ -168,6 +175,12 @@ test(
       }
       assert.match(JSON.stringify(requests[1]!.input), /faces/);
       assert.match(JSON.stringify(requests[2]!.input), /rollId/);
+      assert.equal(
+        (requests[2]!.input as { type: string }[]).filter(
+          (item) => item.type === 'function_call_output'
+        ).length,
+        2
+      );
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));

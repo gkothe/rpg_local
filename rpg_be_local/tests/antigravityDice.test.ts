@@ -18,21 +18,30 @@ const request = {
   declaration: 'No modifiers or target',
 };
 const fixture = `
+import { readFileSync } from 'node:fs'; import { homedir } from 'node:os'; import path from 'node:path';
 const args=process.argv.slice(2);
 if(args.includes('changelog')) console.log('1.2.14:');
 else if(args.includes('/hooks')) {
   if(process.env.RPG_TEST_AGY_MODE==='hooks') setTimeout(()=>{},10000);
   else console.log(JSON.stringify({command:{data:{hooks:[]}}}));
 } else {
-  let raw=''; process.stdin.on('data',c=>raw+=c); process.stdin.on('end',()=>{
-    const text=JSON.parse(raw).message.content;
-    const history=JSON.parse(text.split('Application-owned executed tool transcript:').at(-1));
-    const tool={kind:'tool_call',tool:'roll_dice',arguments:${JSON.stringify(request)}};
-    tool.arguments.slot=history.length;
-    const response=history.length<2 ? tool : {kind:'final',response:{version:2,narrative:history.map(r=>r.result.groups[0].faces[0]).join(','),operations:[],rollInterpretations:history.map(r=>({rollId:r.result.rollId,explanation:'Recorded face '+r.result.groups[0].faces[0]}))}};
+  let raw=''; process.stdin.on('data',c=>raw+=c); process.stdin.on('end',async()=>{
+    const history=[];
+    const agent=readFileSync(path.join(homedir(),'.gemini','config','agents',args[args.indexOf('--agent')+1],'agent.md'),'utf8');
+    const server=JSON.parse(/^mcpServers: (.+)$/m.exec(agent)[1])[0];
     console.log(JSON.stringify({event:'init',init:{agent:args[args.indexOf('--agent')+1]}}));
     if(process.env.RPG_TEST_AGY_MODE==='native') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'run_command'}}));
-    console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:{input_tokens:1000},response:JSON.stringify(response)}}));
+    for(let slot=0;slot<2;slot++) {
+      const input={...${JSON.stringify(request)},slot};
+      console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:slot*2,state:'DONE',usage:{input_tokens:10000,output_tokens:50,cache_read_tokens:0}}}));
+      console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:slot*2+1,state:'ACTIVE',tool_name:'call_mcp_tool',tool_info:{parameters:{ServerName:'local_rpg',ToolName:'roll_dice',Arguments:input}}}}));
+      const reply=await fetch(server.serverUrl,{method:'POST',headers:{...server.headers,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'roll_dice',arguments:input}})});
+      const payload=await reply.json(); if(payload.result.isError)throw new Error(JSON.stringify(payload));
+      history.push({result:JSON.parse(payload.result.content[0].text)});
+    }
+    console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:4,state:'DONE',usage:{input_tokens:10000,output_tokens:100}}}));
+    const response={version:2,narrative:history.map(r=>r.result.groups[0].faces[0]).join(','),operations:[],rollInterpretations:history.map(r=>({rollId:r.result.rollId,explanation:'Recorded face '+r.result.groups[0].faces[0]}))};
+    console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:{input_tokens:30000},response:JSON.stringify(response)}}));
   });
 }`;
 
@@ -86,7 +95,7 @@ test('Antigravity rejects intrinsic native tools, error framing and opaque repea
   );
 });
 
-test('Antigravity explicit tool phases preserve canonical faces and stop on a structured final', async () => {
+test('Antigravity continuous native MCP preserves faces with repeated RPC IDs and bounded individual inference windows', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-dice-test-'));
   try {
     const filename = path.join(root, 'cli.mjs');
@@ -140,7 +149,7 @@ test('Antigravity rejects native capabilities before executing application dice'
           throw new Error('Unexpected callback');
         }
       ),
-      /unapproved phase activity/
+      /unapproved native activity/
     );
     assert.equal(calls, 0);
   } finally {
@@ -179,7 +188,7 @@ test('Antigravity cancellation during setup cannot draw dice and oversized phase
         process.env,
         roll
       ),
-      /reserved context/
+      /input allowance/
     );
     assert.equal(calls, 0);
   } finally {

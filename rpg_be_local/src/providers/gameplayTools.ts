@@ -4,11 +4,11 @@ import { RULE_TOOLS, RULE_LIMITS, serializedBytes, type RuleTool } from '../doma
 import { ruleToolSchemas } from '../services/ruleLookup.js';
 import { Problem } from '../errors.js';
 export type GameplayToolResult = DiceResult | Record<string, unknown>;
-export type GameplayToolDispatch = (
+export type GameplayToolDispatch = ((
   name: string,
   input: unknown,
   requestId: string | number
-) => Promise<GameplayToolResult>;
+) => Promise<GameplayToolResult>) & { definitions?: GameplayToolDefinition[] };
 export type GameplayToolDefinition = {
   name: string;
   description: string;
@@ -19,13 +19,62 @@ export type GameplayNativeUsage = {
   phase?: number;
   inputTokens?: number;
   outputTokens?: number;
+  cacheReadTokens?: number;
   contextWindow?: number;
   modelTurns?: number;
 };
 export type BookGameplayAdapter = {
   dispatch: GameplayToolDispatch;
+  definitions?: GameplayToolDefinition[];
   observe?: (usage: GameplayNativeUsage) => void;
 };
+export type GameplayToolRegistration = {
+  name: string;
+  description: string;
+  schema: z.ZodType;
+  purpose: 'default' | 'book';
+  capability: 'dice' | 'rules';
+  handler: (input: unknown, requestId: string | number) => Promise<GameplayToolResult>;
+  invalid?: (input: unknown, requestId: string | number) => Promise<GameplayToolResult>;
+};
+function definition(registration: GameplayToolRegistration): GameplayToolDefinition {
+  return {
+    name: registration.name,
+    description: registration.description,
+    inputSchema: z.toJSONSchema(registration.schema, {
+      unrepresentable: 'any',
+    }) as GameplayToolDefinition['inputSchema'],
+  };
+}
+function ownedRegistrations(
+  roll: GameplayToolRegistration['handler'],
+  read: GameplayTools['options']['read']
+): GameplayToolRegistration[] {
+  return [
+    {
+      name: DICE_TOOL_NAME,
+      description:
+        'Request genuine persisted dice faces. Declare known modifiers/targets before sequential slots.',
+      schema: diceInputSchema,
+      purpose: 'default',
+      capability: 'dice',
+      handler: roll,
+      invalid: roll,
+    },
+    ...RULE_TOOLS.map((name): GameplayToolRegistration => ({
+      name,
+      description:
+        name === 'rules_get'
+          ? 'Read bounded direct original text or derived fields. Only direct text receipts support citations.'
+          : 'Discover current rule paths and derived navigation metadata. Results are not ruling authority.',
+      schema: ruleToolSchemas[name],
+      purpose: 'book',
+      capability: 'rules',
+      handler: (input, id) => read!(name, input, JSON.stringify(id)),
+      invalid: (input, id) => read!(name, input, JSON.stringify(id)),
+    })),
+  ];
+}
 export const VERIFIED_BOOK_LIMITS = {
   ruleCalls: 12,
   diceCalls: 12,
@@ -39,29 +88,9 @@ export type BookGameplayLimits = {
   promptBytes: number;
 };
 export function gameplayToolDefinitions(book: boolean): GameplayToolDefinition[] {
-  const definitions: GameplayToolDefinition[] = [
-    {
-      name: DICE_TOOL_NAME,
-      description:
-        'Request genuine persisted dice faces. Declare known modifiers/targets before sequential slots.',
-      inputSchema: z.toJSONSchema(diceInputSchema, {
-        unrepresentable: 'any',
-      }) as GameplayToolDefinition['inputSchema'],
-    },
-  ];
-  if (book)
-    for (const name of RULE_TOOLS)
-      definitions.push({
-        name,
-        description:
-          name === 'rules_get'
-            ? 'Read bounded direct original text or derived fields. Only direct text receipts support citations.'
-            : 'Discover current rule paths and derived navigation metadata. Results are not ruling authority.',
-        inputSchema: z.toJSONSchema(ruleToolSchemas[name], {
-          unrepresentable: 'any',
-        }) as GameplayToolDefinition['inputSchema'],
-      });
-  return definitions;
+  return ownedRegistrations(async () => ({}), undefined)
+    .filter((tool) => book || tool.purpose === 'default')
+    .map(definition);
 }
 export class GameplayTools {
   readonly definitions: GameplayToolDefinition[];
@@ -72,6 +101,7 @@ export class GameplayTools {
   private diceBytes = 0;
   private readonly receipts = new Map<string, { identity: string; result: GameplayToolResult }>();
   private tail: Promise<void> = Promise.resolve();
+  private readonly registrations: GameplayToolRegistration[];
   constructor(
     readonly options: {
       book: boolean;
@@ -84,11 +114,18 @@ export class GameplayTools {
       assertActive: () => Promise<void>;
       signal?: AbortSignal;
       limits?: BookGameplayLimits;
+      registrations?: GameplayToolRegistration[];
     }
   ) {
     if (options.book && !options.read)
       throw new Error('Book gameplay requires persisted rule reads');
-    this.definitions = gameplayToolDefinitions(options.book);
+    this.registrations = (
+      options.registrations ?? ownedRegistrations(options.roll, options.read)
+    ).filter((tool) => options.book || tool.purpose === 'default');
+    if (new Set(this.registrations.map((tool) => tool.name)).size !== this.registrations.length)
+      throw new Error('Duplicate gameplay tool registration');
+    this.definitions = this.registrations.map(definition);
+    this.call.definitions = this.definitions;
   }
   call: GameplayToolDispatch = (name, input, requestId) => {
     const work = this.tail.then(() => this.dispatch(name, input, requestId));
@@ -126,7 +163,8 @@ export class GameplayTools {
     }
     if (this.calls >= (this.options.limits?.combinedCalls ?? RULE_LIMITS.combinedCalls))
       throw new Problem(422, 'gameplay_calls_exhausted', 'Combined gameplay call limit exhausted');
-    const rule = name !== DICE_TOOL_NAME;
+    const registration = this.registrations.find((tool) => tool.name === name)!;
+    const rule = registration.capability === 'rules';
     if (
       rule
         ? this.ruleCalls >= (this.options.limits?.ruleCalls ?? RULE_LIMITS.calls)
@@ -136,9 +174,20 @@ export class GameplayTools {
     this.calls++;
     if (rule) this.ruleCalls++;
     else this.diceCalls++;
-    const result = rule
-      ? await this.options.read!(name as RuleTool, input, key)
-      : await this.options.roll(input, requestId);
+    // The canonical registry owns runtime validation; transport adapters only translate.
+    // Existing handlers retain their persisted invalid-request/error accounting.
+    const parsed = registration.schema.safeParse(input);
+    const result = parsed.success
+      ? await registration.handler(parsed.data, requestId)
+      : registration.invalid
+        ? await registration.invalid(input, requestId)
+        : (() => {
+            throw new Problem(
+              422,
+              'gameplay_arguments_invalid',
+              'Tool arguments do not match its registered schema'
+            );
+          })();
     const bytes = serializedBytes({ tool: name, arguments: input, result });
     if (
       rule

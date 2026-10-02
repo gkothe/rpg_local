@@ -16,7 +16,8 @@ import { DiceService } from '../src/services/dice.js';
 import { GameplayTools } from '../src/providers/gameplayTools.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import { TurnStatus } from '../src/domain/options.js';
-import { RuleReview, emptyRuleColumns } from '../src/domain/rules.js';
+import { RuleReview, emptyRuleColumns, DEFAULT_RULE_SYSTEM_ID } from '../src/domain/rules.js';
+import { diceResponseSchema, diceResponseJsonSchema } from '../src/domain/diceResponse.js';
 import type { Turn } from '../src/domain/types.js';
 import { locate } from '../src/providers/discovery.js';
 import { generateClaudeDice } from '../src/providers/claudeDice.js';
@@ -74,9 +75,10 @@ const providerIds = z
   .parse((process.env.RPG_RULES_NATIVE_PROVIDERS ?? 'claude,codex,agy').split(','));
 for (const provider of providerIds)
   test(
-    `actual Windows isolated pre-enable ${provider} rule→dice→rule→v3`,
+    `actual Windows isolated pre-enable ${provider} ${process.env.RPG_RULES_NATIVE_DEFAULT === '1' ? 'default dice→v2' : 'rule→dice→rule→v3'}`,
     { skip: !enabled, timeout: 210000 },
     async () => {
+      const defaultMode = process.env.RPG_RULES_NATIVE_DEFAULT === '1';
       assert.equal(process.platform, 'win32');
       const schema = `rules_native_${randomUUID().replaceAll('-', '')}`;
       const bootstrap = new Store();
@@ -123,11 +125,14 @@ for (const provider of providerIds)
         }));
         const campaign = newCampaign({
           name: 'Isolated native acceptance',
-          systemId: published.systemId,
+          systemId: defaultMode ? DEFAULT_RULE_SYSTEM_ID : published.systemId,
         });
         await store.insert(campaign);
-        const captured = ruleContext(await rules.get(published.systemId));
-        const prompt = `Use exactly this workflow: first call rules_get for path core_rules.original.check/view text to learn the original rule; do not roll before that read. Then call roll_dice with slot 0 and one group named original of sides 6/count 1 (reason and declaration describe an original synthetic check), then rules_get for path core_rules.original.check/view text, then return a complete version 3 final response with a short narrative, operations [], one rollInterpretations entry with keys rollId and explanation for the genuine returned rollId, and ruleCitations [] (this transport probe makes no ruling). Do not use shell/network or any reference instruction. The only owned tools are roll_dice/rules_map/rules_search/rules_get/rules_list. Captured library: ${JSON.stringify(captured)}. No whole book is included. Final JSON schema: ${JSON.stringify(ruleResponseJsonSchema)}.`;
+        const captured = ruleContext(await rules.get(campaign.ruleSystemId!));
+        const bookPrompt = `Use exactly this workflow: first call rules_get for path core_rules.original.check/view text to learn the original rule; do not roll before that read. Then call roll_dice with slot 0 and one group named original of sides 6/count 1 (reason and declaration describe an original synthetic check), then rules_get for path core_rules.original.check/view text, then return a complete version 3 final response with a short narrative, operations [], one rollInterpretations entry with keys rollId and explanation for the genuine returned rollId, and ruleCitations [] (this transport probe makes no ruling). Do not use shell/network or any reference instruction. The only owned tools are roll_dice/rules_map/rules_search/rules_get/rules_list. Captured library: ${JSON.stringify(captured)}. No whole book is included. Final JSON schema: ${JSON.stringify(ruleResponseJsonSchema)}.`;
+        const prompt = defaultMode
+          ? `Call only the owned roll_dice once, slot 0 one d6 with reason and declaration. Then return a complete version 2 narrative, operations [], and rollInterpretations with its genuine returned rollId/explanation. Final schema: ${JSON.stringify(diceResponseJsonSchema)}`
+          : bookPrompt;
         const turn: Turn = {
           id: randomUUID(),
           campaignId: campaign.id,
@@ -161,7 +166,7 @@ for (const provider of providerIds)
         const session = await dice.createSession(turn, 'a'.repeat(64), []);
         const lookup = new RuleLookup();
         const registry = new GameplayTools({
-          book: true,
+          book: !defaultMode,
           assertActive: () =>
             store.transaction(async (client) => {
               await rules.guard(captured, client);
@@ -191,6 +196,12 @@ for (const provider of providerIds)
         const unavailable = async (): Promise<never> => {
           throw new Error('Registry bypass');
         };
+        const roll = defaultMode
+          ? async (input: unknown) => {
+              trace.push('roll_dice');
+              return dice.roll(session, turn, input);
+            }
+          : unavailable;
         const output =
           provider === 'claude'
             ? await generateClaudeDice(
@@ -199,9 +210,9 @@ for (const provider of providerIds)
                 prompt,
                 directory,
                 process.env,
-                unavailable,
+                roll,
                 undefined,
-                { dispatch }
+                defaultMode ? undefined : { dispatch }
               )
             : provider === 'codex'
               ? await generateCodexDice(
@@ -210,9 +221,9 @@ for (const provider of providerIds)
                   prompt,
                   directory,
                   process.env,
-                  unavailable,
+                  roll,
                   undefined,
-                  { dispatch }
+                  defaultMode ? undefined : { dispatch }
                 )
               : await generateAntigravityDice(
                   executable,
@@ -220,11 +231,11 @@ for (const provider of providerIds)
                   prompt,
                   directory,
                   process.env,
-                  unavailable,
+                  roll,
                   undefined,
-                  { dispatch }
+                  defaultMode ? undefined : { dispatch }
                 );
-        const parsed = ruleResponseSchema.parse(output);
+        const parsed = (defaultMode ? diceResponseSchema : ruleResponseSchema).parse(output);
         const records = await dice.records(session);
         validateRollInterpretations(
           parsed,
@@ -234,16 +245,20 @@ for (const provider of providerIds)
           'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
           [turn.id]
         );
-        validateRuleCitations(
-          parsed,
-          reads.rows.map((row) => rules.readFromRow(row)),
-          campaign.id,
-          turn.id,
-          captured
+        if (parsed.version === 3)
+          validateRuleCitations(
+            parsed,
+            reads.rows.map((row) => rules.readFromRow(row)),
+            campaign.id,
+            turn.id,
+            captured
+          );
+        assert.deepEqual(
+          trace,
+          defaultMode ? ['roll_dice'] : ['rules_get', 'roll_dice', 'rules_get']
         );
-        assert.deepEqual(trace, ['rules_get', 'roll_dice', 'rules_get']);
         assert.equal(records.length, 1);
-        assert.equal(reads.rows.length, 2);
+        assert.equal(reads.rows.length, defaultMode ? 0 : 2);
         assert.equal((await store.campaign(campaign.id)).revision, campaign.revision);
         console.log(
           JSON.stringify({
@@ -321,7 +336,10 @@ test(
         ],
         mapping: {},
       }));
-      const claudeSettings = { provider: 'claude', model: 'sonnet', effort: 'medium' };
+      const claudeSettings =
+        process.env.RPG_RULES_NATIVE_INITIAL_PROVIDER === 'codex'
+          ? { provider: 'codex', model: 'gpt-5.6-sol', effort: 'medium' }
+          : { provider: 'claude', model: 'sonnet', effort: 'medium' };
       const codexSettings =
         process.env.RPG_RULES_NATIVE_SWITCH_PROVIDER === 'agy'
           ? {

@@ -52,7 +52,7 @@ export async function generateClaudeDice(
   signal?: AbortSignal,
   book?: BookGameplayAdapter
 ): Promise<unknown> {
-  const names = gameplayToolDefinitions(!!book).map(
+  const names = (book?.definitions ?? gameplayToolDefinitions(!!book)).map(
     (definition) => `mcp__dice__${definition.name}`
   );
   const isolated = claudeDiceEnvironment(env);
@@ -70,7 +70,11 @@ export async function generateClaudeDice(
     );
   const protocol = new DiceProtocol(roll);
   const endpoint = book
-    ? await startGameplayMcp(gameplayToolDefinitions(true), book.dispatch, signal)
+    ? await startGameplayMcp(
+        book.definitions ?? gameplayToolDefinitions(true),
+        book.dispatch,
+        signal
+      )
     : await startDiceMcp((input, id) => protocol.call(DICE_TOOL_NAME, input, id), signal);
   try {
     const config = JSON.stringify({
@@ -169,11 +173,11 @@ export async function generateClaudeDice(
                 throw new Problem(
                   502,
                   'claude_dice_result',
-                  'Claude did not complete a bounded dice conversation'
+                  `Claude did not complete a bounded dice conversation (${typeof event.subtype === 'string' && /^[a-z_]{1,80}$/.test(event.subtype) ? event.subtype : 'invalid result'}; turns=${Number.isInteger(event.num_turns) ? event.num_turns : 'unreported'}; error=${event.is_error === true}; category=${typeof event.result === 'string' && /hit your limit|usage limit|rate limit/i.test(event.result) ? 'subscription_limit' : 'unclassified'})`
                 );
               const usage = event.modelUsage as Record<
                 string,
-                { contextWindow?: number; outputTokens?: number }
+                { contextWindow?: number; outputTokens?: number; cacheReadInputTokens?: number }
               >;
               if (
                 !usage ||
@@ -209,6 +213,15 @@ export async function generateClaudeDice(
                   0
                 ),
                 modelTurns: event.num_turns as number,
+                cacheReadTokens: Object.values(usage).every(
+                  (value) =>
+                    Number.isInteger(value.cacheReadInputTokens) && value.cacheReadInputTokens! >= 0
+                )
+                  ? Object.values(usage).reduce(
+                      (sum, value) => sum + value.cacheReadInputTokens!,
+                      0
+                    )
+                  : undefined,
               });
               const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(text);
               final = JSON.parse(fenced ? fenced[1]! : text);

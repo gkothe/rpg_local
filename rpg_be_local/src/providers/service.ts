@@ -299,15 +299,22 @@ export class ProviderService implements Generator {
             model.id === 'sonnet') ||
             (id === PROVIDER_ID.Codex &&
               version === CODEX_ISOLATED_VERSION &&
-              model.id === 'gpt-5.6-sol'));
+              model.id === 'gpt-5.6-sol') ||
+            (id === PROVIDER_ID.Antigravity &&
+              version === ANTIGRAVITY_ISOLATED_VERSION &&
+              model.id === 'gemini-3.8-flash'));
         return {
           ...model,
           rules: {
             supported: rulesSupported,
             reason: rulesSupported
               ? null
-              : 'Book gameplay is verified only for Claude 2.1.232 sonnet medium and Codex 0.159.2 gpt-5.6-sol medium on Windows',
-            efforts: rulesSupported ? ['medium'] : [],
+              : 'Book gameplay requires a verified Windows CLI/model: Claude 2.1.232 sonnet, Codex 0.159.2 gpt-5.6-sol or Antigravity 1.2.14 gemini-3.8-flash',
+            efforts: rulesSupported
+              ? id === PROVIDER_ID.Antigravity
+                ? ['low', 'medium']
+                : ['medium']
+              : [],
             ...(rulesSupported ? { limits: VERIFIED_BOOK_LIMITS } : {}),
           },
           dice: {
@@ -498,7 +505,7 @@ export class ProviderService implements Generator {
       throw new Problem(
         503,
         'rules_effort_unavailable',
-        'Book gameplay is verified only with medium effort for this model'
+        'Select a verified book gameplay effort for this model'
       );
     await this.gameplayCapacity(settings, ceiling);
     // Schema and narrator are already included in book-mode context. Native
@@ -531,7 +538,7 @@ export class ProviderService implements Generator {
       throw new Problem(503, 'rules_dispatch', 'Use the owned gameplay registry');
     };
     try {
-      const book = { dispatch: tools };
+      const book = { dispatch: tools, definitions: tools.definitions };
       if (settings.provider === PROVIDER_ID.Codex)
         return await generateCodexDice(
           executable,

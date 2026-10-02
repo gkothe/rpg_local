@@ -131,7 +131,7 @@ async function cleanDiceHome(home: string, isolatedHome: string): Promise<void> 
     throw new Problem(500, 'codex_cleanup', 'Isolated CLI cleanup path validation failed');
   await rm(isolatedHome, { recursive: true, force: true });
 }
-/** Each native phase ends before tool reply, so hidden model history cannot grow. */
+/** One ephemeral native thread per logical turn, with bounded owned tool continuations. */
 export async function runCodexDicePhases(
   executable: Executable,
   settings: ProviderSettings,
@@ -148,17 +148,19 @@ export async function runCodexDicePhases(
     args.push('-c', `${key}=${JSON.stringify(value)}`);
   const protocol = new DiceProtocol(roll);
   const transcript: { tool?: string; arguments: unknown; result: GameplayToolResult }[] = [];
-  const definitions = gameplayToolDefinitions(!!book);
+  const definitions = book?.definitions ?? gameplayToolDefinitions(!!book);
   const deadline = Date.now() + DICE_LIMITS.attemptMs;
   let outputBytes = 0;
-  for (let phase = 0; phase < DICE_CLI_LIMITS.modelTurns; phase++) {
+  {
+    let phase = 0;
+    let outputTokens = 0;
     const phasePrompt =
       prompt +
       '\nApplication-owned gameplay transcript (already executed; do not repeat these calls): ' +
       JSON.stringify(transcript) +
       (book
-        ? '\nRequest at most ONE owned gameplay tool in this phase. Otherwise return the final version 3 response acknowledging every roll ID and rule citation.'
-        : '\nRequest at most ONE next roll in this phase. Otherwise return the final schema response acknowledging every roll ID. No other tools or external context.');
+        ? '\nUse the owned gameplay tools sequentially as needed. Return the final version 3 response acknowledging every roll ID and rule citation.'
+        : '\nUse the owned roll tool sequentially as needed. Return the final schema response acknowledging every roll ID. No other tools or external context.');
     if (
       Buffer.byteLength(phasePrompt, 'utf8') > DICE_CLI_LIMITS.codexPhaseInputBytes ||
       Date.now() >= deadline ||
@@ -172,7 +174,7 @@ export async function runCodexDicePhases(
     let threadId = '';
     let turnId = '';
     let completed = false;
-    let called = false;
+    const calls = new Map<string, string>();
     let final: unknown;
     await runProcess(executable.binary, args, '', {
       cwd,
@@ -235,7 +237,6 @@ export async function runCodexDicePhases(
               book ? toolCallSchema.extend({ tool: z.string() }) : toolCallSchema
             ).parse(message.params);
             if (
-              called ||
               !threadId ||
               call.namespace ||
               call.threadId !== threadId ||
@@ -248,23 +249,38 @@ export async function runCodexDicePhases(
                 'dice_isolation',
                 'Codex requested an unapproved or concurrent dice capability'
               );
-            called = true;
+            const identity = JSON.stringify({ tool: call.tool, arguments: call.arguments });
+            if (calls.has(call.callId) && calls.get(call.callId) !== identity)
+              throw new Problem(409, 'gameplay_transport_conflict', 'Native tool identity changed');
+            if (!calls.has(call.callId) && calls.size >= DICE_LIMITS.requestsPerAttempt)
+              throw new Problem(422, 'dice_limit', 'Codex exhausted its owned tool call budget');
+            calls.set(call.callId, identity);
             const result = await (book ? book.dispatch : protocol.call.bind(protocol))(
               call.tool,
               call.arguments,
-              `${phase}:${call.callId}`
+              call.callId
             );
             transcript.push({
               ...(book ? { tool: call.tool } : {}),
               arguments: call.arguments,
               result,
             });
-            // Never reply to the pending dynamic call: that would allow a hidden continuation.
-            // The next fresh phase receives this exact application-owned result instead.
+            if (
+              Buffer.byteLength(JSON.stringify(transcript), 'utf8') >
+              DICE_LIMITS.transcriptBytes + (book ? RULE_LIMITS.transcriptBytes : 0)
+            )
+              throw new Problem(
+                422,
+                'dice_limit',
+                'Codex tool transcript exceeded its byte budget'
+              );
+            // Installed app-server DynamicToolCallResponse schema: text content + success.
             send({
-              id: CODEX_DICE_REQUEST_ID.Interrupt,
-              method: CODEX_DICE_RPC.TurnInterrupt,
-              params: { threadId: call.threadId, turnId: call.turnId },
+              id: message.id,
+              result: {
+                contentItems: [{ type: 'inputText', text: JSON.stringify(result) }],
+                success: true,
+              },
             });
           } else if (message.id !== undefined && message.method) {
             throw new Problem(502, 'dice_isolation', 'Codex requested an unapproved capability');
@@ -276,13 +292,16 @@ export async function runCodexDicePhases(
                   last: z.object({
                     inputTokens: z.number().int().nonnegative(),
                     outputTokens: z.number().int().nonnegative().optional(),
+                    cachedInputTokens: z.number().int().nonnegative().optional(),
                   }),
                 }),
               })
               .parse(message.params);
             if (
               usage.threadId !== threadId ||
-              usage.tokenUsage.last.inputTokens > DICE_CLI_LIMITS.contextTokens
+              usage.tokenUsage.last.inputTokens > DICE_CLI_LIMITS.contextTokens ||
+              (usage.tokenUsage.last.outputTokens ?? 0) > DICE_CLI_LIMITS.modelOutputTokens ||
+              phase >= DICE_CLI_LIMITS.modelTurns
             )
               throw new Problem(
                 422,
@@ -294,7 +313,16 @@ export async function runCodexDicePhases(
               phase,
               inputTokens: usage.tokenUsage.last.inputTokens,
               outputTokens: usage.tokenUsage.last.outputTokens,
+              cacheReadTokens: usage.tokenUsage.last.cachedInputTokens,
             });
+            outputTokens += usage.tokenUsage.last.outputTokens ?? 0;
+            if (outputTokens > DICE_CLI_LIMITS.modelTurns * DICE_CLI_LIMITS.modelOutputTokens)
+              throw new Problem(
+                422,
+                'context_overflow',
+                'Codex exceeded its turn output token budget'
+              );
+            phase++;
           } else if (message.method === CODEX_DICE_RPC.TurnCompleted) {
             const result = z
               .object({
@@ -310,8 +338,7 @@ export async function runCodexDicePhases(
               completed ||
               result.threadId !== threadId ||
               (turnId && result.turn.id !== turnId) ||
-              result.turn.status !==
-                (called ? CODEX_DICE_STATUS.Interrupted : CODEX_DICE_STATUS.Completed)
+              result.turn.status !== CODEX_DICE_STATUS.Completed
             )
               throw new Problem(502, 'codex_protocol', 'Codex returned an unexpected dice phase');
             if (
@@ -326,7 +353,7 @@ export async function runCodexDicePhases(
                 'dice_isolation',
                 'Codex completed with an unapproved capability'
               );
-            if (!called) {
+            {
               const messages = result.turn.items.filter(
                 (item) => item.type === CODEX_DICE_ITEM_TYPES[0]
               );
@@ -357,20 +384,6 @@ export async function runCodexDicePhases(
     });
     if (!completed)
       throw new Problem(502, 'codex_protocol', 'Codex closed before completing its dice phase');
-    if (!called) return (book ? ruleResponseSchema : diceResponseSchema).parse(final);
-    if (
-      Buffer.byteLength(JSON.stringify(transcript), 'utf8') >
-      DICE_LIMITS.transcriptBytes + (book ? RULE_LIMITS.transcriptBytes : 0)
-    )
-      throw new Problem(
-        422,
-        'dice_limit',
-        'Codex dice transcript exceeded its reserved byte allowance'
-      );
+    return (book ? ruleResponseSchema : diceResponseSchema).parse(final);
   }
-  throw new Problem(
-    422,
-    'dice_limit',
-    'Codex exhausted its bounded dice phases before a final response'
-  );
 }

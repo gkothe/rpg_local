@@ -3,8 +3,8 @@ import { createServer } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { DICE_LIMITS, DICE_TOOL_NAME } from '../domain/dice.js';
-import { RULE_TOOLS, RULE_LIMITS } from '../domain/rules.js';
+import { DICE_LIMITS } from '../domain/dice.js';
+import { RULE_LIMITS } from '../domain/rules.js';
 import type { GameplayToolDefinition, GameplayToolDispatch } from './gameplayTools.js';
 import { Problem } from '../errors.js';
 
@@ -23,10 +23,11 @@ export async function startGameplayMcp(
   signal?: AbortSignal
 ): Promise<GameplayMcpEndpoint> {
   const book = definitions.length > 1;
-  const allowed = book ? [DICE_TOOL_NAME, ...RULE_TOOLS] : [DICE_TOOL_NAME];
+  const allowed = definitions.map((definition) => definition.name);
   if (
-    definitions.length !== allowed.length ||
-    definitions.some((definition, index) => definition.name !== allowed[index])
+    !allowed.length ||
+    new Set(allowed).size !== allowed.length ||
+    allowed.some((name) => !/^[a-z][a-z0-9_]{0,63}$/.test(name))
   )
     throw new Error('MCP requires the exact owned gameplay tool definitions');
   const authorization = `Bearer ${randomBytes(CAPABILITY_BYTES).toString('hex')}`;
@@ -96,9 +97,7 @@ export async function startGameplayMcp(
             throw new Problem(422, 'gameplay_tool', 'Only owned gameplay tools are available');
           if (
             Buffer.byteLength(JSON.stringify(request.params.arguments ?? {}), 'utf8') >
-            (request.params.name === DICE_TOOL_NAME
-              ? DICE_LIMITS.inputBytes
-              : RULE_LIMITS.requestBytes)
+            RULE_LIMITS.requestBytes
           )
             throw new Problem(422, 'dice_limit', 'Dice input exceeds byte limit');
           return dispatch(request.params.name, request.params.arguments, rpcId);

@@ -1,6 +1,24 @@
 # Rules-library Windows capability evidence
 
-Date: 2026-10-01. Original synthetic fixtures only; separate PostgreSQL cluster on loopback port 55439, disposable schemas, native subscription CLIs. Private extraction/books were not opened or modified.
+Updated: 2026-10-02. Native scenarios use original synthetic fixtures only, a separate PostgreSQL cluster on loopback port55439 and disposable schemas. Authorized private extraction inspection was read-only and is documented separately in [handoff evidence](rules-library-handoff.md); private prose is absent from public fixtures/reports.
+
+## Current enabled native transports
+
+Claude2.1.232/sonnet/medium retains its prior successful private MCP/direct/full campaign evidence. Fresh Claude validation is an explicit user-deferred TODO until the weekly subscription allowance is available. Codex0.159.2/gpt-5.6-sol/medium now replies to pending native calls within one bounded ephemeral turn. Antigravity1.2.14/gemini-3.8-flash/low or medium now uses an authenticated owned private MCP/profile and one bounded native loop. These exact Windows book gates are enabled; other combinations remain unverified. Default mode keeps v2 and dice-only definitions; book mode uses v3/five tools with12 rule/12 dice/24 combined calls and8000-byte initial prompt.
+
+Actual current evidence: Codex direct28.272s, Antigravity low direct17.050/22.699s, Claude→Antigravity low full50.629s, Codex→Antigravity low full40.119s, Antigravity medium direct26.792s and Codex→Antigravity medium full46.728/45.528s. Full runs retain outdated failed audit, reject retry, switch provider and complete a latest-head original citation. Current default native persisted dice→v2 checks passed Antigravity14.325s and Codex10.200s. The actual native Codex anonymous Responses fixture independently proved two replies/one ephemeral turn, without claiming live model inference.
+
+Codex reported actual cachedInputTokens3200/3456/3584 in accepted continuations; some runs reported zero on particular continuations. Antigravity reported zero cache reads. Claude telemetry is forwarded where available but fresh measurement is deferred. Cross-action warm process pooling is intentionally unimplemented; each action reconstructs authoritative state. No provider price/subscription credit-saving inference is made. See [native MCP/cache/extension verification](rules-library-native-mcp.md) for usage windows, protocol evidence and limitations.
+
+The actual package compatibility check passed11 files/598 nodes/4599 nonempty body lines with unchanged original hashes. T001 still requires the extraction owner's acceptance of manifest metadata and canonical LF/UTF-16 direct-text offsets for future enrichment. This is a precise confirmation dependency, not absence of investigated artifacts.
+
+Current normal root checks passed backend110/122 with12 explicit opt-in skips and frontend35 tests; type/lint/format/build passed. Chrome10/15 passed with5 unrelated explicit opt-in skips, including the real original rules import/reference/default recovery scenario on a fresh isolated browser database. Maximum20MiB benchmark p95 warm48.629ms/cold161.672ms and guarded repeated cached query0.749ms; the repeat workload cycles four primed queries and is distinct from uncached unique-query samples.
+
+Reproduce current full Codex→Antigravity validation from the backend directory using NODE_ENV=test and the separate RPG_TEST_DATABASE_URL: RPG_RULES_NATIVE=1, RPG_RULES_NATIVE_INTEGRATION=1, RPG_RULES_NATIVE_INITIAL_PROVIDER=codex, RPG_RULES_NATIVE_SWITCH_PROVIDER=agy, RPG_RULES_NATIVE_EFFORT=medium, then `node --import tsx --test --test-name-pattern="complete campaign" tests/rules.native.test.ts`. Direct probes use RPG_RULES_NATIVE_PROVIDERS=codex,agy. RPG_RULES_NATIVE_DEFAULT=1 selects the explicit default dice/v2 scenario. No application override bypasses native guards. Do not run fresh Claude checks while the user-requested weekly-quota TODO is pending.
+
+## Historical pre-MCP measurements
+
+The following 2026-10-01/early2026-10-02 results describe the previous JSON/interrupted-phase implementation. Disabled status statements refer to that milestone and are superseded by the actual current MCP evidence above. Failures remain recorded; no rejected run is counted as a success.
 
 | Path        | Installed version / model / effort         | Actual result                                                                                                                                                                                             |
 | ----------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

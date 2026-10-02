@@ -26,6 +26,9 @@ import {
 
 const contentFields = ['instructions', 'sources', ...RULE_COLUMNS, 'mapping'] as const;
 type RuleRow = Record<string, unknown>;
+const snapshotCaches = new WeakMap<Store, Map<string, { system: RuleSystem; bytes: number }>>();
+const SNAPSHOT_CACHE_BYTES = 64 * 1024 * 1024;
+const SNAPSHOT_CACHE_ENTRIES = 4;
 export function ruleSystemFromRow(row: RuleRow): RuleSystem {
   return {
     ...Object.fromEntries(contentFields.map((key) => [key, row[key]])),
@@ -132,13 +135,50 @@ export class RuleStore {
     return ruleContext(ruleSystemFromRow(result.rows[0]));
   }
   async guard(expected: RuleContext, client: PoolClient): Promise<RuleSystem> {
-    const system = await this.get(expected.systemId, client, 'share');
+    // Always lock and verify the authoritative head before serving any cached content.
+    const head = await client.query(
+      'SELECT revision,content_hash,kind FROM rule_systems WHERE id=$1 FOR SHARE',
+      [expected.systemId]
+    );
+    const row = head.rows[0];
     if (
-      system.revision !== expected.revision ||
-      system.contentHash !== expected.contentHash ||
-      system.kind !== expected.kind
+      !row ||
+      row.revision !== expected.revision ||
+      row.content_hash !== expected.contentHash ||
+      row.kind !== expected.kind
     )
       throw new Problem(409, 'rules_context_changed', 'Rule system changed during this attempt');
+    let cache = snapshotCaches.get(this.store);
+    if (!cache) {
+      cache = new Map();
+      snapshotCaches.set(this.store, cache);
+    }
+    const key = JSON.stringify([
+      expected.systemId,
+      expected.revision,
+      expected.contentHash,
+      expected.kind,
+    ]);
+    const cached = cache.get(key);
+    if (cached) {
+      cache.delete(key);
+      cache.set(key, cached);
+      return cached.system;
+    }
+    const system = await this.get(expected.systemId, client, 'share');
+    const bytes = serializedBytes(system);
+    for (const [oldKey, entry] of cache)
+      if (entry.system.systemId === system.systemId) cache.delete(oldKey);
+    if (bytes <= SNAPSHOT_CACHE_BYTES) {
+      while (
+        cache.size >= SNAPSHOT_CACHE_ENTRIES ||
+        [...cache.values()].reduce((sum, entry) => sum + entry.bytes, 0) + bytes >
+          SNAPSHOT_CACHE_BYTES
+      )
+        cache.delete(cache.keys().next().value!);
+      freezeSnapshot(system);
+      cache.set(key, { system, bytes });
+    }
     return system;
   }
   async publish(
@@ -375,4 +415,9 @@ export class RuleStore {
       },
     };
   }
+}
+function freezeSnapshot(value: unknown): void {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return;
+  for (const child of Object.values(value)) freezeSnapshot(child);
+  Object.freeze(value);
 }

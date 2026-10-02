@@ -66,6 +66,11 @@ type Position = {
   locator: boolean;
 };
 const MAX_LOOKUP_TOKENS = 4096;
+type SearchHit = { path: string; node: RuleNode; rank: number; match: number };
+// Only immutable, bounded Store snapshots enter this cache. Cursor/receipt creation stays fresh.
+const searchCaches = new WeakMap<RuleSystem, Map<string, SearchHit[]>>();
+const MAX_SEARCH_CACHE_QUERIES = 8;
+const MAX_SEARCH_CACHE_HITS = 4096;
 function digest(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
@@ -292,41 +297,58 @@ export class RuleLookup {
       const args = ruleToolSchemas.rules_search.parse(input);
       cap = RULE_LIMITS.searchHits;
       const terms = args.query.toLowerCase().split(/\s+/);
-      const hits = nodes(system)
-        .filter(
-          ({ path, node }) =>
-            (!args.columns ||
-              args.columns.includes(path.split('.')[0] as (typeof RULE_COLUMNS)[number])) &&
-            (!args.source || node.source === args.source)
-        )
-        .map(({ path, node }) => {
-          const names = [node.name, ...node.aliases].map((name) => name.toLowerCase());
-          const direct = node.text.toLowerCase();
-          const summary = (node.summary ?? '').toLowerCase();
-          const rank = names.includes(args.query.toLowerCase())
-            ? 0
-            : terms.every((term) => direct.includes(term))
-              ? 1
-              : terms.every((term) => summary.includes(term))
-                ? 2
-                : -1;
-          const foldedMatch = direct.indexOf(terms[0]!);
-          let foldedOffset = 0;
-          let originalOffset = 0;
-          for (const character of node.text) {
-            if (foldedOffset + character.toLowerCase().length > foldedMatch) break;
-            foldedOffset += character.toLowerCase().length;
-            originalOffset += character.length;
-          }
-          return { path, node, rank, match: foldedMatch < 0 ? 0 : originalOffset };
-        })
-        .filter((hit) => hit.rank >= 0)
-        .sort(
-          (a, b) =>
-            a.rank - b.rank ||
-            a.node.source.localeCompare(b.node.source) ||
-            a.path.localeCompare(b.path)
-        );
+      let cache = Object.isFrozen(system) ? searchCaches.get(system) : undefined;
+      if (Object.isFrozen(system) && !cache) {
+        cache = new Map();
+        searchCaches.set(system, cache);
+      }
+      let hits = cache?.get(argumentHash);
+      if (!hits) {
+        hits = nodes(system)
+          .filter(
+            ({ path, node }) =>
+              (!args.columns ||
+                args.columns.includes(path.split('.')[0] as (typeof RULE_COLUMNS)[number])) &&
+              (!args.source || node.source === args.source)
+          )
+          .map(({ path, node }) => {
+            const names = [node.name, ...node.aliases].map((name) => name.toLowerCase());
+            const direct = node.text.toLowerCase();
+            const summary = (node.summary ?? '').toLowerCase();
+            const rank = names.includes(args.query.toLowerCase())
+              ? 0
+              : terms.every((term) => direct.includes(term))
+                ? 1
+                : terms.every((term) => summary.includes(term))
+                  ? 2
+                  : -1;
+            const foldedMatch = direct.indexOf(terms[0]!);
+            let foldedOffset = 0;
+            let originalOffset = 0;
+            for (const character of node.text) {
+              if (foldedOffset + character.toLowerCase().length > foldedMatch) break;
+              foldedOffset += character.toLowerCase().length;
+              originalOffset += character.length;
+            }
+            return { path, node, rank, match: foldedMatch < 0 ? 0 : originalOffset };
+          })
+          .filter((hit) => hit.rank >= 0)
+          .sort(
+            (a, b) =>
+              a.rank - b.rank ||
+              a.node.source.localeCompare(b.node.source) ||
+              a.path.localeCompare(b.path)
+          );
+        if (cache && hits.length <= MAX_SEARCH_CACHE_HITS) {
+          while (
+            cache.size >= MAX_SEARCH_CACHE_QUERIES ||
+            [...cache.values()].reduce((sum, entries) => sum + entries.length, 0) + hits.length >
+              MAX_SEARCH_CACHE_HITS
+          )
+            cache.delete(cache.keys().next().value!);
+          cache.set(argumentHash, hits);
+        }
+      }
       entries = hits.map(({ path, node, rank, match }) => {
         let start = Math.max(0, match - 80);
         if (start && /[\uDC00-\uDFFF]/.test(node.text[start]!)) start--;

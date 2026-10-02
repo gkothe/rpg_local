@@ -29,14 +29,19 @@ import {readFileSync} from 'node:fs';import {homedir} from 'node:os';import path
 const args=process.argv.slice(2);
 if(args.includes('changelog'))console.log('1.2.14:');
 else if(args.includes('/hooks'))console.log(JSON.stringify({command:{data:{hooks:[]}}}));
-else {let text='';process.stdin.on('data',c=>text+=c);process.stdin.on('end',()=>{
-const book=JSON.parse(text).message.content.includes('rules_get');
-if(book){const agent=readFileSync(path.join(homedir(),'.gemini','config','agents',args[args.indexOf('--agent')+1],'agent.md'),'utf8');
-const definitions=JSON.parse(agent.split('Owned application tool argument schemas:').at(-1));
-if(definitions.map(x=>x.name).sort().join(',')!=='roll_dice,rules_get,rules_list,rules_map,rules_search'||text.includes('Tool argument schema:'))throw new Error('Owned book definitions must live in the isolated agent, without duplicated stdin');}
+else {let text='';process.stdin.on('data',c=>text+=c);process.stdin.on('end',async()=>{
+let book=false; {const agent=readFileSync(path.join(homedir(),'.gemini','config','agents',args[args.indexOf('--agent')+1],'agent.md'),'utf8');
+const server=JSON.parse(/^mcpServers: (.+)$/m.exec(agent)[1])[0];
+const response=await fetch(server.serverUrl,{method:'POST',headers:{...server.headers,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})});
+const definitions=(await response.json()).result.tools;
+book=definitions.length===5;
+if(server.name!=='local_rpg'||definitions.map(x=>x.name).sort().join(',')!==(book?'roll_dice,rules_get,rules_list,rules_map,rules_search':'roll_dice'))throw new Error('Mode must use its private actual MCP tool definitions');
+const permissions=JSON.parse(readFileSync(path.join(homedir(),'.gemini','antigravity-cli','settings.json'),'utf8')).permissions;
+if(permissions.allow.length!==definitions.length||!permissions.deny.includes('read_file(*)'))throw new Error('Permissions must be private and bounded');}
 console.log(JSON.stringify({event:'init',init:{agent:args[args.indexOf('--agent')+1]}}));
 const phase={kind:'final',response:{version:book?3:2,narrative:'Original synthetic response',operations:[],rollInterpretations:[],...(book?{ruleCitations:[]}:{})}};
-console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:{input_tokens:1000},response:JSON.stringify(phase)}}));
+console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:1,state:'DONE',usage:{input_tokens:1000,output_tokens:100,cache_read_tokens:0}}}));
+console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:{input_tokens:1000},response:JSON.stringify(phase.response)}}));
 });}`;
 test('all three candidate adapters positively accept selected book-v3 and preserve default-v2 final contracts', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'rpg-rule-adapter-test-'));

@@ -199,7 +199,7 @@ test('rules capability is independent, requires its verified effort and preserve
   assert.equal(await service.bookGameplayCapacity(settings, 7000), 7000);
   await assert.rejects(
     service.bookGameplayCapacity({ ...settings, effort: 'low' }),
-    /only with medium effort/
+    /verified book gameplay effort/
   );
   assert.equal(await service.capacity(settings), 4800);
   assert.deepEqual(await service.bookGameplayLimits(settings), {

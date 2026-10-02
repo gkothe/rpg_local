@@ -103,6 +103,7 @@ test(
         const lookup = new RuleLookup();
         const warm: number[] = [];
         const cold: number[] = [];
+        const guardedCached: number[] = [];
         for (let index = 0; index < 30; index++) {
           const query = { query: `unique_${String(index).padStart(5, '0')} passage` };
           let started = performance.now();
@@ -113,6 +114,30 @@ test(
           const loaded = await rules.get(system.systemId);
           lookup.execute(loaded, 'rules_search', query, 'benchmark');
           cold.push(performance.now() - started);
+        }
+        const head = await rules.get(system.systemId);
+        const context = {
+          systemId: head.systemId,
+          systemKey: head.systemKey,
+          systemName: head.systemName,
+          revision: head.revision,
+          contentHash: head.contentHash,
+          kind: head.kind,
+        };
+        for (let index = 0; index < 34; index++) {
+          const started = performance.now();
+          await store.transaction(async (client) => {
+            const current = await new RuleStore(store).guard(context, client);
+            const result = new RuleLookup().execute(
+              current,
+              'rules_search',
+              { query: `unique_${String(index % 4).padStart(5, '0')} passage` },
+              `fresh-${index}`
+            );
+            assert.equal(result.receipt, `fresh-${index}`);
+            assert.equal((result.entries as unknown[]).length, 1);
+          });
+          if (index >= 4) guardedCached.push(performance.now() - started);
         }
         const percentile = (values: number[]) =>
           values.sort((a, b) => a - b)[Math.ceil(values.length * 0.95) - 1]!;
@@ -125,6 +150,7 @@ test(
             queries: 30,
             warmP95Ms: warmP95,
             coldP95Ms: coldP95,
+            guardedCachedRepeatP95Ms: percentile(guardedCached),
           })
         );
         assert.ok(warmP95 < 500, `Warm p95 ${warmP95}ms`);

@@ -50,6 +50,35 @@ after(async () => {
   await store.close();
 });
 test(
+  'revision cache shares immutable snapshots across registry stores and rejects stale heads before reuse',
+  { skip: !enabled },
+  async () => {
+    const library = new RuleStore(store);
+    const created = await library.create(
+      `cache_${randomUUID().replaceAll('-', '')}`,
+      'Synthetic cache fixture'
+    );
+    const first = await store.transaction((client) => library.guard(created, client));
+    const second = await store.transaction((client) => new RuleStore(store).guard(created, client));
+    assert.equal(first, second);
+    assert.equal(Object.isFrozen(first), true);
+    await assert.rejects(async () => {
+      first.instructions = 'mutation';
+    }, TypeError);
+    const changed = await library.publish(created.systemId, created.revision, (current) => ({
+      ...ruleContent(current),
+      instructions: 'New authoritative instructions',
+    }));
+    await assert.rejects(
+      store.transaction((client) => library.guard(created, client)),
+      /changed/
+    );
+    const latest = await store.transaction((client) => library.guard(changed, client));
+    assert.notEqual(latest, first);
+    assert.equal(latest.instructions, 'New authoritative instructions');
+  }
+);
+test(
   'fresh/upgraded migrations seed the protected default with a reproducible content hash',
   { skip: !enabled },
   async () => {
