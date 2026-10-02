@@ -131,7 +131,7 @@ test('refresh reports failed help inspection and cannot keep a previously usable
   }
 });
 
-test('Antigravity dice enables installed catalog models and reserves fresh-phase context only for gameplay', async () => {
+test('Antigravity dice enables installed catalog models and uses soft planning targets without reserving native inference capacity', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-catalog-'));
   const keys = ['RPG_CLAUDE_BIN', 'RPG_CODEX_BIN', 'RPG_AGY_BIN', 'RPG_MODEL_CATALOG'];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
@@ -156,8 +156,8 @@ else console.log('--agent');
     assert.equal(installed.dice?.supported, true);
     assert.deepEqual(installed.models[0]?.efforts, ['low']);
     const settings = { provider: 'agy', model: 'gemini-fixture', effort: 'low' };
-    assert.equal(await service.capacity(settings), 12800);
-    assert.equal(await service.gameplayCapacity(settings), 9600);
+    assert.equal(await service.capacity(settings), 16000);
+    assert.equal(await service.gameplayCapacity(settings), 16000);
     process.env.RPG_MODEL_CATALOG = JSON.stringify([
       {
         provider: 'agy',
@@ -172,7 +172,7 @@ else console.log('--agent');
     );
     assert.equal(
       await service.capacity({ provider: 'agy', model: 'unverified', effort: null }),
-      12800
+      16000
     );
   } finally {
     for (const key of keys) {

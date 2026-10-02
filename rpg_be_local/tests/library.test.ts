@@ -25,10 +25,8 @@ test('source sections preserve Unicode, original offsets and page boundaries whi
   const context = buildContext(c, [], 'Sneak', [], 16000);
   assert.match(context.prompt, /move silently/);
   assert.doesNotMatch(context.prompt, /😀/);
-  assert.throws(
-    () => buildContext({ ...c, instructions: 'x'.repeat(16000) }, [], 'Sneak', [], 16000),
-    (e) => (e as { code: string }).code === 'context_mandatory_overflow'
-  );
+  const large = buildContext({ ...c, instructions: 'x'.repeat(16000) }, [], 'Sneak', [], 16000);
+  assert.equal(JSON.parse(large.prompt).mandatory.campaignInstructions, 'x'.repeat(16000));
 });
 test('archive remaps only schema references and preserves UUID-looking narrative/private text', () => {
   const c = newCampaign({ name: 'Archive' });

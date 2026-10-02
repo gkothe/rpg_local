@@ -41,6 +41,7 @@ else if(args.includes('/hooks')) {
     }
     console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:4,state:'DONE',usage:{input_tokens:10000,output_tokens:12417}}}));
     const response={version:2,narrative:history.map(r=>r.result.groups[0].faces[0]).join(','),operations:[],rollInterpretations:history.map(r=>({rollId:r.result.rollId,explanation:'Recorded face '+r.result.groups[0].faces[0]}))};
+    console.log(JSON.stringify({event:'step_update',step_update:{step_type:'unknown',step_index:5,state:'DONE',duration_seconds:0.1}}));
     console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:{input_tokens:30000},response:JSON.stringify(response)}}));
   });
 }`;
@@ -104,7 +105,7 @@ test('Antigravity native MCP accepts High effort output usage and preserves dice
     const response = (await generateAntigravityDice(
       { binary: process.execPath, prefix: [filename] },
       settings,
-      'Synthetic context',
+      'Synthetic context' + 'x'.repeat(70000),
       root,
       process.env,
       async (input) => {

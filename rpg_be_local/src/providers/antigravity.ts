@@ -97,7 +97,7 @@ export async function generateAntigravity(
       {
         env,
         signal,
-        timeoutMs: Math.max(1, Math.min(8000, (options.deadlineMs ?? Infinity) - Date.now())),
+        timeoutMs: 0,
         maxOutputBytes: 100000,
       }
     )

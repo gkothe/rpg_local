@@ -112,3 +112,7 @@ Each player/NPC sheet section switches between formatted data and its own JSON e
 ## Book effort selection (2026-10-02)
 
 Removed book effort readiness gate and always offer Default in the picker. High and Default browser checks passed with former Medium-only metadata. 48 unit tests and six targeted Chrome tests passed; root lint/build passed. See ../docs/reviews/book-effort-selection.md.
+
+## GM processing indicator (2026-10-02)
+
+Pending/submitting GM requests show a circular loading animation in the processing status and Send button, labelled "GM is responding...". Cancel remains available and the next-action draft remains editable. Verified 49 frontend unit tests and seven Windows Chrome play tests, including visible animated spinner and cancellation access.

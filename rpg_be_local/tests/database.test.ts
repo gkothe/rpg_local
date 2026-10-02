@@ -33,7 +33,7 @@ before(async () => {
 });
 
 test(
-  'PostgreSQL rejects mandatory context overflow before creating a turn or making any AI call',
+  'PostgreSQL sends complete mandatory context above the soft planning target',
   { skip: !enabled },
   async () => {
     const initial = await create();
@@ -44,21 +44,25 @@ test(
       let generated = 0;
       const service = new TurnService(store, {
         capacity: async () => 16000,
-        generate: async () => {
+        generate: async (_settings, prompt) => {
           generated++;
-          throw new Error('Unexpected AI call');
+          assert.equal(JSON.parse(prompt).mandatory.campaignInstructions, 'x'.repeat(16000));
+          return { version: 1, narrative: 'Accepted', operations: [] };
         },
       });
-      await assert.rejects(
-        service.submit(campaign.id, {
-          revision: campaign.revision,
-          requestId: randomUUID(),
-          action: 'Open the door',
-        }),
-        (error: unknown) => error instanceof Problem && error.code === 'context_mandatory_overflow'
-      );
-      assert.equal(generated, 0);
-      assert.deepEqual(await store.turns(campaign.id), []);
+      const submitted = await service.submit(campaign.id, {
+        revision: campaign.revision,
+        requestId: randomUUID(),
+        action: 'Open the door',
+      });
+      let terminal = await store.turn(campaign.id, submitted.id);
+      for (let i = 0; terminal.status === 'pending' || terminal.status === 'running'; i++) {
+        assert.ok(i < 400);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        terminal = await store.turn(campaign.id, submitted.id);
+      }
+      assert.equal(terminal.status, 'completed');
+      assert.equal(generated, 1);
       assert.equal((await store.campaign(campaign.id)).memory, null);
     } finally {
       await store.pool.query('DELETE FROM campaigns WHERE id=$1', [initial.id]);

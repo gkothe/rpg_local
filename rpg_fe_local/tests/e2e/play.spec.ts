@@ -297,3 +297,32 @@ test('journal layout has no horizontal overflow across standard widths', async (
     true
   );
 });
+
+test('pending GM response shows animated loading and keeps the next-action draft editable', async ({
+  page,
+}) => {
+  const campaign = fixtureCampaign();
+  campaign.turns = [{ ...fixtureTurn(), status: 'pending', narrative: null }];
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url());
+    const data =
+      url.pathname === '/api/providers'
+        ? providers
+        : url.pathname === '/api/settings'
+          ? options
+          : url.pathname.includes('/turns/')
+            ? campaign.turns[0]
+            : url.pathname === `/api/campaigns/${campaign.id}`
+              ? campaign
+              : [];
+    await route.fulfill({ json: { data } });
+  });
+  await page.goto(`/campaigns/${campaign.id}`);
+  const busy = page.getByRole('button', { name: /GM is responding/ });
+  await expect(busy).toBeDisabled();
+  await expect(busy.locator('.loading-spinner')).toBeVisible();
+  await expect(busy.locator('.loading-spinner')).toHaveCSS('animation-name', 'loading-spin');
+  await expect(page.getByRole('button', { name: /Cancel/ })).toBeEnabled();
+  await page.getByLabel('Your action').fill('Keep my next action');
+  await expect(page.getByLabel('Your action')).toHaveValue('Keep my next action');
+});

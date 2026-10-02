@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { Store, ownerId } from '../store.js';
+import { withResponseRetries } from '../domain/responseRetry.js';
 import { Problem, conflict } from '../errors.js';
 import type { Campaign, Turn, ProviderSettings, Memory, GMResponse } from '../domain/types.js';
 import type { Generator } from '../providers/service.js';
@@ -395,148 +396,174 @@ export class TurnService {
           t.context = turn.context;
           await this.store.saveTurn(turn, client);
         });
-      const dice = new DiceService(this.store);
-      let diceResponse: DiceResponse | RuleResponse | undefined;
-      let response: GMResponse;
-      if (this.generator.generateGameplay || t.ruleContext?.kind === RuleSystemKind.Library) {
-        if (!t.diceSessionId) {
-          c = await this.store.campaign(t.campaignId);
-          history = await this.store.activeTurns(c.id);
-          const characters = JSON.parse(t.context!.prompt).mandatory.characters as { id: string }[];
-          t.diceSessionId = await dice.createSession(
-            t,
-            gameplayDigest(c, history, t.ruleContext),
-            characters.map((character) => character.id)
-          );
-        }
-        const existing = await dice.records(t.diceSessionId);
-        const specifications = existing.map(
-          ({
-            id: _id,
-            sessionId: _sessionId,
-            campaignId: _campaignId,
-            createdAt: _createdAt,
-            groups,
-            ...input
-          }) => ({
-            ...input,
-            groups: groups.map((group) => ({
-              label: group.label,
-              sides: group.sides,
-              count: group.faces.length,
-            })),
-          })
-        );
-        const prompt =
-          t.context!.prompt +
-          (specifications.length
-            ? '\nReplay the original requests in order with exactly these specifications before appending any dice: ' +
-              JSON.stringify(specifications)
-            : '');
-        if (t.ruleContext?.kind === RuleSystemKind.Library) {
-          const rules = new RuleStore(this.store);
-          const lookup = new RuleLookup();
-          const registry = new GameplayTools({
-            book: true,
-            limits: await this.generator.bookGameplayLimits?.(t.settings),
-            signal: ctl.signal,
-            roll: (input) => dice.roll(t.diceSessionId!, t, input),
-            read: async (tool, input, requestId) =>
-              (await rules.read(t, tool, input, requestId, lookup, ctl.signal)).payload,
-            assertActive: async () => {
-              await this.store.transaction(async (client) => {
-                await this.lockedOwned(t, client);
+      await withResponseRetries(
+        async (attempt, feedback) => {
+          const dice = new DiceService(this.store);
+          let diceResponse: DiceResponse | RuleResponse | undefined;
+          let response: GMResponse;
+          if (this.generator.generateGameplay || t.ruleContext?.kind === RuleSystemKind.Library) {
+            if (!t.diceSessionId) {
+              c = await this.store.campaign(t.campaignId);
+              history = await this.store.activeTurns(c.id);
+              const characters = JSON.parse(t.context!.prompt).mandatory.characters as {
+                id: string;
+              }[];
+              t.diceSessionId = await dice.createSession(
+                t,
+                gameplayDigest(c, history, t.ruleContext),
+                characters.map((character) => character.id)
+              );
+            }
+            const existing = await dice.records(t.diceSessionId);
+            const specifications = existing.map(
+              ({
+                id: _id,
+                sessionId: _sessionId,
+                campaignId: _campaignId,
+                createdAt: _createdAt,
+                groups,
+                ...input
+              }) => ({
+                ...input,
+                groups: groups.map((group) => ({
+                  label: group.label,
+                  sides: group.sides,
+                  count: group.faces.length,
+                })),
+              })
+            );
+            const prompt =
+              t.context!.prompt +
+              (feedback ? `\nResponse correction: ${feedback}` : '') +
+              (specifications.length
+                ? '\nReplay the original requests in order with exactly these specifications before appending any dice: ' +
+                  JSON.stringify(specifications)
+                : '');
+            if (t.ruleContext?.kind === RuleSystemKind.Library) {
+              const rules = new RuleStore(this.store);
+              const lookup = new RuleLookup();
+              const registry = new GameplayTools({
+                book: true,
+                limits: await this.generator.bookGameplayLimits?.(t.settings),
+                signal: ctl.signal,
+                roll: (input) => dice.roll(t.diceSessionId!, t, input),
+                read: async (tool, input, requestId) =>
+                  (
+                    await rules.read(
+                      t,
+                      tool,
+                      input,
+                      `repair:${attempt}:${requestId}`,
+                      lookup,
+                      ctl.signal
+                    )
+                  ).payload,
+                assertActive: async () => {
+                  await this.store.transaction(async (client) => {
+                    await this.lockedOwned(t, client);
+                  });
+                },
               });
-            },
-          });
-          diceResponse = ruleResponseSchema.parse(
-            await this.generator.generateBookGameplay!(
-              t.settings,
-              prompt,
-              ruleResponseJsonSchema,
-              registry.call,
-              ctl.signal
-            )
-          );
-        } else
-          diceResponse = diceResponseSchema.parse(
-            await this.generator.generateGameplay!(
-              t.settings,
-              prompt,
-              (input) => dice.roll(t.diceSessionId!, t, input),
-              ctl.signal
-            )
-          );
-        response = {
-          version: GM_RESPONSE_SCHEMA_VERSION,
-          narrative: diceResponse.narrative,
-          operations: diceResponse.operations,
-        };
-      } else {
-        response = responseSchema.parse(
-          await this.generator.generate(
-            t.settings,
-            t.context!.prompt,
-            responseJsonSchema,
-            ctl.signal
-          )
-        );
-      }
-      await this.store.transaction(async (client) => {
-        const { campaign, turn } = await this.lockedOwned(t, client);
-        if (diceResponse && t.diceSessionId) {
-          const records = await dice.records(t.diceSessionId, client);
-          const attempt = await client.query(
-            'SELECT next_slot FROM dice_attempts WHERE turn_id=$1',
-            [t.id]
-          );
-          if (attempt.rows[0]?.next_slot !== records.length)
-            throw new Problem(
-              409,
-              'dice_replay',
-              'Replay every original roll before completing the retry'
+              diceResponse = ruleResponseSchema.parse(
+                await this.generator.generateBookGameplay!(
+                  t.settings,
+                  prompt,
+                  ruleResponseJsonSchema,
+                  registry.call,
+                  ctl.signal
+                )
+              );
+            } else
+              diceResponse = diceResponseSchema.parse(
+                await this.generator.generateGameplay!(
+                  t.settings,
+                  prompt,
+                  (input) => dice.roll(t.diceSessionId!, t, input),
+                  ctl.signal
+                )
+              );
+            response = {
+              version: GM_RESPONSE_SCHEMA_VERSION,
+              narrative: diceResponse.narrative,
+              operations: diceResponse.operations,
+            };
+          } else {
+            response = responseSchema.parse(
+              await this.generator.generate(
+                t.settings,
+                t.context!.prompt + (feedback ? `\nResponse correction: ${feedback}` : ''),
+                responseJsonSchema,
+                ctl.signal
+              )
             );
-          validateRollInterpretations(
-            diceResponse,
-            records.map((record) => record.id)
-          );
-          turn.rollInterpretations = diceResponse.rollInterpretations;
-          turn.rolls = records;
-          if ('ruleCitations' in diceResponse && t.ruleContext) {
-            const rows = await client.query(
-              'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
-              [t.id]
-            );
-            const reads = rows.rows.map((row) => ({
-              id: row.id,
-              campaignId: row.campaign_id,
-              turnId: row.turn_id,
-              context: row.captured_context,
-              tool: row.tool_name,
-              transportRequestId: row.transport_request_id,
-              argumentDigest: row.argument_digest,
-              resultHash: row.result_hash,
-              payload: row.payload,
-              createdAt: new Date(row.created_at).toISOString(),
-            }));
-            validateRuleCitations(diceResponse, reads, t.campaignId, t.id, t.ruleContext);
-            turn.ruleCitations = diceResponse.ruleCitations;
           }
-        }
-        const applied = applyResponse(campaign, response, t.id);
-        applied.campaign.revision++;
-        turn.narrative = response.narrative;
-        turn.changes = applied.changes;
-        turn.status = TurnStatus.Completed;
-        turn.completedAt = new Date().toISOString();
-        await client.query('INSERT INTO snapshots(turn_id,campaign_id,document) VALUES($1,$2,$3)', [
-          t.id,
-          campaign.id,
-          applied.snapshot,
-        ]);
-        await this.store.save(applied.campaign, client);
-        await this.store.saveTurn(turn, client);
-      });
+          await this.store.transaction(async (client) => {
+            const { campaign, turn } = await this.lockedOwned(t, client);
+            if (diceResponse && t.diceSessionId) {
+              const records = await dice.records(t.diceSessionId, client);
+              const attempt = await client.query(
+                'SELECT next_slot FROM dice_attempts WHERE turn_id=$1',
+                [t.id]
+              );
+              if (attempt.rows[0]?.next_slot !== records.length)
+                throw new Problem(
+                  409,
+                  'dice_replay',
+                  'Replay every original roll before completing the retry'
+                );
+              validateRollInterpretations(
+                diceResponse,
+                records.map((record) => record.id)
+              );
+              turn.rollInterpretations = diceResponse.rollInterpretations;
+              turn.rolls = records;
+              if ('ruleCitations' in diceResponse && t.ruleContext) {
+                const rows = await client.query(
+                  'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
+                  [t.id]
+                );
+                const reads = rows.rows.map((row) => ({
+                  id: row.id,
+                  campaignId: row.campaign_id,
+                  turnId: row.turn_id,
+                  context: row.captured_context,
+                  tool: row.tool_name,
+                  transportRequestId: row.transport_request_id,
+                  argumentDigest: row.argument_digest,
+                  resultHash: row.result_hash,
+                  payload: row.payload,
+                  createdAt: new Date(row.created_at).toISOString(),
+                }));
+                validateRuleCitations(diceResponse, reads, t.campaignId, t.id, t.ruleContext);
+                turn.ruleCitations = diceResponse.ruleCitations;
+              }
+            }
+            const applied = applyResponse(campaign, response, t.id);
+            applied.campaign.revision++;
+            turn.narrative = response.narrative;
+            turn.changes = applied.changes;
+            turn.status = TurnStatus.Completed;
+            turn.completedAt = new Date().toISOString();
+            await client.query(
+              'INSERT INTO snapshots(turn_id,campaign_id,document) VALUES($1,$2,$3)',
+              [t.id, campaign.id, applied.snapshot]
+            );
+            await this.store.save(applied.campaign, client);
+            await this.store.saveTurn(turn, client);
+          });
+        },
+        async () => {
+          await this.store.transaction(async (client) => {
+            await this.lockedOwned(t, client);
+            if (t.diceSessionId)
+              await client.query(
+                'UPDATE dice_attempts SET next_slot=0,requests=0 WHERE turn_id=$1',
+                [t.id]
+              );
+          });
+        },
+        ctl.signal
+      );
     } catch (e) {
       await this.store
         .transaction(async (client) => {

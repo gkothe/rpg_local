@@ -199,7 +199,7 @@ it('shows a spinner and cancellation while the GM processes a turn', async () =>
       </Routes>
     </MemoryRouter>
   );
-  const busy = await screen.findByRole('button', { name: 'GM is responding�' });
+  const busy = await screen.findByRole('button', { name: /GM is responding/ });
   expect(busy).toBeDisabled();
   expect(busy.querySelector('.loading-spinner')).not.toBeNull();
   expect(container.querySelector('[role="status"] .loading-spinner')).not.toBeNull();

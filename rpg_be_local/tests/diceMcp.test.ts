@@ -89,7 +89,7 @@ test('private MCP exposes only dice, serializes calls and closes its listener', 
   await assert.rejects(fetch(server.url));
 });
 
-test('aborting an attempt closes MCP access and request exhaustion prevents another roll', async () => {
+test('MCP permits continued tool calls and aborting an attempt closes access', async () => {
   const controller = new AbortController();
   let calls = 0;
   const server = await startDiceMcp(async () => {
@@ -112,9 +112,9 @@ test('aborting an attempt closes MCP access and request exhaustion prevents anot
       await client.callTool({ name: 'roll_dice', arguments: { slot: i } });
     assert.equal(
       (await client.callTool({ name: 'roll_dice', arguments: { slot: 25 } })).isError,
-      true
+      undefined
     );
-    assert.equal(calls, 24);
+    assert.equal(calls, 25);
     controller.abort();
     await server.close();
     await assert.rejects(fetch(server.url));

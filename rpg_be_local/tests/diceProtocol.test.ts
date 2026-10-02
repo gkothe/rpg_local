@@ -41,17 +41,17 @@ test('transport receipts reject other tools, changed identities and excessive ca
   assert.equal(calls, 1);
 });
 
-test('Claude final output rejects exhausted turns and unverifiable context without accepting partial JSON', async () => {
+test('Claude leaves model turn count and context capacity to the CLI while validating its response', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-claude-dice-bounds-'));
   try {
     const script = path.join(root, 'cli.mjs');
     await writeFile(
       script,
-      `if(process.argv.includes('--version'))console.log('2.1.232 (Claude Code)');else{process.stdin.resume();process.stdin.on('end',()=>{console.log(JSON.stringify({type:'system',subtype:'init',tools:['mcp__dice__roll_dice'],mcp_servers:[{name:'dice',status:'connected'}]}));console.log(JSON.stringify({type:'result',subtype:'success',is_error:false,num_turns:process.env.RPG_TEST_DICE_MODE==='turns'?26:1,result:'{"fixture":true}',modelUsage:{fixture:{contextWindow:process.env.RPG_TEST_DICE_MODE==='context'?1000:128000,outputTokens:10}}}));});}`
+      `if(process.argv.includes('--version'))console.log('2.1.232 (Claude Code)');else{process.stdin.resume();process.stdin.on('end',()=>{console.log(JSON.stringify({type:'system',subtype:'init',tools:['mcp__dice__roll_dice'],mcp_servers:[{name:'dice',status:'connected'}]}));console.log(JSON.stringify({type:'result',subtype:'success',is_error:false,num_turns:process.env.RPG_TEST_DICE_MODE==='turns'?26:1,result:JSON.stringify({version:2,narrative:'Done',operations:[],rollInterpretations:[]}),modelUsage:{fixture:{contextWindow:process.env.RPG_TEST_DICE_MODE==='context'?1000:128000,outputTokens:10}}}));});}`
     );
     for (const mode of ['turns', 'context']) {
-      await assert.rejects(
-        generateClaudeDice(
+      assert.deepEqual(
+        await generateClaudeDice(
           { binary: process.execPath, prefix: [script] },
           { provider: 'claude', model: 'sonnet', effort: 'low' },
           'Synthetic',
@@ -61,14 +61,14 @@ test('Claude final output rejects exhausted turns and unverifiable context witho
             throw new Error('Unexpected dice');
           }
         ),
-        /bounded dice conversation|continuation budget/
+        { version: 2, narrative: 'Done', operations: [], rollInterpretations: [] }
       );
     }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
-test('Codex adapter rejects foreign tools, ambient capabilities and overflow and cleans its isolated login', async () => {
+test('Codex adapter rejects foreign tools and ambient capabilities and cleans its isolated login', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-dice-protocol-'));
   try {
     await writeFile(path.join(root, 'auth.json'), 'Synthetic fixture only');
@@ -98,7 +98,7 @@ test('Codex adapter rejects foreign tools, ambient capabilities and overflow and
       else send({method:'thread/tokenUsage/updated',params:{threadId:'thread',tokenUsage:{last:{inputTokens:128001}}}});}});}
     `
     );
-    for (const mode of ['tool', 'ambient', 'overflow']) {
+    for (const mode of ['tool', 'ambient']) {
       let calls = 0;
       await assert.rejects(
         generateCodexDice(

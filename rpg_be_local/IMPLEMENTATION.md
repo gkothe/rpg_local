@@ -82,3 +82,11 @@ Removed book-specific effort allowlists across providers. Native model efforts a
 ## Book context and prompt logs (2026-10-02)
 
 Removed fixed 8,000-byte book cap and corrected byte/token planning for schema-heavy book contexts. Existing model/campaign token budgets and native runtime checks remain. Saved Vampire first-turn context passes read-only reconstruction without truncation. All CLI prompt boundaries now write git-ignored root log files as YYYYMMdd__HHmmss__functionName.json, with collision-safe suffixes. Verified 88 backend tests (42 gated skips), enlarged three-adapter book input regression, lint/typecheck/build, logging fidelity/collision/failure tests and git ignore. No live AI turn submitted. See ../docs/reviews/book-context-and-prompt-logs.md.
+
+## CLI capacity and automatic response recovery (2026-10-02)
+
+Latest user policy supersedes the earlier model/campaign budget gates: mandatory context is preserved, native inference/output ceilings and AI deadlines are removed, and the private MCP listener stays active until completion/cancellation. Response validation and owned tools remain enforced. Automatic GM response correction retries twice with feedback, saved-dice replay and one atomic final commit. Antigravity empty completion markers are accepted without granting capabilities.
+
+Verified 91 backend tests (43 gated skips), seven isolated PostgreSQL dice tests including same-face automatic repair and single commit, eight isolated campaign tests including oversized mandatory context, backend lint/typecheck/build. No user database was used for automated tests. See ../docs/reviews/book-context-and-prompt-logs.md.
+
+Live Antigravity Gemini 3.8 Flash High completed three actual turns in the saved Sigurd campaign, including Rouse, Insight and social rolls. Dialogue and Hunger persisted across turns; an invalid response recovered automatically. Earlier interrupted/failed attempts remain audit. Some rulings were explicitly provisional after lookup difficulties; this verifies real turn transport and dice/state persistence, not perfect rules interpretation. Claude live check stays deferred.

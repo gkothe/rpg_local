@@ -22,7 +22,6 @@ export async function startGameplayMcp(
   dispatch: GameplayToolDispatch,
   signal?: AbortSignal
 ): Promise<GameplayMcpEndpoint> {
-  const book = definitions.length > 1;
   const allowed = definitions.map((definition) => definition.name);
   if (
     !allowed.length ||
@@ -35,8 +34,6 @@ export async function startGameplayMcp(
   let closed = false;
   let closing: Promise<void> | undefined;
   let queue: Promise<void> = Promise.resolve();
-  let requests = 0;
-  const deadline = Date.now() + DICE_LIMITS.attemptMs;
   const transports = new Set<StreamableHTTPServerTransport>();
   const http = createServer(async (req, res) => {
     const supplied = Buffer.from(req.headers.authorization ?? '');
@@ -87,12 +84,9 @@ export async function startGameplayMcp(
         tools: definitions,
       }));
       mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
-        requests++;
         const work = queue.then(async () => {
-          if (closed || signal?.aborted || Date.now() >= deadline)
+          if (closed || signal?.aborted)
             throw new Problem(409, 'cancelled', 'Dice attempt is no longer active');
-          if (!book && requests > DICE_LIMITS.requestsPerAttempt)
-            throw new Problem(422, 'dice_limit', 'Dice request limit exceeded');
           if (!allowed.includes(request.params.name as (typeof allowed)[number]))
             throw new Problem(422, 'gameplay_tool', 'Only owned gameplay tools are available');
           if (
@@ -156,7 +150,6 @@ export async function startGameplayMcp(
     close() {
       if (closing) return closing;
       closed = true;
-      clearTimeout(timer);
       signal?.removeEventListener('abort', abort);
       closing = (async () => {
         for (const transport of transports) await transport.close();
@@ -172,8 +165,6 @@ export async function startGameplayMcp(
   const abort = () => {
     void endpoint.close();
   };
-  const timer = setTimeout(abort, DICE_LIMITS.attemptMs);
-  timer.unref();
   signal?.addEventListener('abort', abort, { once: true });
   if (signal?.aborted) await endpoint.close();
   return endpoint;

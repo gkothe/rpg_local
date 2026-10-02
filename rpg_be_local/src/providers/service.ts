@@ -486,7 +486,7 @@ export class ProviderService implements Generator {
       .find((provider) => provider.id === settings.provider)!
       .models.find((model) => model.id === settings.model)!;
     return {
-      ...model.rules!.limits!,
+      ...VERIFIED_BOOK_LIMITS,
       promptBytes: model.inputTokens * BOOK_CONTEXT_BYTES_PER_TOKEN,
     };
   }

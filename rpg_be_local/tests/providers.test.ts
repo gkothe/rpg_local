@@ -83,12 +83,12 @@ test('gameplay rejects provider and model dice gates without disabling no-tools 
   }
   const service = new FixtureProviders();
   const settings = { provider: 'codex', model: 'fixture', effort: 'low' };
-  assert.equal(await service.capacity(settings), 4800);
+  assert.equal(await service.capacity(settings), 16000);
   await assert.rejects(service.gameplayCapacity(settings), /Unverified dice/);
   service.provider.dice = { supported: true, reason: null };
   await assert.rejects(service.gameplayCapacity(settings), /Unverified model/);
   service.provider.models[0]!.dice = { supported: true, reason: null };
-  assert.equal(await service.gameplayCapacity(settings), 4800);
+  assert.equal(await service.gameplayCapacity(settings), 16000);
 });
 test('Claude invocation retains subscription auth, disables tools/customization and session reuse', () => {
   const a = providerArgs(
@@ -235,8 +235,8 @@ test('rules capability accepts model-supported efforts and Default while preserv
   }
   const service = new FixtureProviders();
   const settings = { provider: 'codex', model: 'gpt-5.6-sol', effort: 'medium' };
-  assert.equal(await service.capacity(settings), 4800);
-  assert.equal(await service.gameplayCapacity(settings), 4800);
+  assert.equal(await service.capacity(settings), 16000);
+  assert.equal(await service.gameplayCapacity(settings), 16000);
   await assert.rejects(service.bookGameplayCapacity(settings), /Unverified rules model/);
   service.provider.rules = { supported: true, reason: null };
   service.provider.models[0]!.rules = {
@@ -250,11 +250,11 @@ test('rules capability accepts model-supported efforts and Default while preserv
   assert.equal(await service.bookGameplayCapacity(settings, 7000), 7000);
   for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', null])
     assert.equal(await service.bookGameplayCapacity({ ...settings, effort }), 16000);
-  assert.equal(await service.capacity(settings), 12800);
+  assert.equal(await service.capacity(settings), 16000);
   assert.deepEqual(await service.bookGameplayLimits(settings), {
-    ruleCalls: 12,
-    diceCalls: 12,
-    combinedCalls: 24,
+    ruleCalls: Number.MAX_SAFE_INTEGER,
+    diceCalls: Number.MAX_SAFE_INTEGER,
+    combinedCalls: Number.MAX_SAFE_INTEGER,
     promptBytes: 32000,
   });
 });

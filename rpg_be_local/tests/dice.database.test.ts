@@ -50,7 +50,7 @@ after(async () => {
   }
 });
 test(
-  'whole-attempt timeout fails without committing state and preserves revealed dice',
+  'long-running attempts keep their dice until explicit player cancellation',
   { skip: !enabled },
   async (context) => {
     const campaign = newCampaign({ name: 'Timeout dice fixture' });
@@ -94,14 +94,16 @@ test(
       });
       await ready;
       context.mock.timers.tick(DICE_LIMITS.attemptMs + 1);
+      assert.equal((await store.turn(campaign.id, submitted.id)).status, TurnStatus.Running);
+      await service.cancel(campaign.id, submitted.id);
       let terminal = await store.turn(campaign.id, submitted.id);
       const cleanupDeadline = Date.now() + 5000;
-      while (terminal.status !== TurnStatus.Failed && Date.now() < cleanupDeadline) {
+      while (terminal.status !== TurnStatus.Cancelled && Date.now() < cleanupDeadline) {
         await new Promise<void>((resolve) => setImmediate(resolve));
         terminal = await store.turn(campaign.id, submitted.id);
       }
-      assert.equal(terminal.status, TurnStatus.Failed);
-      assert.match(terminal.error!, /time limit/);
+      assert.equal(terminal.status, TurnStatus.Cancelled);
+      assert.match(terminal.error!, /Cancelled/);
       assert.equal(terminal.rolls?.length, 1);
       assert.equal((await store.campaign(campaign.id)).revision, 0);
     } finally {
@@ -603,6 +605,77 @@ test(
       assert.equal((await service.records(sessionId)).length, 1);
     } finally {
       await store.pool.query('DELETE FROM campaigns WHERE id=$1', [c.id]);
+    }
+  }
+);
+
+test(
+  'automatic response repair preserves rolled faces and commits state exactly once',
+  { skip: !enabled },
+  async () => {
+    const campaign = newCampaign({ name: 'Automatic repair fixture' });
+    await store.insert(campaign);
+    const rollIds: string[] = [];
+    let calls = 0;
+    const service = new TurnService(store, {
+      capacity: async () => 16000,
+      gameplayCapacity: async () => 16000,
+      generate: async () => {
+        throw new Error('Unexpected no-tools call');
+      },
+      generateGameplay: async (_settings, prompt, roll) => {
+        calls++;
+        const result = await roll(
+          {
+            slot: 0,
+            groups: [{ label: 'Check', count: 1, sides: 6 }],
+            reason: 'Check',
+            declaration: 'No modifiers',
+          },
+          'roll'
+        );
+        rollIds.push(result.rollId);
+        if (calls === 1) throw new SyntaxError('Malformed JSON');
+        assert.match(prompt, /previous response was rejected/);
+        assert.match(prompt, /Replay the original requests/);
+        assert.equal(result.reused, true);
+        return {
+          version: 2,
+          narrative: 'Recovered result',
+          operations: [{ op: 'state', expected: {}, value: { recovered: true } }],
+          rollInterpretations: [{ rollId: result.rollId, explanation: 'Saved roll' }],
+        };
+      },
+    });
+    try {
+      const submitted = await service.submit(campaign.id, {
+        revision: 0,
+        requestId: randomUUID(),
+        action: 'Check the door',
+      });
+      let turn = await store.turn(campaign.id, submitted.id);
+      for (let i = 0; turn.status === 'pending' || turn.status === 'running'; i++) {
+        assert.ok(i < 400);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        turn = await store.turn(campaign.id, submitted.id);
+      }
+      assert.equal(turn.status, TurnStatus.Completed, turn.error ?? undefined);
+      assert.equal(calls, 2);
+      assert.equal(new Set(rollIds).size, 1);
+      assert.equal(turn.rolls?.length, 1);
+      const saved = await store.campaign(campaign.id);
+      assert.equal(saved.revision, 1);
+      assert.deepEqual(saved.state, { recovered: true });
+      assert.equal(
+        (
+          await store.pool.query('SELECT count(*)::int AS count FROM snapshots WHERE turn_id=$1', [
+            turn.id,
+          ])
+        ).rows[0].count,
+        1
+      );
+    } finally {
+      await store.pool.query('DELETE FROM campaigns WHERE id=$1', [campaign.id]);
     }
   }
 );

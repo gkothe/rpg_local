@@ -38,7 +38,9 @@ test('book context fits ordinary instructions and a character without the old by
   assert.ok(context.estimatedTokens <= 16000);
   assert.equal(JSON.parse(context.prompt).mandatory.systemInstructions, rules.instructions);
   c.state = { oversized: 'x'.repeat(40000) };
-  assert.throws(() => buildContext(c, [], 'start', [], 16000, true, rules), /Mandatory state/);
+  const large = buildContext(c, [], 'start', [], 16000, true, rules);
+  assert.equal(JSON.parse(large.prompt).mandatory.state.oversized, c.state.oversized);
+  assert.ok(large.estimatedTokens > 16000);
 });
 const turn = (id: string, narrative: string): Turn => ({
   id,
@@ -77,7 +79,7 @@ test('trusted context includes completed roll evidence but excludes failed and u
   assert.ok(context.estimatedTokens <= 16000);
   assert.doesNotMatch(compactionBatch(c, [completed], 16000).prompt, /roll_dice/);
 });
-test('never silently drops uncovered turns, enforces final serialized ceiling and keeps pinned facts', () => {
+test('preserves uncovered turns and pinned facts even above the optional retrieval target', () => {
   const c = newCampaign({ name: 'A' });
   c.pinnedFacts = ['Marta has a silver key'];
   const history = [turn('1', 'Door open')];
@@ -85,10 +87,10 @@ test('never silently drops uncovered turns, enforces final serialized ceiling an
   assert.ok(context.prompt.includes('silver key'));
   assert.deepEqual(context.historyIds, ['1']);
   assert.ok(context.estimatedTokens <= 16000);
-  assert.throws(
-    () => buildContext(c, [turn('2', 'x'.repeat(70000))], 'go', [], 16000),
-    /Uncovered history/
-  );
+  const large = buildContext(c, [turn('2', 'x'.repeat(70000))], 'go', [], 16000);
+  assert.deepEqual(large.historyIds, ['2']);
+  assert.ok(large.prompt.includes('x'.repeat(70000)));
+  assert.ok(large.estimatedTokens > 16000);
 });
 test('memory coverage and undone events are excluded and compaction stays bounded without partial turns', () => {
   const c = newCampaign({ name: 'A' });
@@ -103,10 +105,12 @@ test('memory coverage and undone events are excluded and compaction stays bounde
     ['2']
   );
   assert.ok(estimateTokens(batch.prompt) <= 8000);
-  assert.throws(
-    () => compactionBatch(c, [...h, turn('3', 'x'.repeat(40000))], 8000),
-    /single complete turn/
+  const largeBatch = compactionBatch(c, [turn('3', 'x'.repeat(40000))], 8000);
+  assert.deepEqual(
+    largeBatch.turns.map((x) => x.id),
+    ['3']
   );
+  assert.ok(largeBatch.prompt.includes('x'.repeat(40000)));
   c.memory.valid = false;
   assert.deepEqual(buildContext(c, h, 'go', [], 16000).historyIds, ['1', '2']);
 });

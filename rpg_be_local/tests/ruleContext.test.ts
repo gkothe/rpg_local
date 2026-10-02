@@ -52,19 +52,18 @@ test('default context permits model knowledge and retains its v2 contract withou
   assert.equal(payload.mandatory.schema.properties.version.const, 2);
   assert.equal(Object.hasOwn(payload.mandatory, 'rulesOverview'), false);
 });
-test('instruction/overview and mandatory serialized overflow fail explicitly instead of trimming authority/state', () => {
+test('large instructions, overview and mandatory state remain intact above soft planning targets', () => {
   const campaign = newCampaign({ name: 'Original overflow context' });
   const rules = fixture();
   for (const invalid of [
     { ...rules, instructions: 'x'.repeat(RULE_LIMITS.instructionsBytes + 1) },
     { ...rules, overview: 'x'.repeat(RULE_LIMITS.overviewBytes + 1) },
   ])
-    assert.throws(
-      () => buildContext(campaign, [], 'Action', [], 16000, true, invalid),
-      /exceeds its context limit/
+    assert.equal(
+      JSON.parse(buildContext(campaign, [], 'Action', [], 16000, true, invalid).prompt).mandatory
+        .systemInstructions,
+      invalid.instructions
     );
-  assert.throws(
-    () => buildContext(campaign, [], 'Action', [], 100, true, rules),
-    /Mandatory state/
-  );
+  const large = buildContext(campaign, [], 'Action', [], 100, true, rules);
+  assert.ok(large.estimatedTokens > 100);
 });

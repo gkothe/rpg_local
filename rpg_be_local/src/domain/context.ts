@@ -1,16 +1,15 @@
 import { sourceSections } from './sourceSections.js';
 import type { Campaign, Turn, ContextManifest } from './types.js';
-import { Problem } from '../errors.js';
 import { responseJsonSchema, memoryJsonSchema } from './schemas.js';
 import { CharacterType, SourceStatus, TurnStatus } from './options.js';
 import { DICE_NARRATOR } from './dice.js';
 import { BOOK_GAMEPLAY_NARRATOR } from './gameplayNarrator.js';
 import { gameplayResponseContract } from './ruleResponse.js';
-import { RULE_LIMITS, RuleSystemKind, type RulePrompt } from './rules.js';
+import { RuleSystemKind, type RulePrompt } from './rules.js';
 // UTF-8 bytes is a deliberately pessimistic upper estimate: no raw text is assumed to compress.
 export const estimateTokens = (text: string) => Buffer.byteLength(text, 'utf8');
-// Book prompts include verbose JSON schemas. Native adapters separately enforce
-// their observed inference token ceiling; this is a conservative planning heuristic.
+// Book prompts include verbose JSON schemas; this soft planning heuristic guides
+// optional retrieval only. The CLI owns its actual inference capacity.
 export const BOOK_CONTEXT_BYTES_PER_TOKEN = 2;
 export const estimateBookTokens = (text: string) =>
   Math.ceil(Buffer.byteLength(text, 'utf8') / BOOK_CONTEXT_BYTES_PER_TOKEN);
@@ -51,16 +50,6 @@ export function buildContext(
   trustedDice = false,
   rulePrompt?: RulePrompt
 ): ContextManifest {
-  if (
-    rulePrompt &&
-    (Buffer.byteLength(rulePrompt.instructions) > RULE_LIMITS.instructionsBytes ||
-      Buffer.byteLength(rulePrompt.overview) > RULE_LIMITS.overviewBytes)
-  )
-    throw new Problem(
-      422,
-      'rules_context_overflow',
-      'Rules instructions or overview exceeds its context limit'
-    );
   let ceiling = Math.min(c.budgets.gameplay, capacity);
   const book = rulePrompt?.context.kind === RuleSystemKind.Library;
   const estimate = book ? estimateBookTokens : estimateTokens;
@@ -178,11 +167,5 @@ export function compactionBatch(
     if (estimateTokens(make([...selected, t])) > ceiling) break;
     selected.push(t);
   }
-  if (estimateTokens(make(selected)) > ceiling)
-    throw new Problem(
-      422,
-      'memory_overflow',
-      'Previous memory and pinned facts exceed compaction budget'
-    );
   return { prompt: make(selected), turns: selected };
 }

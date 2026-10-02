@@ -14,6 +14,7 @@ import { startGameplayMcp } from './gameplayMcp.js';
 import { gameplayToolDefinitions, type BookGameplayAdapter } from './gameplayTools.js';
 import { DICE_NARRATOR } from './diceProtocol.js';
 import { logPrompt } from './promptLog.js';
+import { responseRetryFeedback } from '../domain/responseRetry.js';
 
 const MCP_SERVER = 'local_rpg';
 const MCP_GATEWAY = 'call_mcp_tool';
@@ -244,6 +245,23 @@ export async function generateAntigravityMcpBook(
                   });
                   notify();
                 }
+              } else if (
+                step.step_type === 'unknown' &&
+                step.state === 'DONE' &&
+                Number.isInteger(step.step_index) &&
+                step.step_index! >= 0 &&
+                Object.keys(step).every((key) =>
+                  [
+                    'conversation_id',
+                    'step_index',
+                    'state',
+                    'step_type',
+                    'duration_seconds',
+                  ].includes(key)
+                )
+              ) {
+                // The CLI emits an empty completion marker after tool continuation.
+                // It grants no capability and carries no tool or response content.
               } else if (step.step_type !== 'user_input') {
                 await logPrompt('antigravityUnexpectedStep', settings, JSON.stringify(event));
                 throw new Problem(
@@ -279,7 +297,15 @@ export async function generateAntigravityMcpBook(
               const text = result.response.trim();
               await logPrompt('antigravityFinalResponse', settings, text);
               const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(text);
-              final = responseSchema.parse(JSON.parse(fenced ? fenced[1]! : text));
+              try {
+                final = responseSchema.parse(JSON.parse(fenced ? fenced[1]! : text));
+              } catch (error) {
+                throw new Problem(
+                  502,
+                  'provider_json',
+                  responseRetryFeedback(error) ?? 'Invalid final GM JSON'
+                );
+              }
               completed = true;
             } else
               throw new Problem(

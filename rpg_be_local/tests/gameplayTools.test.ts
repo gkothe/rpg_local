@@ -39,13 +39,12 @@ test('registry advertises exactly owned tools, replays once and rechecks active 
   await assert.rejects(fallback.call('rules_map', {}, 'foreign'), /outside/);
 });
 
-test('verified native reserves independently bound invalid rule requests, dice and combined calls without charging transport replays', async () => {
-  const { VERIFIED_BOOK_LIMITS } = await import('../src/providers/gameplayTools.js');
+test('explicit opt-in limits independently bound invalid rule requests, dice and combined calls without charging transport replays', async () => {
   let reads = 0,
     rolls = 0;
   const registry = new GameplayTools({
     book: true,
-    limits: { ...VERIFIED_BOOK_LIMITS, promptBytes: 16000 },
+    limits: { ruleCalls: 12, diceCalls: 12, combinedCalls: 24, promptBytes: 16000 },
     assertActive: async () => {},
     read: async () => {
       reads++;
@@ -65,7 +64,7 @@ test('verified native reserves independently bound invalid rule requests, dice a
   assert.equal(rolls, 12);
   await assert.rejects(registry.call('roll_dice', {}, 'extra-dice'), /Combined/);
 });
-test('cancellation and aggregate transcript exhaustion prevent returning another partial tool result', async () => {
+test('large aggregate tool transcripts are allowed and cancellation still prevents results', async () => {
   const signal = new AbortController();
   const registry = new GameplayTools({
     book: true,
@@ -76,7 +75,7 @@ test('cancellation and aggregate transcript exhaustion prevent returning another
   });
   await registry.call('rules_get', {}, 'first');
   await registry.call('rules_get', {}, 'second');
-  await assert.rejects(registry.call('rules_get', {}, 'third'), /transcript byte limit/);
+  assert.deepEqual(await registry.call('rules_get', {}, 'third'), { text: 'x'.repeat(3000) });
   signal.abort();
   await assert.rejects(registry.call('rules_get', {}, 'first'), /cancelled/);
 });
