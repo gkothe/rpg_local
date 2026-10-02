@@ -174,3 +174,37 @@ it('switches providers in an existing game without losing its draft or history',
     });
   });
 });
+
+it('shows a spinner and cancellation while the GM processes a turn', async () => {
+  const campaign = fixtureCampaign();
+  const pending = { ...fixtureTurn(), status: 'pending', narrative: null };
+  campaign.turns = [pending];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation(async (path: string) => {
+      const data = path.startsWith('/api/providers')
+        ? providers
+        : path === '/api/settings'
+          ? options
+          : path.includes('/turns/')
+            ? pending
+            : campaign;
+      return new Response(JSON.stringify({ data }));
+    })
+  );
+  const { container } = render(
+    <MemoryRouter initialEntries={[`/campaigns/${campaign.id}`]}>
+      <Routes>
+        <Route path="/campaigns/:id" element={<PlayPage />} />
+      </Routes>
+    </MemoryRouter>
+  );
+  const busy = await screen.findByRole('button', { name: 'GM is responding�' });
+  expect(busy).toBeDisabled();
+  expect(busy.querySelector('.loading-spinner')).not.toBeNull();
+  expect(container.querySelector('[role="status"] .loading-spinner')).not.toBeNull();
+  expect(screen.getByRole('button', { name: /Cancel/ })).toBeEnabled();
+  const action = screen.getByLabelText('Your action');
+  fireEvent.change(action, { target: { value: 'My next action' } });
+  expect(action).toHaveValue('My next action');
+});

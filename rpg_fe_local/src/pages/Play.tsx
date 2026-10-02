@@ -506,7 +506,11 @@ export default function PlayPage() {
                 className="primary"
                 disabled={game.busy || saving || !draft.trim() || !playable}
               >
-                {game.busy ? <LoaderCircle size={16} className="loading-spinner" aria-hidden="true" /> : <Send size={16} />}
+                {game.busy ? (
+                  <LoaderCircle size={16} className="loading-spinner" aria-hidden="true" />
+                ) : (
+                  <Send size={16} />
+                )}
                 {game.busy ? 'GM is responding…' : 'Send action'}
               </button>
             </div>

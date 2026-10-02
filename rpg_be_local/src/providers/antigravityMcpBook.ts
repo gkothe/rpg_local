@@ -42,10 +42,7 @@ export async function generateAntigravityMcpBook(
   const profile = await mkdtemp(path.join(os.tmpdir(), PROFILE_PREFIX));
   const deadline = Infinity;
   const controller = new AbortController();
-  const boundedSignal = AbortSignal.any([
-    controller.signal,
-    ...(signal ? [signal] : []),
-  ]);
+  const boundedSignal = AbortSignal.any([controller.signal, ...(signal ? [signal] : [])]);
   const env = { ...antigravityDiceEnvironment(sourceEnv), USERPROFILE: profile };
   const definitions = book.definitions ?? gameplayToolDefinitions(selectedBook);
   const tools = definitions.map((definition) => definition.name);

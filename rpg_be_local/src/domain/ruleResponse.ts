@@ -3,7 +3,6 @@ import { Problem } from '../errors.js';
 import { diceResponseSchema, diceResponseJsonSchema } from './diceResponse.js';
 import { RULE_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from './versions.js';
 import {
-  RULE_LIMITS,
   RuleSystemKind,
   ruleCitationSchema,
   rulePageSpanSchema,
@@ -13,7 +12,7 @@ import {
 export const ruleResponseSchema = diceResponseSchema
   .extend({
     version: z.literal(RULE_GAMEPLAY_RESPONSE_SCHEMA_VERSION),
-    ruleCitations: z.array(ruleCitationSchema).max(RULE_LIMITS.calls),
+    ruleCitations: z.array(ruleCitationSchema),
   })
   .strict();
 export const ruleResponseJsonSchema = z.toJSONSchema(ruleResponseSchema);

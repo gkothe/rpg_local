@@ -268,9 +268,7 @@ export async function runCodexDicePhases(
                 }),
               })
               .parse(message.params);
-            if (
-              usage.threadId !== threadId
-            )
+            if (usage.threadId !== threadId)
               throw new Problem(
                 422,
                 'context_overflow',

@@ -14,7 +14,6 @@ import {
   MAX_ENTITY_NAME_CHARS,
   MAX_JSON_OBJECT_CHARS,
   MAX_LONG_TEXT_CHARS,
-  MAX_MEMORY_TEXT_CHARS,
   MAX_TURN_TEXT_CHARS,
 } from './limits.js';
 import { GM_RESPONSE_SCHEMA_VERSION } from './versions.js';
@@ -60,13 +59,11 @@ export const operationSchema = z.discriminatedUnion('op', [
 export const responseSchema = z
   .object({
     version: z.literal(GM_RESPONSE_SCHEMA_VERSION),
-    narrative: z.string().trim().min(1).max(MAX_TURN_TEXT_CHARS),
-    operations: z.array(operationSchema).max(100),
+    narrative: z.string().trim().min(1),
+    operations: z.array(operationSchema),
   })
   .strict();
-export const memorySchema = z
-  .object({ text: z.string().trim().min(1).max(MAX_MEMORY_TEXT_CHARS) })
-  .strict();
+export const memorySchema = z.object({ text: z.string().trim().min(1) }).strict();
 export const draftSchema = characterInput.omit({ notes: true });
 // Pass the same strict contract to the model and validate again locally.
 export const responseJsonSchema = z.toJSONSchema(responseSchema);

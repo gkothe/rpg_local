@@ -545,7 +545,8 @@ export class TurnService {
           if (![TurnStatus.Pending, TurnStatus.Running].includes(turn.status as TurnStatus)) return;
           turn.status = ctl.signal.aborted ? TurnStatus.Cancelled : TurnStatus.Failed;
           turn.completedAt = new Date().toISOString();
-          turn.error = heartbeatFailure instanceof Problem
+          turn.error =
+            heartbeatFailure instanceof Problem
               ? heartbeatFailure.message
               : e instanceof Problem
                 ? e.message

@@ -20,9 +20,7 @@ import { z } from 'zod';
 import { generateCodexDice } from './codexDice.js';
 import { CLAUDE_DICE_VERSION, generateClaudeDice } from './claudeDice.js';
 import { type RollCallback } from './diceProtocol.js';
-import {
-  generateAntigravityDice,
-} from './antigravityDice.js';
+import { generateAntigravityDice } from './antigravityDice.js';
 import {
   ANTIGRAVITY_ISOLATED_VERSION,
   generateAntigravity,

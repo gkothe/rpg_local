@@ -163,13 +163,16 @@ export async function generateAntigravity(
         cwd,
         env,
         signal,
-        timeoutMs: (options.timeoutMs ?? ANTIGRAVITY_PROCESS_TIMEOUT_MS) === 0 ? 0 : Math.max(
-          1,
-          Math.min(
-            options.timeoutMs ?? ANTIGRAVITY_PROCESS_TIMEOUT_MS,
-            (options.deadlineMs ?? Infinity) - Date.now()
-          )
-        ),
+        timeoutMs:
+          (options.timeoutMs ?? ANTIGRAVITY_PROCESS_TIMEOUT_MS) === 0
+            ? 0
+            : Math.max(
+                1,
+                Math.min(
+                  options.timeoutMs ?? ANTIGRAVITY_PROCESS_TIMEOUT_MS,
+                  (options.deadlineMs ?? Infinity) - Date.now()
+                )
+              ),
         maxOutputBytes: options.maxOutputBytes ?? ANTIGRAVITY_PROCESS_OUTPUT_BYTES,
         onOutputBytes: options.onOutputBytes,
         protocol: options.protocol?.(name),
