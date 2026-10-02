@@ -72,3 +72,28 @@ test('cancellation, changed context and forbidden tools never trigger automatic 
   );
   assert.equal(calls, 1);
 });
+
+test('unavailable MCP requests retry with owned-tool feedback without granting access', async () => {
+  let calls = 0;
+  let prepared = 0;
+  const result = await withResponseRetries(
+    async (_attempt, feedback) => {
+      calls++;
+      if (calls === 1)
+        throw new Problem(
+          502,
+          'gameplay_tool_unavailable',
+          'Use only server local_rpg with tools: roll_dice'
+        );
+      assert.match(feedback, /Use only server local_rpg/);
+      assert.match(feedback, /All saved dice are authoritative/);
+      return 'recovered';
+    },
+    async () => {
+      prepared++;
+    }
+  );
+  assert.equal(result, 'recovered');
+  assert.equal(calls, 2);
+  assert.equal(prepared, 1);
+});

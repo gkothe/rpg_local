@@ -31,6 +31,9 @@ else if(args.includes('/hooks')) {
     const server=JSON.parse(/^mcpServers: (.+)$/m.exec(agent)[1])[0];
     console.log(JSON.stringify({event:'init',init:{agent:args[args.indexOf('--agent')+1]}}));
     if(process.env.RPG_TEST_AGY_MODE==='native') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'run_command'}}));
+    if(process.env.RPG_TEST_AGY_MODE==='foreign-server') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:1,state:'ACTIVE',tool_name:'call_mcp_tool',tool_info:{parameters:{ServerName:'outside',ToolName:'roll_dice',Arguments:{}}}}}));
+    if(process.env.RPG_TEST_AGY_MODE==='foreign-tool') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:1,state:'ACTIVE',tool_name:'call_mcp_tool',tool_info:{parameters:{ServerName:'local_rpg',ToolName:'shell',Arguments:{}}}}}));
+    if(process.env.RPG_TEST_AGY_MODE==='orphan-completion') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:99,state:'DONE',tool_name:'call_mcp_tool'}}));
     for(let slot=0;slot<2;slot++) {
       const input={...${JSON.stringify(request)},slot};
       console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:slot*2,state:'DONE',usage:{input_tokens:10000,output_tokens:50,cache_read_tokens:0}}}));
@@ -38,6 +41,7 @@ else if(args.includes('/hooks')) {
       const reply=await fetch(server.serverUrl,{method:'POST',headers:{...server.headers,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'roll_dice',arguments:input}})});
       const payload=await reply.json(); if(payload.result.isError)throw new Error(JSON.stringify(payload));
       history.push({result:JSON.parse(payload.result.content[0].text)});
+      console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:slot*2+1,state:'DONE',tool_name:'call_mcp_tool'}}));
     }
     console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:4,state:'DONE',usage:{input_tokens:10000,output_tokens:12417}}}));
     const response={version:2,narrative:history.map(r=>r.result.groups[0].faces[0]).join(','),operations:[],rollInterpretations:history.map(r=>({rollId:r.result.rollId,explanation:'Recorded face '+r.result.groups[0].faces[0]}))};
@@ -210,4 +214,32 @@ test('Antigravity rejects foreign tool envelopes and strips inherited configurat
     CASCADE_GLOBAL_CONFIG_OVERRIDE: 'fixture',
   });
   assert.deepEqual(env, { PATH: 'local' });
+});
+
+test('unavailable MCP server/tools and unmatched completion markers fail before dispatch', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-mcp-envelope-'));
+  try {
+    const filename = path.join(root, 'cli.mjs');
+    await writeFile(filename, fixture);
+    for (const mode of ['foreign-server', 'foreign-tool', 'orphan-completion']) {
+      let calls = 0;
+      await assert.rejects(
+        generateAntigravityDice(
+          { binary: process.execPath, prefix: [filename] },
+          settings,
+          'Synthetic',
+          root,
+          { ...process.env, RPG_TEST_AGY_MODE: mode },
+          async () => {
+            calls++;
+            throw new Error('Unapproved tool must never dispatch');
+          }
+        ),
+        (error: unknown) => (error as { code: string }).code === 'gameplay_tool_unavailable'
+      );
+      assert.equal(calls, 0);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

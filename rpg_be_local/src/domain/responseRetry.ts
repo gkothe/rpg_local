@@ -10,6 +10,7 @@ const RETRYABLE_RESPONSE_CODES = new Set([
   'rules_citations_invalid',
   'dice_references',
   'invalid_operation',
+  'gameplay_tool_unavailable',
 ]);
 
 export function responseRetryFeedback(error: unknown): string | null {

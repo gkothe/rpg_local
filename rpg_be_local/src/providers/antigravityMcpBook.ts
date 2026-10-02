@@ -196,16 +196,31 @@ export async function generateAntigravityMcpBook(
                 }
               } else if (step.step_type === 'tool') {
                 const parameters = step.tool_info?.parameters;
+                const gateway = step.tool_name ?? step.tool_info?.name;
                 if (
-                  (step.tool_name ?? step.tool_info?.name) !== MCP_GATEWAY ||
+                  step.state === 'DONE' &&
+                  gateway === MCP_GATEWAY &&
+                  parameters === undefined &&
+                  pending.some((entry) => entry.index === step.step_index && entry.claimed)
+                ) {
+                  // Completion metadata can omit arguments; only an already validated,
+                  // dispatched tool step can complete without repeating its envelope.
+                  return;
+                }
+                if (
+                  gateway !== MCP_GATEWAY ||
                   parameters?.ServerName !== MCP_SERVER ||
                   !tools.includes(parameters?.ToolName ?? '')
-                )
+                ) {
+                  await logPrompt('antigravityRejectedTool', settings, JSON.stringify(event));
                   throw new Problem(
                     502,
-                    'dice_isolation',
-                    'Antigravity attempted a tool outside its private MCP'
+                    gateway === MCP_GATEWAY ? 'gameplay_tool_unavailable' : 'dice_isolation',
+                    gateway === MCP_GATEWAY
+                      ? `Antigravity requested an unavailable MCP tool. Use only server ${MCP_SERVER} with tools: ${tools.join(', ')}. Match the supplied argument schema.`
+                      : 'Antigravity attempted a tool outside its private MCP'
                   );
+                }
                 const input =
                   typeof parameters.Arguments === 'string'
                     ? JSON.parse(parameters.Arguments)

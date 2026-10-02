@@ -90,3 +90,7 @@ Latest user policy supersedes the earlier model/campaign budget gates: mandatory
 Verified 91 backend tests (43 gated skips), seven isolated PostgreSQL dice tests including same-face automatic repair and single commit, eight isolated campaign tests including oversized mandatory context, backend lint/typecheck/build. No user database was used for automated tests. See ../docs/reviews/book-context-and-prompt-logs.md.
 
 Live Antigravity Gemini 3.8 Flash High completed three actual turns in the saved Sigurd campaign, including Rouse, Insight and social rolls. Dialogue and Hunger persisted across turns; an invalid response recovered automatically. Earlier interrupted/failed attempts remain audit. Some rulings were explicitly provisional after lookup difficulties; this verifies real turn transport and dice/state persistence, not perfect rules interpretation. Claude live check stays deferred.
+
+## Antigravity invalid MCP request recovery (2026-10-02)
+
+Native MCP gateway requests for unavailable servers/tools now fail before dispatch and qualify for automatic correction using the existing saved-dice recovery. Other native isolation violations remain non-retryable. Valid dispatched tool steps can finish with argument-free completion metadata. Rejected envelopes are logged locally for diagnosis. Ten targeted tests passed. The reported campaign's saved-dice retry completed and reused its original Rouse Check of 9. The original rejected tool name was not recorded, so its exact envelope is unverified. See ../docs/reviews/antigravity-mcp-recovery.md.
