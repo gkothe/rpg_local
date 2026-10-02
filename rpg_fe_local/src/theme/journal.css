@@ -544,6 +544,12 @@ fieldset {
   border: 1px solid var(--line);
   border-radius: 16px;
 }
+.setup-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
 hr {
   border: 0;
   border-top: 1px solid var(--line);

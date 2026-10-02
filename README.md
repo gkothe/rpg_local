@@ -15,11 +15,24 @@ Windows is the acceptance platform. Physical Android Chrome validation is on hol
 The aim is a local replacement for the older RPG backend/frontend, using independently authenticated **Claude Code, Codex or Antigravity (`agy`) CLIs** through the user's subscription. The app does not collect provider credentials. Players can change CLI, model and effort between turns while the app retains their campaign context.
 
 - Flexible character sheets and AI game-rule interpretation, with validated automatic state changes, a visible change list and full undo.
-- Pasted text, Markdown/text files, PDFs including locally OCR'd scans, and public Google Docs. Extracted text is reviewed/corrected before it becomes confirmed reference material.
+- Pasted text, Markdown/text files, PDFs including locally OCR'd scans, and public Google Docs. Markdown/text files are usable immediately; conversion drafts require review/correction before use.
 - Reusable campaign/character templates, campaign export/import, private notes, editable campaign memory, local dictation and read-aloud.
 - No user-account system, adventure-generation workflow or map generation. Optional LAN pairing is a device access boundary, not a game account.
 
 The backend owns canonical campaign state, immutable turn inputs, transcripts, relevant rules and memory checkpoints. Each game turn starts with bounded application-owned context rather than relying on a provider's persisted chat session. Memory compaction covers bounded consecutive history instead of summarizing the entire chat every turn. Private notes stay out of GM prompts.
+
+New campaign setup accepts multiple campaign documents and a separate character-sheet file
+(Markdown, text or PDF), plus public Google Docs links for each section. Imports run after the
+campaign is saved. Markdown/text files are immediately usable; PDF and Google Docs drafts open
+in Sources for text correction and confirmation. For a character sheet, open Characters, generate
+an editable draft with “Parse a confirmed source”, and approve it with Add character. Scanned PDFs
+use the existing local OCR configuration. If an
+import fails, follow the saved campaign link and review existing sources before retrying; campaign
+creation is disabled to prevent duplicates.
+
+During a campaign, system rules and CLI/model/effort controls live in the **Game master** tab.
+Switching tabs preserves the unsent action. Untested CLI versions show a compatibility warning
+without disabling gameplay; actual capability failures still show an error.
 
 | Location                       | Responsibility                                                                             |
 | ------------------------------ | ------------------------------------------------------------------------------------------ |

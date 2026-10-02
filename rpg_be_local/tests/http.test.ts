@@ -52,7 +52,7 @@ test('restricted public source URLs and test database isolation reject unsafe in
     'https://docs.google.com:444/document/d/abcdefghij',
   ])
     assert.throws(() => googleDocumentId(url));
-  assert.equal(textSource('Rules', 'Corrected rules').status, 'draft');
+  assert.equal(textSource('Rules', 'Corrected rules').status, 'confirmed');
   assert.throws(() => textSource('Empty', '   '));
   assert.throws(
     () =>

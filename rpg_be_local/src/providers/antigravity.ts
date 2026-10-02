@@ -8,6 +8,7 @@ import { runProcess, type RunOptions } from './processRunner.js';
 import type { GameplayMcpEndpoint } from './gameplayMcp.js';
 import type { ModelOption } from './service.js';
 import { MAX_PROVIDER_INPUT_TOKENS } from './options.js';
+// Tested evidence baseline only; version differences produce a warning, never a gate.
 export const ANTIGRAVITY_ISOLATED_VERSION = '1.2.14';
 export const ANTIGRAVITY_INPUT_BYTES = 12_800;
 const ANTIGRAVITY_PROCESS_OUTPUT_BYTES = 2_000_000;

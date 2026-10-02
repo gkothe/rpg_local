@@ -10,6 +10,7 @@ export async function uploadSources(
   isCurrent: () => boolean
 ) {
   let revision = campaign.revision;
+  let latestCampaign = campaign;
   const imported: string[] = [];
   for (let index = 0; index < files.length; index++) {
     if (!isCurrent()) break;
@@ -26,14 +27,16 @@ export async function uploadSources(
         body,
       });
       revision = updated.revision;
+      latestCampaign = updated;
       imported.push(file.name);
     } catch (error) {
       return {
         imported,
+        campaign: latestCampaign,
         remaining: files.slice(index),
         error: `${file.name}: ${errorMessage(error)} Import stopped. Earlier imports are saved; review sources before retrying the remaining files.`,
       };
     }
   }
-  return { imported, remaining: files.slice(imported.length), error: '' };
+  return { imported, campaign: latestCampaign, remaining: files.slice(imported.length), error: '' };
 }

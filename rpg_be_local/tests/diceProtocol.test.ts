@@ -90,7 +90,7 @@ test('Codex adapter rejects foreign tools, ambient capabilities and overflow and
     await writeFile(
       script,
       `import readline from 'node:readline';
-      const args=process.argv.slice(2);if(args.includes('--version'))console.log('codex-cli 0.159.2');else if(args.includes('login'))console.log('Logged in using ChatGPT');else{
+      const args=process.argv.slice(2);if(args.includes('--version'))console.log('codex-cli 0.159.0-alpha.12.1');else if(args.includes('login'))console.log('Logged in using ChatGPT');else{
       const send=o=>console.log(JSON.stringify(o));const lines=readline.createInterface({input:process.stdin});
       lines.on('line',raw=>{const m=JSON.parse(raw);if(m.id===1)send({id:1,result:{}});else if(m.id===2)send({id:2,result:{thread:{id:'thread'}}});else if(m.id===3){send({id:3,result:{turn:{id:'turn'}}});
       if(process.env.RPG_TEST_DICE_MODE==='tool')send({id:9,method:'item/tool/call',params:{tool:'shell',arguments:{},callId:'bad',threadId:'thread',turnId:'turn'}});

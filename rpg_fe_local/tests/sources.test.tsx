@@ -26,7 +26,12 @@ describe('multiple source imports', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect((fetcher.mock.calls[0][1].body as FormData).get('revision')).toBe('1');
     completeFirst(success(2));
-    expect(await result).toEqual({ imported: ['rules.md', 'sheet.txt'], remaining: [], error: '' });
+    expect(await result).toEqual({
+      imported: ['rules.md', 'sheet.txt'],
+      campaign: { ...fixtureCampaign(), revision: 3 },
+      remaining: [],
+      error: '',
+    });
     expect((fetcher.mock.calls[1][1].body as FormData).get('revision')).toBe('2');
     expect((fetcher.mock.calls[1][1].headers as Headers).has('Content-Type')).toBe(false);
   });

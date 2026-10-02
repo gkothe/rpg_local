@@ -74,3 +74,17 @@ Verification: 35 frontend unit tests passed across 10 files, including browsing/
 Typecheck, zero-warning lint, formatting and production build passed. Live native gameplay evidence is owned by the backend capability report; frontend fixture passes do not certify a provider. Five unrelated opt-in browser checks (actual Antigravity selector, additional real database flow, local voice, production LAN and local dictation) were skipped explicitly in the standard browser run. No Android/macOS/Linux acceptance is claimed. Exact evidenced Windows book choices now include Claude2.1.232/sonnet/medium, Codex0.159.2/gpt-5.6-sol/medium and Antigravity1.2.14/gemini-3.8-flash/low or medium. Antigravity native full campaign validation passed independently; the skipped browser selector is not represented as a pass. Fresh Claude validation is a user-deferred TODO until weekly quota availability. T001 owner confirmation remains after successful read-only actual-package validation. The latest Chrome run passed10/15 with5 explicit opt-in skips against a fresh isolated browser database.
 
 All gameplay CLIs use one continuous native tool loop within a bounded logical action. Backend revision/search caches preserve authoritative-head/ownership checks and fresh persisted evidence; no frontend audit receipt or stale tree is reused as current rule authority. Providers consume the canonical registry generically, with default dice-only/book five-tool purpose sets. Measured telemetry and practical cross-action warm-process limitations are documented in ../docs/reviews/rules-library-native-mcp.md.
+
+## Setup document imports (2026-10-02)
+
+Campaign creation now offers multiple campaign files and a separate character-sheet file, public Google Docs links for both, and backend-provided OCR languages. Extraction stays sequential and review remains explicit. Partial failures retain the saved campaign link and prevent duplicate creation. Character sources are confirmed in Sources, then parsed and approved in Characters.
+
+Verified: frontend lint, typecheck, formatting check, build, 40 unit tests and 5 targeted browser tests (installed Windows Chrome via LOCAL_BROWSER_PATH). No live OCR/CLI calls in these synthetic checks. Details: ../docs/reviews/setup-document-imports.md.
+
+## CLI compatibility warnings (2026-10-02)
+
+Provider selection during setup/gameplay and Settings display the backend compatibilityWarning without disabling selection. Existing failed-turn errors remain visible. Root lint/typecheck/build passed; 41 frontend tests and 5 targeted Windows Chrome browser tests passed. CLI version warnings were included in browser selection coverage.
+
+## Campaign tabs and direct text imports (2026-10-02)
+
+Moved system rules and CLI/model/effort controls into Game master campaign tab. Hidden panels remain mounted; unsent actions survive switching tabs/providers. Confirmed source rows offer View / edit text, and setup explains that Markdown/text files need no extra review. Verified root lint/typecheck/build, 41 frontend unit tests and 6 targeted Windows Chrome browser tests. Gated live rules/Antigravity tests updated but not executed. See ../docs/reviews/campaign-tabs-and-text-imports.md.

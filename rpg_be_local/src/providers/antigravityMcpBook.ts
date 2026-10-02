@@ -9,13 +9,12 @@ import { ruleResponseSchema, ruleResponseJsonSchema } from '../domain/ruleRespon
 import { diceResponseSchema, diceResponseJsonSchema } from '../domain/diceResponse.js';
 import type { ProviderSettings } from '../domain/types.js';
 import type { Executable } from './discovery.js';
-import { ANTIGRAVITY_ISOLATED_VERSION, generateAntigravity } from './antigravity.js';
+import { generateAntigravity } from './antigravity.js';
 import { antigravityDiceEnvironment } from './antigravityDice.js';
 import { startGameplayMcp } from './gameplayMcp.js';
 import { gameplayToolDefinitions, type BookGameplayAdapter } from './gameplayTools.js';
 import { DICE_CLI_LIMITS, DICE_NARRATOR } from './diceProtocol.js';
 import { MAX_PROVIDER_INPUT_TOKENS } from './options.js';
-import { runProcess } from './processRunner.js';
 
 const MCP_SERVER = 'local_rpg';
 const MCP_GATEWAY = 'call_mcp_tool';
@@ -115,23 +114,6 @@ export async function generateAntigravityMcpBook(
       }),
       { flag: 'wx' }
     );
-    const version = (
-      await runProcess(executable.binary, [...executable.prefix, 'changelog'], '', {
-        env,
-        signal: boundedSignal,
-        timeoutMs: 8000,
-        maxOutputBytes: 200000,
-      })
-    )
-      .trim()
-      .split(/\r?\n/)[0]!
-      .replace(/:$/, '');
-    if (version !== ANTIGRAVITY_ISOLATED_VERSION)
-      throw new Problem(
-        503,
-        'antigravity_dice_version',
-        `Antigravity private MCP requires verified CLI ${ANTIGRAVITY_ISOLATED_VERSION}`
-      );
     const responseJsonSchema = selectedBook ? ruleResponseJsonSchema : diceResponseJsonSchema;
     const responseSchema = selectedBook ? ruleResponseSchema : diceResponseSchema;
     const schema = JSON.stringify(responseJsonSchema);

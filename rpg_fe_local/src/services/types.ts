@@ -89,6 +89,7 @@ export interface RuleImportPreview {
   columns: string[];
 }
 export interface Provider {
+  compatibilityWarning?: string | null;
   rules?: { supported: boolean; reason: string | null };
   id: string;
   name: string;

@@ -9,6 +9,7 @@ import type { ModelOption } from './service.js';
 import { runProcess } from './processRunner.js';
 import { MODEL_EFFORTS } from './options.js';
 
+// Tested evidence baseline only; version differences produce a warning, never a gate.
 export const CODEX_ISOLATED_VERSION = '0.159.2';
 export const CODEX_INPUT_TOKENS = 8000;
 const narrator =
@@ -121,12 +122,6 @@ export async function inspectCodex(executable: Executable, env = process.env) {
   )
     .trim()
     .replace(/^codex-cli\s+/, '');
-  if (version !== CODEX_ISOLATED_VERSION)
-    throw new Problem(
-      503,
-      'codex_version',
-      `Codex isolation is verified on ${CODEX_ISOLATED_VERSION}; installed version ${version.slice(0, 30)} is not supported yet`
-    );
   await requireSubscription(executable, env);
   try {
     return { version, ...(await readCatalog(env)) };

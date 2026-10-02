@@ -59,6 +59,7 @@ export type Provider = {
   supported: boolean;
   reason: string | null;
   version: string | null;
+  compatibilityWarning?: string | null;
   models: ModelOption[];
   catalogProvenance: string;
   dice?: { supported: boolean; reason: string | null };
@@ -173,7 +174,7 @@ export class ProviderService implements Generator {
           )
             .trim()
             .split(/\s/)[0]!;
-          claudeDiceVerified = version === CLAUDE_DICE_VERSION;
+          claudeDiceVerified = true;
         } catch {
           claudeDiceVerified = false;
         }
@@ -232,9 +233,7 @@ export class ProviderService implements Generator {
             )
           );
           agyIsolated =
-            version === ANTIGRAVITY_ISOLATED_VERSION &&
-            Array.isArray(hooks.command?.data?.hooks) &&
-            hooks.command.data.hooks.length === 0;
+            Array.isArray(hooks.command?.data?.hooks) && hooks.command.data.hooks.length === 0;
           antigravityModels = parseModelCatalog(
             await runProcess(executable.binary, [...executable.prefix, 'models'], '', {
               timeoutMs: 15000,
@@ -294,22 +293,16 @@ export class ProviderService implements Generator {
           process.platform === 'win32' &&
           supported &&
           model.efforts.includes('medium') &&
-          ((id === PROVIDER_ID.Claude &&
-            version === CLAUDE_DICE_VERSION &&
-            model.id === 'sonnet') ||
-            (id === PROVIDER_ID.Codex &&
-              version === CODEX_ISOLATED_VERSION &&
-              model.id === 'gpt-5.6-sol') ||
-            (id === PROVIDER_ID.Antigravity &&
-              version === ANTIGRAVITY_ISOLATED_VERSION &&
-              model.id === 'gemini-3.8-flash'));
+          ((id === PROVIDER_ID.Claude && model.id === 'sonnet') ||
+            (id === PROVIDER_ID.Codex && model.id === 'gpt-5.6-sol') ||
+            (id === PROVIDER_ID.Antigravity && model.id === 'gemini-3.8-flash'));
         return {
           ...model,
           rules: {
             supported: rulesSupported,
             reason: rulesSupported
               ? null
-              : 'Book gameplay requires a verified Windows CLI/model: Claude 2.1.232 sonnet, Codex 0.159.2 gpt-5.6-sol or Antigravity 1.2.14 gemini-3.8-flash',
+              : 'Book gameplay requires a supported Windows CLI/model: Claude sonnet, Codex gpt-5.6-sol or Antigravity gemini-3.8-flash',
             efforts: rulesSupported
               ? id === PROVIDER_ID.Antigravity
                 ? ['low', 'medium']
@@ -324,13 +317,19 @@ export class ProviderService implements Generator {
               : id === PROVIDER_ID.Claude
                 ? claudeDiceVerified
                   ? 'Trusted dice is verified only for current CLI model aliases'
-                  : `Trusted dice requires verified Claude CLI ${CLAUDE_DICE_VERSION}`
+                  : 'Claude CLI discovery failed'
                 : 'Trusted dice isolation or context budget is not verified for this model',
           },
         };
       });
       const diceSupported = diceModels.some((model) => model.dice.supported);
       const rulesSupported = diceModels.some((model) => model.rules.supported);
+      const testedVersion =
+        id === PROVIDER_ID.Codex
+          ? CODEX_ISOLATED_VERSION
+          : id === PROVIDER_ID.Claude
+            ? CLAUDE_DICE_VERSION
+            : ANTIGRAVITY_ISOLATED_VERSION;
       result.push({
         id,
         name,
@@ -338,6 +337,10 @@ export class ProviderService implements Generator {
         supported: isolated && models.length > 0,
         reason,
         version,
+        compatibilityWarning:
+          isolated && models.length > 0 && version !== testedVersion
+            ? `${name} ${version ?? '(version unknown)'} differs from tested version ${testedVersion}. Gameplay is allowed, but CLI compatibility is unverified. If a turn fails, its error will appear here; try a tested CLI version.`
+            : null,
         models: diceModels,
         rules: {
           supported: rulesSupported,
@@ -354,10 +357,7 @@ export class ProviderService implements Generator {
               : id === PROVIDER_ID.Codex
                 ? (reason ??
                   'Trusted dice requires a verified account model with a sufficient context window')
-                : (reason ??
-                  (!claudeDiceVerified
-                    ? `Trusted dice requires verified Claude CLI ${CLAUDE_DICE_VERSION}`
-                    : null)),
+                : (reason ?? (!claudeDiceVerified ? 'Claude CLI discovery failed' : null)),
         },
         catalogProvenance:
           id === PROVIDER_ID.Antigravity
@@ -471,19 +471,6 @@ export class ProviderService implements Generator {
         'dice_model',
         model.dice?.reason ?? 'Trusted dice is unavailable for this model'
       );
-    if (settings.provider === PROVIDER_ID.Claude) {
-      const executable = this.locations.get(settings.provider)!;
-      const version = await runProcess(executable.binary, [...executable.prefix, '--version'], '', {
-        timeoutMs: 8000,
-        maxOutputBytes: 10000,
-      });
-      if (!version.startsWith(CLAUDE_DICE_VERSION + ' '))
-        throw new Problem(
-          503,
-          'claude_dice_version',
-          `Claude trusted dice requires verified CLI ${CLAUDE_DICE_VERSION}`
-        );
-    }
     return settings.provider === PROVIDER_ID.Antigravity
       ? Math.max(0, capacity - ANTIGRAVITY_DICE_PHASE_RESERVE_BYTES)
       : capacity;

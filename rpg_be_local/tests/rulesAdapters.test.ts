@@ -8,7 +8,7 @@ import { runCodexDicePhases } from '../src/providers/codexDice.js';
 import { generateAntigravityDice } from '../src/providers/antigravityDice.js';
 const claude = `
 const args=process.argv.slice(2);
-if(args.includes('--version'))console.log('2.1.232 (Claude Code)');
+if(args.includes('--version'))console.log('9.9.9 (Claude Code)');
 else { process.stdin.resume();process.stdin.on('end',()=>{
 const tools=args[args.indexOf('--allowedTools')+1].split(',');
 const book=tools.length===5;
@@ -27,7 +27,7 @@ else if(m.id===3){send({id:3,result:{turn:{id:'turn'}}});send({method:'turn/comp
 const antigravity = `
 import {readFileSync} from 'node:fs';import {homedir} from 'node:os';import path from 'node:path';
 const args=process.argv.slice(2);
-if(args.includes('changelog'))console.log('1.2.14:');
+if(args.includes('changelog'))console.log('9.9.9:');
 else if(args.includes('/hooks'))console.log(JSON.stringify({command:{data:{hooks:[]}}}));
 else {let text='';process.stdin.on('data',c=>text+=c);process.stdin.on('end',async()=>{
 let book=false; {const agent=readFileSync(path.join(homedir(),'.gemini','config','agents',args[args.indexOf('--agent')+1],'agent.md'),'utf8');

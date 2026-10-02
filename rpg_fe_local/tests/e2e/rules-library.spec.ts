@@ -123,6 +123,7 @@ test('original private book import, instructions, latest selection and explicit 
   await expect(page.getByRole('heading', { name: `Original campaign ${suffix}` })).toBeVisible();
   const campaignUrl = page.url();
   const campaignId = new URL(campaignUrl).pathname.split('/').at(-1)!;
+  await page.getByRole('button', { name: 'Game master', exact: true }).click();
   await expect(page.getByLabel('System rules', { exact: true })).toHaveValue(systemId);
   await page.getByRole('button', { name: 'Play', exact: true }).click();
   await page.getByLabel('Your action').fill('Preserved composer draft');
@@ -140,12 +141,15 @@ test('original private book import, instructions, latest selection and explicit 
   expect(importedResponse.ok()).toBeTruthy();
   const imported = (await importedResponse.json()).data;
   await page.goto(`/campaigns/${imported.id}`);
+  await page.getByRole('button', { name: 'Game master', exact: true }).click();
   await expect(page.getByText(/This save references/)).toBeVisible();
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
   await page.getByLabel('Your action').fill('Keep unresolved draft');
   const options = await page.request.get('/api/rule-systems');
   const defaultOption = (await options.json()).data.find(
     (option: { isDefault: boolean }) => option.isDefault
   );
+  await page.getByRole('button', { name: 'Game master', exact: true }).click();
   await page.getByLabel('System rules', { exact: true }).selectOption(defaultOption.systemId);
   await expect(page.getByText(/Rule selection saved/)).toBeVisible();
   await expect(page.getByLabel('Your action')).toHaveValue('Keep unresolved draft');

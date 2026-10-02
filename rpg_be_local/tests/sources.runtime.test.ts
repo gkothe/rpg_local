@@ -27,7 +27,7 @@ test(
         'eng'
       );
       assert.equal(source.kind, 'pdf');
-      assert.equal(source.status, 'draft');
+      assert.equal(source.status, 'confirmed');
       assert.equal(source.pages.length, 2);
       assert.equal(source.pages[1]!.method, 'tesseract');
       assert.match(source.text, /12 health/);

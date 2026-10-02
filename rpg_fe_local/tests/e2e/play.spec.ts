@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { fixtureCampaign, fixtureTurn, options, providers } from '../fixtures';
-test('PDF source text requires correction and explicit confirmation before use', async ({
+test('PDF source text can be optionally corrected after import', async ({
   page,
 }) => {
   let campaign = fixtureCampaign();
@@ -10,7 +10,7 @@ test('PDF source text requires correction and explicit confirmation before use',
       name: 'Scanned rules',
       kind: 'pdf',
       text: 'The bridgc is closcd.',
-      status: 'draft',
+      status: 'confirmed',
       version: 1,
       pages: [],
       warnings: ['OCR text needs review.'],
@@ -46,8 +46,8 @@ test('PDF source text requires correction and explicit confirmation before use',
   });
   await page.goto(`/campaigns/${campaign.id}`);
   await page.getByRole('button', { name: 'Sources', exact: true }).click();
-  await expect(page.getByText('pdf · draft · version 1')).toBeVisible();
-  await page.getByRole('button', { name: 'Review text' }).click();
+  await expect(page.getByText('pdf · confirmed · version 1')).toBeVisible();
+  await page.getByRole('button', { name: 'View / edit text' }).click();
   await expect(page.getByText('OCR text needs review.')).toBeVisible();
   await page.getByLabel('Extracted text').fill('The bridge is closed.');
   await page.getByRole('button', { name: 'Confirm corrected text' }).click();
@@ -121,7 +121,7 @@ test('setup submits only explicit campaign fields', async ({ page }) => {
   await page.getByRole('button', { name: 'Create campaign' }).click();
   await expect(page.getByRole('heading', { name: campaign.name })).toBeVisible();
   await expect(
-    page.getByText('Campaign created. Add and confirm your sources here', { exact: false })
+    page.getByText('Campaign created. Imported documents are ready to use.', { exact: false })
   ).toBeVisible();
   await expect(page.getByLabel('Markdown, text or PDF files (select multiple)')).toBeVisible();
   await expect(page.getByLabel('Public Google Docs URL')).toBeVisible();
@@ -148,6 +148,13 @@ test('journal layout has no horizontal overflow across standard widths', async (
   });
   await page.goto(`/campaigns/${campaign.id}`);
   await expect(page.getByText(fixtureTurn().narrative!)).toBeVisible();
+  await expect(page.getByLabel('AI CLI')).toBeHidden();
+  await page.getByRole('button', { name: 'Game master', exact: true }).click();
+  await expect(page.getByLabel('AI CLI')).toBeVisible();
+  await expect(page.getByLabel('System rules', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Your action')).toBeHidden();
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(page.getByLabel('AI CLI')).toBeHidden();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: 'test-results/journal-desktop.png', fullPage: true });
   for (const width of [320, 375, 768, 1024, 1280, 1440, 1920, 2560]) {

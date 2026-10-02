@@ -55,11 +55,13 @@ test('actual Antigravity selector, persisted GM turn, model switch and full undo
       )
       .toBe(12);
     await expect(page.getByRole('button', { name: 'Undo last turn' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Game master', exact: true }).click();
     await page
       .getByRole('combobox', { name: 'Model', exact: true })
       .selectOption('gemini-3.7-flash');
     await page.getByLabel('Effort').selectOption('low');
     await expect(page.getByRole('status')).toHaveText('Game master settings saved.');
+    await page.getByRole('button', { name: 'Play', exact: true }).click();
     await page
       .getByLabel('Your action')
       .fill('Describe my health and remaining potions in one sentence. Do not change any state.');

@@ -74,7 +74,7 @@ test('Codex launch links native auth into a fresh home, streams context and clea
       `
       import fs from 'node:fs/promises'; import path from 'node:path';
       const args=process.argv.slice(2);
-      if(args[0]==='--version') console.log('codex-cli 0.159.2');
+      if(args[0]==='--version') console.log('codex-cli 0.159.0-alpha.12.1');
       else if(args.includes('login')) console.log('Logged in using ChatGPT');
       else {
         let prompt=''; for await(const part of process.stdin)prompt+=part;

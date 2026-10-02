@@ -129,7 +129,19 @@ export default function PlayPage() {
       </div>
       <ErrorNotice message={error || resource.error || providers.error} />
       {feedback && <p role="status">{feedback}</p>}
-      <div className="panel provider-panel">
+      <nav className="tabs" aria-label="Campaign sections">
+        {['play', 'characters', 'journal', 'sources', 'game master'].map((t) => (
+          <button
+            aria-current={tab === t ? 'page' : undefined}
+            className={tab === t ? 'selected' : ''}
+            key={t}
+            onClick={() => setTab(t)}
+          >
+            {t[0].toUpperCase() + t.slice(1)}
+          </button>
+        ))}
+      </nav>
+      <div className="panel provider-panel" hidden={tab !== 'game master'}>
         <RuleSystemPicker
           campaignId={campaign.id}
           value={campaign.ruleSystemId ?? null}
@@ -194,18 +206,6 @@ export default function PlayPage() {
           }}
         />
       </div>
-      <nav className="tabs" aria-label="Campaign sections">
-        {['play', 'characters', 'journal', 'sources'].map((t) => (
-          <button
-            aria-current={tab === t ? 'page' : undefined}
-            className={tab === t ? 'selected' : ''}
-            key={t}
-            onClick={() => setTab(t)}
-          >
-            {t[0].toUpperCase() + t.slice(1)}
-          </button>
-        ))}
-      </nav>
       <div hidden={tab !== 'play'}>
         <label className="check">
           <input
@@ -502,8 +502,8 @@ export default function PlayPage() {
       <div hidden={tab !== 'sources'}>
         {search.get('setup') === '1' && (
           <p className="notice">
-            Campaign created. Add and confirm your sources here, then open Characters to prepare
-            your sheet or Play when you are ready.
+            Campaign created. Imported documents are ready to use. Open Characters to prepare
+            your sheet or Play when you are ready. Reviewing source text is optional.
           </p>
         )}
         <SourceManager

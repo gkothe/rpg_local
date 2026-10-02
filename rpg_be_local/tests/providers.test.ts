@@ -5,6 +5,56 @@ import { runProcess } from '../src/providers/processRunner.js';
 import { agentDefinition, parseModelCatalog, modelSlug } from '../src/providers/antigravity.js';
 import { responseJsonSchema } from '../src/domain/schemas.js';
 import { ProviderService, type Provider } from '../src/providers/service.js';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+test('untested Codex version remains usable for dice and books and exposes a compatibility warning', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-cli-version-'));
+  const before = { ...process.env };
+  try {
+    const script = path.join(root, 'cli.mjs');
+    await writeFile(
+      script,
+      `const args=process.argv.slice(2);
+      if(args.includes('--help'))console.log('--ignore-user-config --ignore-rules --ephemeral --output-schema');
+      else if(args.includes('--version'))console.log('codex-cli 0.159.0-alpha.12.1');
+      else if(args.includes('login'))console.log('Logged in using ChatGPT');`
+    );
+    await writeFile(path.join(root, 'auth.json'), 'synthetic fixture');
+    await writeFile(
+      path.join(root, 'models_cache.json'),
+      JSON.stringify({
+        models: [
+          {
+            slug: 'gpt-5.6-sol',
+            display_name: 'Fixture',
+            visibility: 'list',
+            context_window: 128000,
+            supported_reasoning_levels: [{ effort: 'medium' }],
+          },
+        ],
+      })
+    );
+    process.env.CODEX_HOME = root;
+    for (const name of ['CODEX', 'CLAUDE', 'AGY']) process.env[`RPG_${name}_BIN`] = script;
+    delete process.env.RPG_MODEL_CATALOG;
+    const service = new ProviderService();
+    const codex = (await service.list()).find((provider) => provider.id === 'codex')!;
+    assert.equal(codex.supported, true);
+    assert.equal(codex.reason, null);
+    assert.equal(codex.dice?.supported, true);
+    assert.match(codex.compatibilityWarning!, /0\.159\.0-alpha\.12\.1.*Gameplay is allowed/);
+    assert.equal(codex.models[0]!.rules?.supported, process.platform === 'win32');
+    assert.ok(
+      await service.gameplayCapacity({ provider: 'codex', model: 'gpt-5.6-sol', effort: 'medium' })
+    );
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in before)) delete process.env[key];
+    Object.assign(process.env, before);
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('gameplay rejects provider and model dice gates without disabling no-tools capacity', async () => {
   class FixtureProviders extends ProviderService {

@@ -95,6 +95,11 @@ export default function ProviderPicker({
         </select>
       </Field>
       {provider?.reason && <small className="provider-reason">{provider.reason}</small>}
+      {provider?.compatibilityWarning && (
+        <p className="notice" role="status">
+          {provider.compatibilityWarning}
+        </p>
+      )}
       {model?.dice?.supported === false && (
         <small className="provider-reason">{model.dice.reason}</small>
       )}

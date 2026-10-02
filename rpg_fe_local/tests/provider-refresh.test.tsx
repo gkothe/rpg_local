@@ -50,6 +50,25 @@ it('provider picker excludes unverified dice models and selects a verified model
 
 afterEach(() => vi.unstubAllGlobals());
 
+it('allows selecting an untested provider and shows its compatibility warning', () => {
+  const onChange = vi.fn();
+  const provider = {
+    ...providers[0],
+    compatibilityWarning: 'Untested CLI version. Gameplay is allowed.',
+  };
+  render(
+    <ProviderPicker
+      providers={[provider]}
+      value={{ provider: provider.id, model: provider.models[0]!.id, effort: null }}
+      onChange={onChange}
+    />
+  );
+  expect(screen.getByRole('status')).toHaveTextContent(provider.compatibilityWarning);
+  expect(screen.getByRole('option', { name: provider.name })).not.toBeDisabled();
+  fireEvent.change(screen.getByLabelText('AI CLI'), { target: { value: provider.id } });
+  expect(onChange).toHaveBeenCalled();
+});
+
 describe('CLI diagnostic refresh', () => {
   for (const page of ['setup', 'play', 'settings']) {
     it(`bypasses the backend provider cache from ${page}`, async () => {
@@ -82,6 +101,8 @@ describe('CLI diagnostic refresh', () => {
           </LanContext.Provider>
         </MemoryRouter>
       );
+      if (page === 'play')
+        fireEvent.click(await screen.findByRole('button', { name: 'Game master' }));
       const button = await screen.findByRole('button', {
         name: page === 'settings' ? 'Refresh diagnostics' : 'Refresh CLI diagnostics',
       });
@@ -130,9 +151,11 @@ it('switches providers in an existing game without losing its draft or history',
   );
   const action = await screen.findByLabelText('Your action');
   fireEvent.change(action, { target: { value: 'Speak to Marta' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Game master' }));
   await screen.findByRole('option', { name: 'Antigravity' });
   fireEvent.change(screen.getByLabelText('AI CLI'), { target: { value: 'agy' } });
   await screen.findByText('Game master settings saved.');
+  fireEvent.click(screen.getByRole('button', { name: 'Play' }));
   expect(action).toHaveValue('Speak to Marta');
   expect(screen.getByText(fixtureTurn().narrative!)).toBeInTheDocument();
   expect(campaign.characters[0].attributes.health).toBe(12);

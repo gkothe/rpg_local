@@ -27,6 +27,11 @@ export default function SettingsPage() {
               {p.version ? ` · ${p.version}` : ''}
             </p>
             {p.reason && <p className="notice">{p.reason}</p>}
+            {p.compatibilityWarning && (
+              <p className="notice" role="status">
+                {p.compatibilityWarning}
+              </p>
+            )}
             <small className="muted">{p.catalogProvenance}</small>
           </article>
         ))}

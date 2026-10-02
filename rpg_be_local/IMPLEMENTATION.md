@@ -58,3 +58,11 @@ External extraction gate T001: authorized read-only inspection validated the act
 User-authorized caching/extension implementation: immutable revision/hash snapshots share one per-Store weak cache, capped at four entries/64 MiB serialized content. Authoritative head lock, ownership/cancellation and fresh persisted receipts remain required before reveal. Search candidates retain at most eight queries/4096 hits per snapshot; receipt/cursor identity is regenerated. Actual Codex telemetry reported cachedInputTokens3200/3456/3584 on some continuations; Antigravity measured zero cache reads and Claude fresh measurement is deferred. No subscription savings are promised. The canonical gameplay registry owns schema/validation/purpose/capability/handler and carries exact definitions to generic provider translators; an original synthetic tool crossed authenticated MCP and rejected foreign capabilities/arguments. One native invocation is reused within each logical action; cross-action warm process pooling is intentionally unimplemented and unclaimed.
 
 A repeated full regression run exposed the existing dice timeout test polling cleanup only 100 immediate iterations; on the loaded native Windows test host it observed running before terminal persistence. The test now waits a bounded five real seconds for cleanup, retaining the failure/face/no-state assertions. No production timeout was changed. Later full regression and static checks passed.
+
+## CLI compatibility warnings (2026-10-02)
+
+Removed exact-version rejection in discovery, dice capacity and native runtime adapters for Codex, Claude and Antigravity. Untested versions expose compatibilityWarning; actual capability and protocol checks remain. Local Codex 0.159.0-alpha.12.1 discovery now enables dice and gpt-5.6-sol book gameplay. Root lint/typecheck/build passed; backend 81 tests passed with 42 opt-in/environment skips. No live AI generation or database mutation for this change. See ../docs/reviews/cli-version-compatibility.md.
+
+## Direct text-file imports (2026-10-02)
+
+Valid UTF-8 Markdown/plain-text file imports are immediately confirmed. PDF and other extraction drafts retain review. Existing saved drafts remain unchanged. Targeted backend tests passed (4), with root lint/typecheck/build. See ../docs/reviews/campaign-tabs-and-text-imports.md.

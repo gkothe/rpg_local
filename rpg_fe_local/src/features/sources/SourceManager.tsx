@@ -24,6 +24,7 @@ export default function SourceManager({
     };
   }, [campaign.id]);
   const [name, setName] = useState(''),
+    [adding, setAdding] = useState(false),
     [text, setText] = useState(''),
     [url, setUrl] = useState(''),
     [language, setLanguage] = useState(''),
@@ -51,12 +52,14 @@ export default function SourceManager({
   }
   return (
     <section className="stack">
+      <div hidden={adding} className="stack">
       <h2>Rules & source material</h2>
       <p className="muted">
-        Imported text stays a draft until you review and confirm it. Correct OCR mistakes here
-        before the GM sees them.
+        Imported documents are ready for the GM immediately. Reviewing and correcting extracted
+        text is optional.
       </p>
       <ErrorNotice message={error} />
+      <button type="button" onClick={() => setAdding(true)}>Add source</button>
       {campaign.sources.map((s) => (
         <div className="source-row" key={s.id}>
           <div>
@@ -73,7 +76,7 @@ export default function SourceManager({
               setEdit(s.text);
             }}
           >
-            Review text
+            {isConfirmed(s, options) ? 'View / edit text' : 'Review text'}
           </button>
         </div>
       ))}
@@ -172,8 +175,11 @@ export default function SourceManager({
           </div>
         </div>
       )}
-      <details className="panel" open>
-        <summary>Add source material</summary>
+      </div>
+      <section className="panel stack" hidden={!adding} aria-label="Add source">
+        <button type="button" disabled={busy} onClick={() => setAdding(false)}>Back to sources</button>
+        <h2>Add source</h2>
+        <ErrorNotice message={error} />
         <div className="stack">
           <Field label="Source name">
             <input value={name} onChange={(e) => setName(e.target.value)} />
@@ -193,7 +199,7 @@ export default function SourceManager({
               })
             }
           >
-            Add pasted text for review
+            Add pasted text
           </button>
           <hr />
           <Field label="OCR language">
@@ -280,7 +286,7 @@ export default function SourceManager({
           </button>
           {busy && <p role="status">Processing source…</p>}
         </div>
-      </details>
+      </section>
     </section>
   );
 }

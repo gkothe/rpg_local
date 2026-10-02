@@ -20,6 +20,7 @@ import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
 import { ruleResponseSchema } from '../domain/ruleResponse.js';
 import { diceResponseSchema } from '../domain/diceResponse.js';
 
+// Tested evidence baseline only; version differences produce a warning, never a gate.
 export const CLAUDE_DICE_VERSION = '2.1.232';
 export function claudeDiceEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = { ...source };
@@ -56,18 +57,6 @@ export async function generateClaudeDice(
     (definition) => `mcp__dice__${definition.name}`
   );
   const isolated = claudeDiceEnvironment(env);
-  const version = await runProcess(executable.binary, [...executable.prefix, '--version'], '', {
-    env: isolated,
-    cwd,
-    timeoutMs: 8000,
-    maxOutputBytes: 10000,
-  });
-  if (!version.startsWith(CLAUDE_DICE_VERSION + ' '))
-    throw new Problem(
-      503,
-      'claude_dice_version',
-      `Claude dice isolation requires verified CLI ${CLAUDE_DICE_VERSION}`
-    );
   const protocol = new DiceProtocol(roll);
   const endpoint = book
     ? await startGameplayMcp(

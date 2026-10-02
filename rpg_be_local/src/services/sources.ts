@@ -33,7 +33,7 @@ export function textSource(
     name,
     kind,
     text,
-    status: SourceStatus.Draft,
+    status: SourceStatus.Confirmed,
     version: 1,
     pages: [],
     warnings: [],
