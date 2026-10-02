@@ -88,7 +88,7 @@ export default function ProviderPicker({
           }
           onChange={(e) => onChange({ ...value, effort: e.target.value || null })}
         >
-          {!model?.efforts.length && <option value="">Default</option>}
+          <option value="">Default</option>
           {model?.efforts.map((e) => (
             <option key={e}>{e}</option>
           ))}

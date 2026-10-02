@@ -88,6 +88,7 @@ test(
     };
     try {
       const source = textSource('Sheet', 'Mira has twelve health points.');
+      source.status = 'draft'; // Exercise the retained explicit-draft workflow, not normal import.
       let c = await sources.add(initial.id, initial.revision, source);
       await assert.rejects(
         sources.characterDraft(c.id, { revision: c.revision, sourceId: source.id }, generator),
@@ -111,11 +112,13 @@ test(
         text: 'x'.repeat(9000),
         confirmed: true,
       });
-      await assert.rejects(
-        sources.characterDraft(c.id, { revision: c.revision, sourceId: source.id }, generator),
-        /too large/
+      const longer = await sources.characterDraft(
+        c.id,
+        { revision: c.revision, sourceId: source.id },
+        generator
       );
-      assert.equal(calls, 1);
+      assert.equal(longer.draft.name, 'Mira');
+      assert.equal(calls, 2);
       c = await sources.correct(c.id, source.id, {
         revision: c.revision,
         text: 'Mira has twelve health points.',

@@ -4,7 +4,7 @@ import { Field, ErrorNotice } from '../components/Controls';
 import { useResource } from '../hooks/useResource';
 import ProviderPicker from '../features/providers/ProviderPicker';
 import RuleSystemPicker from '../features/rules/RuleSystemPicker';
-import type { Campaign, Provider, ProviderSettings, Settings } from '../services/types';
+import type { Campaign, Character, Provider, ProviderSettings, Settings } from '../services/types';
 import { request, json, errorMessage } from '../services/client';
 import { uploadSources } from '../features/sources/uploadSources';
 export default function Setup() {
@@ -41,8 +41,8 @@ export default function Setup() {
       <p className="eyebrow">A fresh beginning</p>
       <h1>New campaign</h1>
       <p className="muted">
-        Start with the essentials. Add rules, import a character sheet, and review sources before
-        playing.
+        Start with the essentials. Add campaign material and automatically import your player
+        character.
       </p>
       <form
         className="panel form"
@@ -60,9 +60,15 @@ export default function Setup() {
                 'Import settings are unavailable. Refresh the page before importing.'
               );
             }
+            if (characterFile && characterUrl.trim()) {
+              throw new Error('Choose a character sheet file or a Google Docs link, not both.');
+            }
+            if ((characterFile || characterUrl.trim()) && (!settings.provider || !settings.model)) {
+              throw new Error(
+                'Select an AI CLI and model to automatically parse your character sheet.'
+              );
+            }
             for (const file of files) {
-              if (!/\.(md|txt|pdf)$/i.test(file.name))
-                throw new Error(`${file.name}: choose Markdown, text or PDF.`);
               if (options.data && file.size > options.data.limits.uploadBytes) {
                 throw new Error(`${file.name}: file exceeds the configured upload limit.`);
               }
@@ -90,10 +96,10 @@ export default function Setup() {
             created.current = c;
             if (!current.current) return;
             let latest = c;
-            if (files.length && options.data) {
+            if (campaignFiles.length && options.data) {
               const result = await uploadSources(
                 c,
-                files,
+                campaignFiles,
                 language || options.data.defaults.ocrLanguage,
                 options.data.limits.uploadBytes,
                 setProgress,
@@ -103,14 +109,68 @@ export default function Setup() {
               created.current = latest;
               if (result.error) throw new Error(result.error);
             }
-            for (const url of urls) {
+            if (campaignUrl.trim()) {
               if (!current.current) return;
               setProgress('Importing Google Docs document…');
               latest = await request<Campaign>(
                 `/campaigns/${c.id}/sources/extract`,
                 json('POST', {
                   revision: latest.revision,
-                  url,
+                  url: campaignUrl.trim(),
+                })
+              );
+              created.current = latest;
+            }
+            if ((characterFile || characterUrl.trim()) && options.data) {
+              if (!current.current) return;
+              const previousIds = new Set(latest.sources.map((source) => source.id));
+              if (characterFile) {
+                const result = await uploadSources(
+                  latest,
+                  [characterFile],
+                  language || options.data.defaults.ocrLanguage,
+                  options.data.limits.uploadBytes,
+                  setProgress,
+                  () => current.current
+                );
+                latest = result.campaign;
+                created.current = latest;
+                if (result.error) throw new Error(result.error);
+              } else {
+                setProgress('Importing character document…');
+                latest = await request<Campaign>(
+                  `/campaigns/${c.id}/sources/extract`,
+                  json('POST', {
+                    revision: latest.revision,
+                    url: characterUrl.trim(),
+                  })
+                );
+                created.current = latest;
+              }
+              if (!current.current) return;
+              const imported = latest.sources.filter((source) => !previousIds.has(source.id));
+              if (imported.length !== 1)
+                throw new Error(
+                  'Character document was saved, but its source could not be identified. Open Characters to parse it.'
+                );
+              setProgress('Parsing your player character with the selected AI CLI…');
+              const parsed = await request<{
+                draft: Pick<Character, 'name' | 'attributes' | 'inventory' | 'description'>;
+              }>(
+                `/campaigns/${c.id}/character-drafts`,
+                json('POST', {
+                  revision: latest.revision,
+                  sourceId: imported[0].id,
+                })
+              );
+              if (!current.current) return;
+              setProgress('Saving your player character…');
+              latest = await request<Campaign>(
+                `/campaigns/${c.id}/characters`,
+                json('POST', {
+                  revision: latest.revision,
+                  ...parsed.draft,
+                  type: options.data.defaults.characterType,
                 })
               );
               created.current = latest;
@@ -183,7 +243,7 @@ export default function Setup() {
               <input
                 type="file"
                 multiple
-                accept=".md,.txt,.pdf"
+                accept="text/*,.md,.markdown,.txt,.json,.yaml,.yml,.csv,.pdf,application/json"
                 onChange={(e) => setCampaignFiles(Array.from(e.target.files || []))}
               />
             </Field>
@@ -203,8 +263,9 @@ export default function Setup() {
               />
             </Field>
             <p className="muted">
-              Add your adventure, setting, background or other campaign material. Markdown, text and
-              PDF files are supported, including scanned PDFs when local OCR is configured.
+              Add your adventure, setting, background or other campaign material. UTF-8 text formats
+              (Markdown, JSON, YAML and more) and PDFs are supported, including scanned PDFs when
+              local OCR is configured.
             </p>
           </section>
           <section className="stack" aria-label="Character sheet">
@@ -212,10 +273,13 @@ export default function Setup() {
             <Field label="Character sheet file">
               <input
                 type="file"
-                accept=".md,.txt,.pdf"
+                accept="text/*,.md,.markdown,.txt,.json,.yaml,.yml,.csv,.pdf,application/json"
                 onChange={(e) => setCharacterFile(e.target.files?.[0] || null)}
               />
             </Field>
+            <small className="muted">
+              Any UTF-8 text format, including Markdown or JSON, or a PDF.
+            </small>
             <Field label="Character public Google Docs URL">
               <input
                 type="url"
@@ -225,9 +289,9 @@ export default function Setup() {
               />
             </Field>
             <p className="muted">
-              Imported sheets are ready to use immediately. Open Characters and choose “Parse a confirmed source” to
-              generate an editable sheet. Nothing is added as a character until you approve the
-              draft.
+              When you create the campaign, the selected AI CLI converts this sheet into the app’s
+              character format and adds it as your player character automatically. Choose either a
+              file or a Google Docs link. You can edit the character afterward.
             </p>
           </section>
           {options.data && (

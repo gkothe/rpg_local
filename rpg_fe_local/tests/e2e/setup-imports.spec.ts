@@ -40,6 +40,38 @@ test('setup imports separate campaign documents and character sheet before sourc
         ],
       };
       data = campaign;
+    } else if (path.endsWith('/character-drafts')) {
+      expect(route.request().postDataJSON()).toEqual({
+        revision: campaign.revision,
+        sourceId: 'source-3',
+      });
+      data = {
+        draft: {
+          name: 'Sigurd',
+          type: 'npc',
+          attributes: { health: 7 },
+          inventory: {},
+          description: {},
+        },
+      };
+    } else if (path.endsWith('/characters')) {
+      const character = route.request().postDataJSON();
+      expect(character.type).toBe(options.defaults.characterType);
+      expect(character.revision).toBe(campaign.revision);
+      campaign = {
+        ...campaign,
+        revision: campaign.revision + 1,
+        characters: [
+          ...campaign.characters,
+          {
+            ...character,
+            id: 'sigurd',
+            revision: 1,
+            notes: '',
+          },
+        ],
+      };
+      data = campaign;
     }
     await route.fulfill({ json: { data } });
   });
@@ -60,7 +92,13 @@ test('setup imports separate campaign documents and character sheet before sourc
   await page.getByRole('button', { name: 'Create campaign' }).click();
   await expect(page.getByRole('heading', { name: 'Rules & source material' })).toBeVisible();
   expect(imports).toEqual(['adventure.md', 'setting.txt', 'character.md']);
-  for (const name of imports) await expect(page.locator('.source-row strong').getByText(name, { exact: true })).toBeVisible();
+  for (const name of imports)
+    await expect(page.locator('.source-row strong').getByText(name, { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'View / edit text' })).toHaveCount(3);
   await expect(page.getByRole('button', { name: 'Review text' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Characters', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /Sigurd/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Sigurd/ })).toContainText(
+    options.defaults.characterType
+  );
 });

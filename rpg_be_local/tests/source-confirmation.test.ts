@@ -4,7 +4,14 @@ import { extractFile, textSource } from '../src/services/sources.js';
 import { SourceStatus } from '../src/domain/options.js';
 
 test('UTF-8 Markdown and plain-text imports are confirmed without a review step', async () => {
-  for (const name of ['campaign.md', 'sheet.txt', 'background.markdown']) {
+  for (const name of [
+    'campaign.md',
+    'sheet.txt',
+    'background.markdown',
+    'sheet.json',
+    'sheet.yaml',
+    'sheet.custom',
+  ]) {
     const text = '# Sigurd\nVampire — São Paulo\n';
     const source = await extractFile(Buffer.from(text), name);
     assert.equal(source.status, SourceStatus.Confirmed);
@@ -17,6 +24,7 @@ test('UTF-8 Markdown and plain-text imports are confirmed without a review step'
 test('blank and invalid UTF-8 files cannot become usable sources', async () => {
   await assert.rejects(extractFile(Buffer.from('  '), 'blank.md'), /no text/);
   await assert.rejects(extractFile(Buffer.from([0xff]), 'invalid.md'));
+  await assert.rejects(extractFile(Buffer.from([0, 1, 2]), 'binary.docx'), /Binary documents/);
   assert.equal(
     textSource('PDF extracted text', 'Review extraction', 'pdf').status,
     SourceStatus.Confirmed

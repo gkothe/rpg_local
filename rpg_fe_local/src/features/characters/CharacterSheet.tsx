@@ -5,18 +5,8 @@ import type { Campaign, Character, Settings, CharacterTemplate } from '../../ser
 import { request, requestCollection, json, errorMessage } from '../../services/client';
 import { useResource } from '../../hooks/useResource';
 import { Field, ErrorNotice, JsonEditor } from '../../components/Controls';
-function ObjectView({ value }: { value: Record<string, unknown> }) {
-  return (
-    <dl className="sheet-values">
-      {Object.entries(value).map(([key, value]) => (
-        <div key={key}>
-          <dt>{key}</dt>
-          <dd>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
+import CharacterSection from './CharacterSection';
+import { CHARACTER_SECTIONS } from './sectionOptions';
 function Editor({
   campaign,
   character,
@@ -31,19 +21,9 @@ function Editor({
   const baseRevision = useRef(campaign.revision),
     savingGuard = useRef(false);
   const [feedback, setFeedback] = useState('');
+  const [section, setSection] = useState('attributes');
   const [name, setName] = useState(character.name),
     [notes, setNotes] = useState(character.notes),
-    [sheet, setSheet] = useState(
-      JSON.stringify(
-        {
-          attributes: character.attributes,
-          inventory: character.inventory,
-          description: character.description,
-        },
-        null,
-        2
-      )
-    ),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
   return (
@@ -51,12 +31,35 @@ function Editor({
       <h3>
         {character.name} <small>{character.type}</small>
       </h3>
-      <h4>Attributes</h4>
-      <ObjectView value={character.attributes} />
-      <h4>Inventory</h4>
-      <ObjectView value={character.inventory} />
-      <h4>Description</h4>
-      <ObjectView value={character.description} />
+      <nav className="tabs sheet-tabs" aria-label={`${character.name} sheet sections`}>
+        {CHARACTER_SECTIONS.map(({ key: item, label }) => (
+          <button
+            key={item}
+            className={section === item ? 'selected' : ''}
+            aria-current={section === item ? 'page' : undefined}
+            onClick={() => setSection(item)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      {CHARACTER_SECTIONS.map(({ key, label }) => (
+        <div key={key} hidden={section !== key}>
+          <CharacterSection
+            campaign={campaign}
+            character={character}
+            field={key}
+            label={label}
+            onSaved={onSaved}
+          />
+        </div>
+      ))}
+      {character.notes && (
+        <div>
+          <h4>Notes</h4>
+          <p className="prose">{character.notes}</p>
+        </div>
+      )}
       <button
         disabled={busy}
         onClick={async () => {
@@ -99,11 +102,6 @@ function Editor({
           <Field label="Character notes">
             <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </Field>
-          <JsonEditor
-            value={sheet}
-            onChange={setSheet}
-            label="Advanced: attributes, inventory & description"
-          />
           <button
             disabled={busy || !name.trim()}
             onClick={async () => {
@@ -111,19 +109,12 @@ function Editor({
               savingGuard.current = true;
               setBusy(true);
               try {
-                const parsed = parseObject(sheet);
-                for (const key of ['attributes', 'inventory', 'description'])
-                  if (!parsed[key] || typeof parsed[key] !== 'object' || Array.isArray(parsed[key]))
-                    throw new Error(`${key} must be a JSON object.`);
                 const saved = await request<Campaign>(
                   `/campaigns/${campaign.id}/characters/${character.id}`,
                   json('PATCH', {
                     revision: baseRevision.current,
                     name,
                     notes,
-                    attributes: parsed.attributes,
-                    inventory: parsed.inventory,
-                    description: parsed.description,
                   })
                 );
                 baseRevision.current = saved.revision;
@@ -146,17 +137,6 @@ function Editor({
             onClick={() => {
               setName(character.name);
               setNotes(character.notes);
-              setSheet(
-                JSON.stringify(
-                  {
-                    attributes: character.attributes,
-                    inventory: character.inventory,
-                    description: character.description,
-                  },
-                  null,
-                  2
-                )
-              );
               baseRevision.current = campaign.revision;
               setError('');
               setFeedback('Loaded current character; unsaved edits discarded.');
@@ -200,10 +180,12 @@ export default function CharacterSheet({
   campaign,
   onSaved,
   options,
+  category = 'players',
 }: {
   campaign: Campaign;
   onSaved: () => Promise<void>;
   options: Settings | null;
+  category?: 'players' | 'npcs';
 }) {
   const templates = useResource<CharacterTemplate[]>(
       '/character-templates',
@@ -226,19 +208,47 @@ export default function CharacterSheet({
     [draft, setDraft] = useState('');
   return (
     <section className="stack">
-      <h2>Characters</h2>
+      <h2>{category === 'npcs' ? 'NPCs' : 'Player characters'}</h2>
       <ErrorNotice message={error} />
       <ErrorNotice message={templates.error} />
       {templateFeedback && <small role="status">{templateFeedback}</small>}
-      {campaign.characters.map((c) => (
-        <Editor
-          key={c.id}
-          campaign={campaign}
-          character={c}
-          onSaved={onSaved}
-          onTemplateSaved={templates.reload}
-        />
-      ))}
+      {campaign.characters.map((c) => {
+        const player = options?.characterTypeOptions.find((role) => role.id === c.type)?.default;
+        return (
+          <div key={c.id} hidden={category === 'npcs' ? player !== false : player === false}>
+            {player === false ? (
+              <details className="npc-entry panel">
+                <summary>{c.name}</summary>
+                <Editor
+                  campaign={campaign}
+                  character={c}
+                  onSaved={onSaved}
+                  onTemplateSaved={templates.reload}
+                />
+              </details>
+            ) : (
+              <Editor
+                key={c.id}
+                campaign={campaign}
+                character={c}
+                onSaved={onSaved}
+                onTemplateSaved={templates.reload}
+              />
+            )}
+          </div>
+        );
+      })}
+      {options &&
+        !campaign.characters.some((c) => {
+          const player = options.characterTypeOptions.find((role) => role.id === c.type)?.default;
+          return category === 'npcs' ? player === false : player === true;
+        }) && (
+          <p className="muted">
+            {category === 'npcs'
+              ? 'No NPCs yet. They will appear as you meet them.'
+              : 'No player character yet. Add or import one below.'}
+          </p>
+        )}
       <details className="panel">
         <summary>Reusable character templates</summary>
         <div className="stack">

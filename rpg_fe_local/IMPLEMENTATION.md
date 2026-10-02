@@ -88,3 +88,27 @@ Provider selection during setup/gameplay and Settings display the backend compat
 ## Campaign tabs and direct text imports (2026-10-02)
 
 Moved system rules and CLI/model/effort controls into Game master campaign tab. Hidden panels remain mounted; unsent actions survive switching tabs/providers. Confirmed source rows offer View / edit text, and setup explains that Markdown/text files need no extra review. Verified root lint/typecheck/build, 41 frontend unit tests and 6 targeted Windows Chrome browser tests. Gated live rules/Antigravity tests updated but not executed. See ../docs/reviews/campaign-tabs-and-text-imports.md.
+
+## Optional review and separate Add source view (2026-10-02)
+
+All imports are immediately usable, including PDFs and Google Docs; review/editor UI remains optional. Sources list offers Add source, opening a separate import view with Back to sources and preserved unfinished inputs. Game master settings remain in the new tab. Verified 41 frontend tests and 7 targeted Windows Chrome browser tests; root lint/typecheck/build passed. See ../docs/reviews/campaign-tabs-and-text-imports.md.
+
+## Automatic setup player character (2026-10-02)
+
+Dedicated character file or Google Docs link is imported, parsed by the selected CLI via existing validated character-drafts API, and saved automatically as the backend default player role. Setup rejects conflicting character inputs and requires a CLI/model for automatic parsing. Campaign/source remain saved on parser failure, and navigation stops later steps. Manual additional-character parsing/editing remains available. Verified frontend lint/typecheck/build and five targeted Windows Chrome browser tests; automatic-character boundaries were mocked and no live AI quota was consumed. See ../docs/reviews/automatic-setup-character.md.
+
+## Flexible character text formats (2026-10-02)
+
+Setup and Add source file pickers accept JSON, YAML, CSV and other UTF-8 text as well as Markdown/text/PDF. Removed extension-only rejection; backend validates text versus binary content. Parser failure no longer asks users to shorten ordinary dossiers; adaptive parsing stays on the backend. Five targeted browser tests and 45 frontend unit tests passed. Actual Antigravity recovered the user's saved Sigurd import without another upload.
+
+## Character, NPC and chat design (2026-10-02)
+
+Adapted the original frontend's separate sheet sections, collapsible NPC list and left/right chat bubbles to the journal theme. Added NPCs campaign tab, recursive readable sheet values, character notes, bounded chat scrolling and message timestamps. Mounted editors preserve drafts across category changes. Verified 46 frontend unit tests, six targeted Windows Chrome browser tests, frontend ESLint/TypeScript/build and a desktop screenshot. See ../docs/reviews/legacy-character-chat-design.md.
+
+## Section view/edit switching (2026-10-02)
+
+Each player/NPC sheet section switches between formatted data and its own JSON editor. Save sends only that section and returns to read mode; View preserves unfinished edits, and Reload current section discards them explicitly. Draft revisions remain fixed through refreshes; errors leave the editor open. Name/notes saves no longer send unrelated sheet fields. Verified 48 frontend unit tests, six targeted Windows Chrome tests and frontend lint/format/build. See ../docs/reviews/legacy-character-chat-design.md.
+
+## Book effort selection (2026-10-02)
+
+Removed book effort readiness gate and always offer Default in the picker. High and Default browser checks passed with former Medium-only metadata. 48 unit tests and six targeted Chrome tests passed; root lint/build passed. See ../docs/reviews/book-effort-selection.md.

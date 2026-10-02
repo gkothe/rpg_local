@@ -103,6 +103,10 @@ describe('draft protection', () => {
     const campaign = fixtureCampaign();
     const onSaved = vi.fn();
     const view = render(<CharacterSheet campaign={campaign} options={options} onSaved={onSaved} />);
+    view.rerender(
+      <CharacterSheet campaign={campaign} options={options} onSaved={onSaved} category="npcs" />
+    );
+    fireEvent.click(screen.getByText('Marta', { selector: 'summary' }));
     const editor = within(screen.getByRole('heading', { name: 'Marta npc' }).closest('article')!);
     fireEvent.click(editor.getByText('Edit character'));
     fireEvent.change(editor.getByLabelText('Name'), { target: { value: 'My unsaved name' } });
@@ -115,6 +119,7 @@ describe('draft protection', () => {
         }}
         options={options}
         onSaved={onSaved}
+        category="npcs"
       />
     );
     expect(editor.getByLabelText('Name')).toHaveValue('My unsaved name');
@@ -126,8 +131,8 @@ describe('draft protection', () => {
     expect(JSON.parse(mutation![1]!.body as string)).toMatchObject({
       revision: 1,
       name: 'My unsaved name',
-      attributes: { health: 12 },
     });
+    expect(JSON.parse(mutation![1]!.body as string)).not.toHaveProperty('attributes');
     await waitFor(() =>
       expect(editor.getByRole('alert')).toHaveTextContent('Reload current character')
     );

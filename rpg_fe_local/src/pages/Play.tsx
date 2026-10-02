@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Send, Undo2, Download, BookmarkPlus } from 'lucide-react';
 import { useResource } from '../hooks/useResource';
@@ -22,6 +22,7 @@ import { Dictation } from '../features/audio/Dictation';
 import { DiceRolls } from '../features/play/DiceRolls';
 import RuleSystemPicker from '../features/rules/RuleSystemPicker';
 import RuleEvidence from '../features/rules/RuleEvidence';
+const CHAT_BOTTOM_THRESHOLD_PX = 100;
 export default function PlayPage() {
   const { id } = useParams();
   const [search] = useSearchParams();
@@ -38,6 +39,13 @@ export default function PlayPage() {
   const [showAudit, setShowAudit] = useState(false);
   const game = useTurn(resource.data, resource.reload, settings.data),
     campaign = resource.data;
+  const transcript = useRef<HTMLElement | null>(null);
+  const followChat = useRef(true);
+  const latestMessage = campaign?.turns.at(-1)?.narrative;
+  useEffect(() => {
+    if (tab === 'play' && transcript.current && followChat.current)
+      transcript.current.scrollTop = transcript.current.scrollHeight;
+  }, [latestMessage, tab]);
   if (!campaign)
     return (
       <div className="page">
@@ -54,13 +62,10 @@ export default function PlayPage() {
   const bookSelected = !!campaign.ruleSystemId;
   const rulesBlocked = campaign.ruleResolution
     ? 'Resolve the saved rule-library reference before playing.'
-    : bookSelected &&
-        (!provider?.rules?.supported ||
-          !model?.rules?.supported ||
-          !model.rules.efforts?.includes(campaign.settings.effort ?? ''))
+    : bookSelected && (!provider?.rules?.supported || !model?.rules?.supported)
       ? (model?.rules?.reason ??
         provider?.rules?.reason ??
-        'Book gameplay requires a verified CLI/model with medium effort.')
+        'Book gameplay is unavailable for the selected CLI/model.')
       : '';
   const playable =
     !!settings.data && !rulesBlocked && validProvider(providers.data || [], campaign.settings);
@@ -130,14 +135,14 @@ export default function PlayPage() {
       <ErrorNotice message={error || resource.error || providers.error} />
       {feedback && <p role="status">{feedback}</p>}
       <nav className="tabs" aria-label="Campaign sections">
-        {['play', 'characters', 'journal', 'sources', 'game master'].map((t) => (
+        {['play', 'characters', 'npcs', 'journal', 'sources', 'game master'].map((t) => (
           <button
             aria-current={tab === t ? 'page' : undefined}
             className={tab === t ? 'selected' : ''}
             key={t}
             onClick={() => setTab(t)}
           >
-            {t[0].toUpperCase() + t.slice(1)}
+            {t === 'npcs' ? 'NPCs' : t[0].toUpperCase() + t.slice(1)}
           </button>
         ))}
       </nav>
@@ -238,7 +243,17 @@ export default function PlayPage() {
           Load full saved transcript
         </button>
         <div className="play-layout">
-          <section className="transcript" aria-label="Campaign transcript">
+          <section
+            className="transcript"
+            aria-label="Campaign transcript"
+            ref={transcript}
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              followChat.current =
+                element.scrollHeight - element.scrollTop - element.clientHeight <
+                CHAT_BOTTOM_THRESHOLD_PX;
+            }}
+          >
             {campaign.turns.filter((t) => isCompleted(t, settings.data) && !t.undone).length ===
               0 && (
               <Empty title="Begin the first scene">
@@ -256,9 +271,8 @@ export default function PlayPage() {
                         settings.data?.turnStatusOptions.find((option) => option.id === t.status)
                           ?.terminal)))
               )
-              .map((t, index) => (
+              .map((t) => (
                 <article className="turn" key={t.id}>
-                  <div className="folio">{String(index + 1).padStart(2, '0')}</div>
                   <div className="turn-content">
                     {showAudit && (
                       <p className="muted">
@@ -271,10 +285,16 @@ export default function PlayPage() {
                     )}
                     <div className="player-action">
                       <small>You</small>
+                      <time className="message-time" dateTime={t.createdAt}>
+                        {new Date(t.createdAt).toLocaleString()}
+                      </time>
                       <p>{t.action}</p>
                     </div>
                     <div className="gm-message">
                       <small>Game master</small>
+                      <time className="message-time" dateTime={t.completedAt || t.createdAt}>
+                        {new Date(t.completedAt || t.createdAt).toLocaleString()}
+                      </time>
                       <div className="prose">{t.narrative}</div>
                       {t.narrative && !t.undone && isCompleted(t, settings.data) && (
                         <ReadAloud text={t.narrative} />
@@ -362,7 +382,18 @@ export default function PlayPage() {
             <h3>Characters</h3>
             {campaign.characters.length ? (
               campaign.characters.map((c) => (
-                <button key={c.id} className="character-link" onClick={() => setTab('characters')}>
+                <button
+                  key={c.id}
+                  className="character-link"
+                  onClick={() =>
+                    setTab(
+                      settings.data?.characterTypeOptions.find((role) => role.id === c.type)
+                        ?.default === false
+                        ? 'npcs'
+                        : 'characters'
+                    )
+                  }
+                >
                   <strong>{c.name}</strong>
                   <small>{c.type}</small>
                 </button>
@@ -493,8 +524,13 @@ export default function PlayPage() {
           </form>
         </section>
       </div>
-      <div hidden={tab !== 'characters'}>
-        <CharacterSheet campaign={campaign} options={settings.data} onSaved={resource.reload} />
+      <div hidden={tab !== 'characters' && tab !== 'npcs'}>
+        <CharacterSheet
+          campaign={campaign}
+          options={settings.data}
+          onSaved={resource.reload}
+          category={tab === 'npcs' ? 'npcs' : 'players'}
+        />
       </div>
       <div hidden={tab !== 'journal'}>
         <Journal campaign={campaign} options={settings.data} onSaved={resource.reload} />
@@ -502,8 +538,8 @@ export default function PlayPage() {
       <div hidden={tab !== 'sources'}>
         {search.get('setup') === '1' && (
           <p className="notice">
-            Campaign created. Imported documents are ready to use. Open Characters to prepare
-            your sheet or Play when you are ready. Reviewing source text is optional.
+            Campaign created. Imported documents are ready to use. Open Characters to prepare your
+            sheet or Play when you are ready. Reviewing source text is optional.
           </p>
         )}
         <SourceManager

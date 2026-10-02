@@ -52,7 +52,7 @@ test('pins a current source section instead of sending an entire rulebook', asyn
   });
   await page.goto(`/campaigns/${campaign.id}`);
   await page.getByRole('button', { name: 'Sources', exact: true }).click();
-  await page.getByRole('button', { name: 'Review text' }).click();
+  await page.getByRole('button', { name: 'View / edit text' }).click();
   await expect(page.getByRole('link', { name: 'Open original document' })).toHaveAttribute(
     'href',
     `/api/campaigns/${campaign.id}/sources/rules/original`

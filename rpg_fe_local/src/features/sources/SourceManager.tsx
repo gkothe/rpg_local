@@ -52,134 +52,139 @@ export default function SourceManager({
   }
   return (
     <section className="stack">
-      <div hidden={adding} className="stack">
-      <h2>Rules & source material</h2>
-      <p className="muted">
-        Imported documents are ready for the GM immediately. Reviewing and correcting extracted
-        text is optional.
-      </p>
       <ErrorNotice message={error} />
-      <button type="button" onClick={() => setAdding(true)}>Add source</button>
-      {campaign.sources.map((s) => (
-        <div className="source-row" key={s.id}>
-          <div>
-            <strong>{s.name}</strong>
-            <small>
-              {s.kind} · {s.status} · version {s.version}
-            </small>
-          </div>
-          <button
-            disabled={busy}
-            onClick={() => {
-              setSelected(s);
-              previewRevision.current = campaign.revision;
-              setEdit(s.text);
-            }}
-          >
-            {isConfirmed(s, options) ? 'View / edit text' : 'Review text'}
-          </button>
-        </div>
-      ))}
-      {selected && (
-        <div className="panel stack">
-          <h3>Review: {selected.name}</h3>
-          {selected.originalAvailable ? (
-            <a
-              className="button"
-              href={`/api/campaigns/${campaign.id}/sources/${selected.id}/original`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open original document
-            </a>
-          ) : (
-            <small className="muted">
-              No original binary is retained for this source. Confirmed text remains usable and
-              portable.
-            </small>
-          )}
-          {selected.pages.length > 0 && (
-            <details>
-              <summary>Original extraction pages & confidence</summary>
-              <p className="muted">
-                This is the initial extraction for comparison. Edited text below becomes the
-                authoritative source when confirmed.
-              </p>
-              {selected.pages.map((page, index) => (
-                <article key={index} className="source-section">
-                  <h4>Page {index + 1}</h4>
-                  <dl className="sheet-values">
-                    {Object.entries(page).map(([key, value]) => (
-                      <div key={key}>
-                        <dt>{key}</dt>
-                        <dd>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </article>
-              ))}
-            </details>
-          )}
-          {selected.warnings.map((w, i) => (
-            <p className="notice" key={i}>
-              {w}
-            </p>
-          ))}
-          <Field label="Extracted text">
-            <textarea rows={12} value={edit} onChange={(e) => setEdit(e.target.value)} />
-          </Field>
-          {currentSource && isConfirmed(currentSource, options) && (
-            <SourceSections
-              key={`${currentSource.id}:${currentSource.version}`}
-              campaign={campaign}
-              source={currentSource}
-              onSaved={onSaved}
-            />
-          )}
-          <div className="row wrap">
+      <div hidden={adding} className="stack">
+        <h2>Rules & source material</h2>
+        <p className="muted">
+          Imported documents are ready for the GM immediately. Reviewing and correcting extracted
+          text is optional.
+        </p>
+        <button type="button" onClick={() => setAdding(true)}>
+          Add source
+        </button>
+        {campaign.sources.map((s) => (
+          <div className="source-row" key={s.id}>
+            <div>
+              <strong>{s.name}</strong>
+              <small>
+                {s.kind} · {s.status} · version {s.version}
+              </small>
+            </div>
             <button
-              className="primary"
-              disabled={busy || !edit.trim()}
-              onClick={() =>
-                void run(async () => {
-                  await request(
-                    `/campaigns/${campaign.id}/sources/${selected.id}`,
-                    json('PATCH', {
-                      revision: previewRevision.current,
-                      text: edit,
-                      confirmed: true,
-                    })
-                  );
-                  setSelected(null);
-                })
-              }
-            >
-              Confirm corrected text
-            </button>
-            <button onClick={() => setSelected(null)}>Close preview</button>
-            <button
-              className="danger"
               disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  await request(
-                    `/campaigns/${campaign.id}/sources/${selected.id}`,
-                    json('DELETE', { revision: campaign.revision })
-                  );
-                  setSelected(null);
-                })
-              }
+              onClick={() => {
+                setSelected(s);
+                previewRevision.current = campaign.revision;
+                setEdit(s.text);
+              }}
             >
-              Delete source
+              {isConfirmed(s, options) ? 'View / edit text' : 'Review text'}
             </button>
           </div>
-        </div>
-      )}
+        ))}
+        {selected && (
+          <div className="panel stack">
+            <h3>Review: {selected.name}</h3>
+            {selected.originalAvailable ? (
+              <a
+                className="button"
+                href={`/api/campaigns/${campaign.id}/sources/${selected.id}/original`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open original document
+              </a>
+            ) : (
+              <small className="muted">
+                No original binary is retained for this source. Confirmed text remains usable and
+                portable.
+              </small>
+            )}
+            {selected.pages.length > 0 && (
+              <details>
+                <summary>Original extraction pages & confidence</summary>
+                <p className="muted">
+                  This is the initial extraction for comparison. Edited text below becomes the
+                  authoritative source when confirmed.
+                </p>
+                {selected.pages.map((page, index) => (
+                  <article key={index} className="source-section">
+                    <h4>Page {index + 1}</h4>
+                    <dl className="sheet-values">
+                      {Object.entries(page).map(([key, value]) => (
+                        <div key={key}>
+                          <dt>{key}</dt>
+                          <dd>
+                            {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </article>
+                ))}
+              </details>
+            )}
+            {selected.warnings.map((w, i) => (
+              <p className="notice" key={i}>
+                {w}
+              </p>
+            ))}
+            <Field label="Extracted text">
+              <textarea rows={12} value={edit} onChange={(e) => setEdit(e.target.value)} />
+            </Field>
+            {currentSource && isConfirmed(currentSource, options) && (
+              <SourceSections
+                key={`${currentSource.id}:${currentSource.version}`}
+                campaign={campaign}
+                source={currentSource}
+                onSaved={onSaved}
+              />
+            )}
+            <div className="row wrap">
+              <button
+                className="primary"
+                disabled={busy || !edit.trim()}
+                onClick={() =>
+                  void run(async () => {
+                    await request(
+                      `/campaigns/${campaign.id}/sources/${selected.id}`,
+                      json('PATCH', {
+                        revision: previewRevision.current,
+                        text: edit,
+                        confirmed: true,
+                      })
+                    );
+                    setSelected(null);
+                  })
+                }
+              >
+                Confirm corrected text
+              </button>
+              <button onClick={() => setSelected(null)}>Close preview</button>
+              <button
+                className="danger"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    await request(
+                      `/campaigns/${campaign.id}/sources/${selected.id}`,
+                      json('DELETE', { revision: campaign.revision })
+                    );
+                    setSelected(null);
+                  })
+                }
+              >
+                Delete source
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       <section className="panel stack" hidden={!adding} aria-label="Add source">
-        <button type="button" disabled={busy} onClick={() => setAdding(false)}>Back to sources</button>
+        <button type="button" disabled={busy} onClick={() => setAdding(false)}>
+          Back to sources
+        </button>
         <h2>Add source</h2>
-        <ErrorNotice message={error} />
         <div className="stack">
           <Field label="Source name">
             <input value={name} onChange={(e) => setName(e.target.value)} />
@@ -217,7 +222,7 @@ export default function SourceManager({
               disabled={busy}
               type="file"
               multiple
-              accept=".txt,.md,.pdf"
+              accept="text/*,.txt,.md,.markdown,.json,.yaml,.yml,.csv,.pdf,application/json"
               onChange={(e) => {
                 setFiles(Array.from(e.target.files || []));
                 setProgress('');
@@ -226,8 +231,9 @@ export default function SourceManager({
             />
           </Field>
           <small className="muted">
-            Files are imported one at a time, each as a separate draft. Review and confirm each
-            source before playing. Scanned PDFs use the configured local OCR runtime.
+            Any UTF-8 text format is supported, including JSON and YAML. Files are imported one at a
+            time and are ready to use immediately. Reviewing text is optional. Scanned PDFs use the
+            configured local OCR runtime.
           </small>
           {files.length > 0 && (
             <ul>
@@ -253,12 +259,12 @@ export default function SourceManager({
                 );
                 if (!current.current) return;
                 setFiles(result.remaining);
-                setProgress(`${result.imported.length} file(s) imported as drafts.`);
+                setProgress(`${result.imported.length} file(s) imported and ready to use.`);
                 setError(result.error);
               })
             }
           >
-            Import selected files for review
+            Import selected files
           </button>
           {progress && <p role="status">{progress}</p>}
           <hr />
@@ -282,7 +288,7 @@ export default function SourceManager({
               })
             }
           >
-            Extract Google Doc for review
+            Import Google Doc
           </button>
           {busy && <p role="status">Processing source…</p>}
         </div>

@@ -206,7 +206,7 @@ test('Antigravity excludes ambient customizations and parses only one bounded is
   );
 });
 
-test('rules capability is independent, requires its verified effort and preserves existing default/no-tools reserves', async () => {
+test('rules capability accepts model-supported efforts and Default while preserving existing reserves', async () => {
   class FixtureProviders extends ProviderService {
     provider: Provider = {
       id: 'codex',
@@ -222,7 +222,7 @@ test('rules capability is independent, requires its verified effort and preserve
         {
           id: 'gpt-5.6-sol',
           label: 'Original fixture',
-          efforts: ['low', 'medium'],
+          efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
           inputTokens: 8000,
           dice: { supported: true, reason: null },
           rules: { supported: false, reason: 'Unverified rules model' },
@@ -247,10 +247,8 @@ test('rules capability is independent, requires its verified effort and preserve
   };
   assert.equal(await service.bookGameplayCapacity(settings), 8000);
   assert.equal(await service.bookGameplayCapacity(settings, 7000), 7000);
-  await assert.rejects(
-    service.bookGameplayCapacity({ ...settings, effort: 'low' }),
-    /verified book gameplay effort/
-  );
+  for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', null])
+    assert.equal(await service.bookGameplayCapacity({ ...settings, effort }), 8000);
   assert.equal(await service.capacity(settings), 4800);
   assert.deepEqual(await service.bookGameplayLimits(settings), {
     ruleCalls: 12,

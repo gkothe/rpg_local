@@ -15,17 +15,22 @@ Windows is the acceptance platform. Physical Android Chrome validation is on hol
 The aim is a local replacement for the older RPG backend/frontend, using independently authenticated **Claude Code, Codex or Antigravity (`agy`) CLIs** through the user's subscription. The app does not collect provider credentials. Players can change CLI, model and effort between turns while the app retains their campaign context.
 
 - Flexible character sheets and AI game-rule interpretation, with validated automatic state changes, a visible change list and full undo.
-- Pasted text, Markdown/text files, PDFs including locally OCR'd scans, and public Google Docs. Markdown/text files are usable immediately; conversion drafts require review/correction before use.
+- Pasted text, Markdown/text files, PDFs including locally OCR'd scans, and public Google Docs. Imports are immediately usable; text review/correction is optional.
 - Reusable campaign/character templates, campaign export/import, private notes, editable campaign memory, local dictation and read-aloud.
 - No user-account system, adventure-generation workflow or map generation. Optional LAN pairing is a device access boundary, not a game account.
 
 The backend owns canonical campaign state, immutable turn inputs, transcripts, relevant rules and memory checkpoints. Each game turn starts with bounded application-owned context rather than relying on a provider's persisted chat session. Memory compaction covers bounded consecutive history instead of summarizing the entire chat every turn. Private notes stay out of GM prompts.
 
 New campaign setup accepts multiple campaign documents and a separate character-sheet file
-(Markdown, text or PDF), plus public Google Docs links for each section. Imports run after the
-campaign is saved. Markdown/text files are immediately usable; PDF and Google Docs drafts open
-in Sources for text correction and confirmation. For a character sheet, open Characters, generate
-an editable draft with “Parse a confirmed source”, and approve it with Add character. Scanned PDFs
+(any UTF-8 text format, including Markdown/JSON/YAML, or PDF), plus public Google Docs links for each section. Imports run after the
+campaign is saved. All imported documents are immediately usable; review/correction in Sources
+is optional. Use **Add source** to open the separate import view, and **Back to sources** to return
+without losing unfinished input. A character file or Google Docs link supplied in New campaign
+is automatically parsed by the selected AI CLI into validated JSON and saved as the player character.
+Choose one character input and select a CLI/model first; later edits are available in Characters.
+Character conversion uses the available CLI capacity; longer sheets are processed sequentially
+in bounded sections and combined into the validated character JSON without truncating the source.
+The manual parse/edit/Add character workflow remains available for additional sheets. Scanned PDFs
 use the existing local OCR configuration. If an
 import fails, follow the saved campaign link and review existing sources before retrying; campaign
 creation is disabled to prevent duplicates.
@@ -73,7 +78,7 @@ Check the backend README for database/provider settings and [local runtime setup
 
 ## Install and run
 
-After installing dependencies and configuring PostgreSQL, double-click `start.cmd` in this folder, or run `.\start.cmd` from PowerShell. It builds both apps and serves the game at `http://127.0.0.1:4100`; keep the terminal open and press Ctrl+C to stop. For live editing, use `.\start.cmd dev` (frontend at port 5174). First run `setup-database.cmd` to create a dedicated local database and apply migrations. It asks for your PostgreSQL administrator password once, creates a separate game role, and saves only the game connection encrypted with Windows DPAPI outside Git. Rerun it after updates to apply pending migrations. The launcher loads these saved settings; explicit environment settings take precedence. PostgreSQL must already be installed and running. For an existing dedicated database, run `powershell -ExecutionPolicy Bypass -File .\setup-database.ps1 -ConfigureExisting`.
+After installing dependencies and configuring PostgreSQL, double-click `start.cmd` in this folder, or run `.\start.cmd` from PowerShell. Automatic reload is enabled by default: play at `http://127.0.0.1:5174`, frontend edits update live, and backend source changes restart the backend. Keep the terminal open and press Ctrl+C to stop. `.\start.cmd dev` explicitly selects the same mode. For the built app without automatic reload, use `.\start.cmd run`, which builds both apps and serves the game at `http://127.0.0.1:4100`. First run `setup-database.cmd` to create a dedicated local database and apply migrations. It asks for your PostgreSQL administrator password once, creates a separate game role, and saves only the game connection encrypted with Windows DPAPI outside Git. Rerun it after updates to apply pending migrations. The launcher loads these saved settings; explicit environment settings take precedence. PostgreSQL must already be installed and running. For an existing dedicated database, run `powershell -ExecutionPolicy Bypass -File .\setup-database.ps1 -ConfigureExisting`.
 
 From this repository's root:
 

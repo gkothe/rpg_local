@@ -292,7 +292,6 @@ export class ProviderService implements Generator {
         const rulesSupported =
           process.platform === 'win32' &&
           supported &&
-          model.efforts.includes('medium') &&
           ((id === PROVIDER_ID.Claude && model.id === 'sonnet') ||
             (id === PROVIDER_ID.Codex && model.id === 'gpt-5.6-sol') ||
             (id === PROVIDER_ID.Antigravity && model.id === 'gemini-3.8-flash'));
@@ -303,11 +302,7 @@ export class ProviderService implements Generator {
             reason: rulesSupported
               ? null
               : 'Book gameplay requires a supported Windows CLI/model: Claude sonnet, Codex gpt-5.6-sol or Antigravity gemini-3.8-flash',
-            efforts: rulesSupported
-              ? id === PROVIDER_ID.Antigravity
-                ? ['low', 'medium']
-                : ['medium']
-              : [],
+            efforts: rulesSupported ? model.efforts : [],
             ...(rulesSupported ? { limits: VERIFIED_BOOK_LIMITS } : {}),
           },
           dice: {
@@ -487,12 +482,6 @@ export class ProviderService implements Generator {
         503,
         'rules_provider_unavailable',
         model.rules?.reason ?? provider.rules?.reason ?? 'Book gameplay is not verified'
-      );
-    if (!model.rules.efforts?.includes(settings.effort ?? ''))
-      throw new Problem(
-        503,
-        'rules_effort_unavailable',
-        'Select a verified book gameplay effort for this model'
       );
     await this.gameplayCapacity(settings, ceiling);
     // Schema and narrator are already included in book-mode context. Native

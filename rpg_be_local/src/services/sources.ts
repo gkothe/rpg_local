@@ -48,8 +48,22 @@ export async function extractFile(
     throw new Problem(422, 'ocr_language', 'Choose English, Portuguese, or both');
   if (bytes.length > uploadBytes) throw new Problem(413, 'upload_limit', 'File exceeds20MiB');
   const extension = path.extname(name).toLowerCase();
-  if (['.txt', '.md', '.markdown'].includes(extension)) {
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  if (extension !== '.pdf') {
+    let text: string;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch {
+      throw new Problem(415, 'source_format', 'Use a UTF-8 text document or a valid PDF.');
+    }
+    for (const character of text) {
+      const code = character.charCodeAt(0);
+      if (code <= 8 || (code >= 14 && code <= 31))
+        throw new Problem(
+          415,
+          'source_format',
+          'Binary documents are unsupported; export as text or PDF.'
+        );
+    }
     return textSource(name, text, SourceKind.File);
   }
   if (extension !== '.pdf' || bytes.subarray(0, 5).toString() !== '%PDF-')

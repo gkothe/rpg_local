@@ -686,3 +686,138 @@ hr {
 .dice-retry {
   margin-block: 1rem;
 }
+
+/* Character sections and conversational bubbles follow the original RPG interface. */
+.character-data {
+  margin: 0;
+}
+.character-data > div {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr);
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.character-data dt {
+  font-weight: bold;
+  text-transform: capitalize;
+}
+.character-data dd {
+  margin: 0;
+  min-width: 0;
+}
+.character-data .nested {
+  display: block;
+}
+.character-data .nested > dt {
+  margin-bottom: 0.5rem;
+}
+.character-data .nested > dd {
+  padding-left: 1rem;
+}
+.character-value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.character-data-list {
+  padding-left: 1.25rem;
+}
+.npc-entry > summary {
+  font-size: 1.2rem;
+  font-weight: bold;
+  padding: 0.5rem 0;
+}
+.npc-entry > article {
+  border: 0;
+  margin-top: 1rem;
+  padding: 0;
+}
+.sheet-tabs {
+  margin-bottom: 1rem;
+}
+.section-heading,
+.section-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.section-heading {
+  justify-content: space-between;
+}
+.section-heading h4 {
+  margin: 0;
+}
+.character-section textarea {
+  width: 100%;
+}
+.transcript {
+  height: 60vh;
+  min-height: 20rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1rem;
+}
+.turn {
+  display: block;
+  border: 0;
+  padding: 0.5rem 0;
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+.turn-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.player-action,
+.gm-message {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 1rem;
+  width: fit-content;
+  max-width: 85%;
+  margin: 0;
+  min-width: 0;
+}
+.player-action {
+  align-self: flex-end;
+  background: var(--raised);
+}
+.gm-message {
+  align-self: flex-start;
+  background: var(--surface);
+}
+.player-action > small,
+.gm-message > small {
+  font-family: system-ui, sans-serif;
+  font-weight: bold;
+  color: var(--sage);
+}
+.message-time {
+  display: inline-block;
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-left: 1rem;
+}
+.gm-message .prose {
+  font-size: 1rem;
+  line-height: 1.65;
+  margin-top: 0.5rem;
+}
+.composer {
+  margin-top: 1rem;
+}
+@media (max-width: 600px) {
+  .player-action,
+  .gm-message {
+    max-width: 96%;
+    padding: 0.75rem;
+  }
+  .character-data > div {
+    grid-template-columns: minmax(80px, 1fr) minmax(0, 2fr);
+    gap: 0.5rem;
+  }
+}

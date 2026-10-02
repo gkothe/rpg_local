@@ -32,13 +32,14 @@ test('real isolated PostgreSQL manual campaign, source, notes and archive round 
     page.getByRole('button', { name: `Delete character template ${name} character` })
   ).toHaveCount(0);
   await page.getByRole('button', { name: 'Sources', exact: true }).click();
-  await page.getByText('Add source material', { exact: true }).click();
+  await page.getByRole('button', { name: 'Add source', exact: true }).click();
   await page.getByLabel('Source name').fill('Smoke rules');
   await page
     .getByLabel('Paste rules or source text')
     .fill('Always describe the scene before asking for an action.');
-  await page.getByRole('button', { name: 'Add pasted text for review' }).click();
-  await page.getByRole('button', { name: 'Review text' }).click();
+  await page.getByRole('button', { name: 'Add pasted text' }).click();
+  await page.getByRole('button', { name: 'Back to sources' }).click();
+  await page.getByRole('button', { name: 'View / edit text' }).click();
   await page.getByLabel('Extracted text').fill('Always describe the scene. The bridge is closed.');
   await page.getByRole('button', { name: 'Confirm corrected text' }).click();
   await expect(page.getByText(/confirmed.*version/)).toBeVisible();

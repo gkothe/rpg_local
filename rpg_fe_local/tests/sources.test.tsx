@@ -83,11 +83,12 @@ describe('multiple source imports', () => {
       .mockRejectedValueOnce(new Error('Connection lost'));
     vi.stubGlobal('fetch', fetcher);
     render(<SourceManager campaign={fixtureCampaign()} options={options} onSaved={refreshed} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
     const input = screen.getByLabelText('Markdown, text or PDF files (select multiple)');
     expect(input).toHaveAttribute('multiple');
     expect(screen.getByLabelText('Public Google Docs URL')).toBeVisible();
     fireEvent.change(input, { target: { files: files() } });
-    fireEvent.click(screen.getByRole('button', { name: 'Import selected files for review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Import selected files' }));
     await waitFor(() => expect(refreshed).toHaveBeenCalledTimes(1));
     expect(screen.getByText('sheet.txt')).toBeVisible();
     expect(screen.queryByText('rules.md')).not.toBeInTheDocument();

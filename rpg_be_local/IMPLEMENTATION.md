@@ -66,3 +66,15 @@ Removed exact-version rejection in discovery, dice capacity and native runtime a
 ## Direct text-file imports (2026-10-02)
 
 Valid UTF-8 Markdown/plain-text file imports are immediately confirmed. PDF and other extraction drafts retain review. Existing saved drafts remain unchanged. Targeted backend tests passed (4), with root lint/typecheck/build. See ../docs/reviews/campaign-tabs-and-text-imports.md.
+
+## Optional source review (2026-10-02)
+
+User-directed policy supersedes PDF/Google Docs review prerequisites: all successful source imports are immediately confirmed. Existing explicit-draft/editor support remains in code. Activated 2 previously uploaded sources in 1 local campaign under locks/revision checks with reindexing and no text changes. Backend 83 tests passed with 42 environment-gated skips; root lint/typecheck/build passed.
+
+## Adaptive character parsing (2026-10-02)
+
+Removed the arbitrary character 8,000 ceiling and mismatched token/byte precheck. Uses actual CLI byte capacity, full-schema parsing for fitting sheets and sequential partial extraction/merge for longer sheets, with revision checks and final validation. Imports accept arbitrary UTF-8 text formats; binary data remains rejected. Verified 86 backend tests (42 gated skips), 45 frontend tests, five targeted Chrome browser tests, lint/typecheck/build. Actual Antigravity gemini-3.8-flash high parsed the user's 6,244-byte sheet and saved Sigurd as the sole player in the previously failed campaign. See ../docs/reviews/character-import-capacity.md.
+
+## Book effort selection (2026-10-02)
+
+Removed book-specific effort allowlists across providers. Native model efforts and Default now work with book rules; existing model/tool/budget checks remain. Eight provider tests, 48 frontend unit tests, six Chrome browser tests, root lint/build passed. See ../docs/reviews/book-effort-selection.md.
