@@ -97,7 +97,7 @@ export function parseAntigravityDicePhase(
   }
 }
 
-/** Explicit app-managed tool calling; native CLI tools and MCP remain unavailable. */
+/** Execute owned tools through private native MCP in one bounded logical turn. */
 export async function generateAntigravityDice(
   executable: Executable,
   settings: ProviderSettings,
