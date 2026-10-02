@@ -14,9 +14,13 @@ import {
 } from './diceProtocol.js';
 import { startDiceMcp } from './diceMcp.js';
 import { runProcess } from './processRunner.js';
+import { startGameplayMcp } from './gameplayMcp.js';
+import { gameplayToolDefinitions, type BookGameplayAdapter } from './gameplayTools.js';
+import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
+import { ruleResponseSchema } from '../domain/ruleResponse.js';
+import { diceResponseSchema } from '../domain/diceResponse.js';
 
 export const CLAUDE_DICE_VERSION = '2.1.232';
-const CLAUDE_DICE_TOOL = `mcp__dice__${DICE_TOOL_NAME}`;
 export function claudeDiceEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = { ...source };
   for (const key of Object.keys(env))
@@ -45,8 +49,12 @@ export async function generateClaudeDice(
   cwd: string,
   env: NodeJS.ProcessEnv,
   roll: RollCallback,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  book?: BookGameplayAdapter
 ): Promise<unknown> {
+  const names = gameplayToolDefinitions(!!book).map(
+    (definition) => `mcp__dice__${definition.name}`
+  );
   const isolated = claudeDiceEnvironment(env);
   const version = await runProcess(executable.binary, [...executable.prefix, '--version'], '', {
     env: isolated,
@@ -61,10 +69,9 @@ export async function generateClaudeDice(
       `Claude dice isolation requires verified CLI ${CLAUDE_DICE_VERSION}`
     );
   const protocol = new DiceProtocol(roll);
-  const endpoint = await startDiceMcp(
-    (input, id) => protocol.call(DICE_TOOL_NAME, input, id),
-    signal
-  );
+  const endpoint = book
+    ? await startGameplayMcp(gameplayToolDefinitions(true), book.dispatch, signal)
+    : await startDiceMcp((input, id) => protocol.call(DICE_TOOL_NAME, input, id), signal);
   try {
     const config = JSON.stringify({
       mcpServers: { dice: { type: 'http', url: endpoint.url, headers: endpoint.headers } },
@@ -87,7 +94,7 @@ export async function generateClaudeDice(
         '--tools',
         '',
         '--allowedTools',
-        CLAUDE_DICE_TOOL,
+        names.join(','),
         '--disable-slash-commands',
         '--strict-mcp-config',
         '--mcp-config',
@@ -102,7 +109,7 @@ export async function generateClaudeDice(
         '--max-turns',
         String(DICE_CLI_LIMITS.modelTurns),
         '--system-prompt',
-        DICE_NARRATOR,
+        book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR,
       ],
       '',
       {
@@ -126,8 +133,9 @@ export async function generateClaudeDice(
               if (
                 initialized ||
                 !Array.isArray(tools) ||
-                tools.length !== 1 ||
-                tools[0] !== CLAUDE_DICE_TOOL ||
+                tools.length !== names.length ||
+                tools.some((tool) => typeof tool !== 'string' || !names.includes(tool)) ||
+                new Set(tools).size !== names.length ||
                 !Array.isArray(servers) ||
                 servers.length !== 1 ||
                 servers[0]?.name !== 'dice' ||
@@ -144,7 +152,7 @@ export async function generateClaudeDice(
               for (const item of message?.content ?? [])
                 if (
                   item.type === CLAUDE_DICE_CONTENT_TYPE.ToolUse &&
-                  item.name !== CLAUDE_DICE_TOOL
+                  !names.includes(item.name ?? '')
                 )
                   throw new Problem(502, 'dice_isolation', 'Claude attempted an unapproved tool');
             } else if (event.type === CLAUDE_DICE_EVENT.Result) {
@@ -191,6 +199,17 @@ export async function generateClaudeDice(
                   'Claude did not report a verified dice continuation budget'
                 );
               const text = event.result.trim();
+              book?.observe?.({
+                provider: 'claude',
+                contextWindow: Math.min(
+                  ...Object.values(usage).map((value) => value.contextWindow!)
+                ),
+                outputTokens: Object.values(usage).reduce(
+                  (total, value) => total + value.outputTokens!,
+                  0
+                ),
+                modelTurns: event.num_turns as number,
+              });
               const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(text);
               final = JSON.parse(fenced ? fenced[1]! : text);
               completed = true;
@@ -201,7 +220,7 @@ export async function generateClaudeDice(
     );
     if (!completed)
       throw new Problem(502, 'claude_dice_result', 'Claude closed before completing the dice turn');
-    return final;
+    return (book ? ruleResponseSchema : diceResponseSchema).parse(final);
   } finally {
     await endpoint.close();
   }

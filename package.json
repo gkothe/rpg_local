@@ -21,7 +21,8 @@
     "test:clean-install": "node scripts/test-clean-install.mjs",
     "audit:public": "node scripts/audit-public.mjs",
     "start": "npm run start --workspace rpg-be-local",
-    "migrate": "npm run migrate --workspace rpg-be-local"
+    "migrate": "npm run migrate --workspace rpg-be-local",
+    "rules:manifest": "node --import tsx scripts/prepare-rule-manifest.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

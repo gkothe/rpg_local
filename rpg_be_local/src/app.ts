@@ -25,6 +25,7 @@ import {
   turnInputSchema,
   ocrLanguageSchema,
   transcriptionLanguageSchema,
+  campaignRuleBindingSchema,
 } from './domain/schemas.js';
 import { accessBoundary, LanAccess } from './security.js';
 import {
@@ -35,6 +36,13 @@ import {
 } from './domain/limits.js';
 import { SETTINGS_CONTRACT_VERSION } from './domain/versions.js';
 import { DICE_LIMITS } from './domain/dice.js';
+import { RULE_COLUMNS, RULE_LIMITS, ruleSlugSchema } from './domain/rules.js';
+import { RuleStore } from './services/ruleStore.js';
+import { RuleLibrary } from './services/ruleLibrary.js';
+import { RulePreview } from './services/rulePreview.js';
+import { RuleLookup } from './services/ruleLookup.js';
+import { RuleBackup } from './services/ruleBackup.js';
+import { ruleUploadStorage } from './services/ruleUpload.js';
 import {
   TURN_STATUS_OPTIONS,
   CHARACTER_TYPE_OPTIONS,
@@ -58,6 +66,7 @@ const wrap =
   };
 const param = (req: Request, key: string) => idSchema.parse(req.params[key]);
 export type AppOptions = {
+  rulePreviews?: RulePreview;
   store: Store | null;
   providers?: ProviderService;
   allowedHosts?: string[];
@@ -76,6 +85,27 @@ export function createApp(options: AppOptions) {
   const library = store ? new LibraryService(store) : null;
   const campaigns = store ? new CampaignService(store, providers) : null;
   const sources = store ? new SourceLibrary(store) : null;
+  const rules = store ? new RuleStore(store) : null;
+  const ruleLookup = new RuleLookup();
+  let ruleLibrary: RuleLibrary | null = null;
+  const getRuleLibrary = () => {
+    if (!rules) throw new Problem(503, 'database_setup', 'Configure local PostgreSQL first');
+    ruleLibrary ??= new RuleLibrary(rules, options.rulePreviews ?? new RulePreview());
+    return ruleLibrary;
+  };
+  const ruleUpload = multer({
+    storage: ruleUploadStorage(),
+    limits: {
+      files: RULE_LIMITS.importFiles,
+      fileSize: RULE_LIMITS.importFileBytes,
+      fields: 1,
+      fieldSize: RULE_LIMITS.requestBytes,
+    },
+  });
+  const backupUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { files: 1, fileSize: RULE_LIMITS.backupBytes, fields: 0 },
+  });
   const lan = new LanAccess(options.lan ?? false);
   const upload = multer({
     storage: multer.memoryStorage(),
@@ -145,6 +175,7 @@ export function createApp(options: AppOptions) {
           lan: { enabled: options.lan ?? false },
           limits: { uploadBytes },
           dice: { enabled: true, limits: DICE_LIMITS },
+          rules: { columns: RULE_COLUMNS, limits: RULE_LIMITS },
         },
       });
     })
@@ -217,6 +248,232 @@ export function createApp(options: AppOptions) {
   app.use('/api/campaigns', requireDb);
   app.use('/api/templates', requireDb);
   app.use('/api/character-templates', requireDb);
+  app.use('/api/rule-systems', requireDb);
+  app.post(
+    '/api/rule-systems/backups/imports',
+    backupUpload.single('file'),
+    wrap(async (req, res) => {
+      if (!req.file)
+        throw new Problem(422, 'upload_required', 'Choose a private rule-library backup');
+      const service = getRuleLibrary();
+      res.status(201).json({
+        data: await new RuleBackup(service.rules, service.previews).preview(req.file.buffer),
+      });
+    })
+  );
+  app.post(
+    '/api/rule-systems/backups/imports/:previewId/confirm',
+    wrap(async (req, res) => {
+      const input = z
+        .object({
+          systemId: z.uuid(),
+          systemKey: ruleSlugSchema,
+          revision: z.number().int().positive().nullable(),
+          requestId: z.uuid(),
+          replace: z.boolean(),
+        })
+        .strict()
+        .parse(req.body);
+      const service = getRuleLibrary();
+      res.json({
+        data: await new RuleBackup(service.rules, service.previews).confirm({
+          ...input,
+          previewId: param(req, 'previewId'),
+        }),
+      });
+    })
+  );
+  app.get(
+    '/api/rule-systems/:id/backups',
+    wrap(async (req, res) => {
+      const service = getRuleLibrary();
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="private-rules-${param(req, 'id')}.json"`
+      );
+      res.json({
+        data: await new RuleBackup(service.rules, service.previews).export(param(req, 'id')),
+      });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/rule-system/resolution',
+    wrap(async (req, res) => {
+      const campaign = await store!.campaign(param(req, 'id'));
+      if (!campaign.ruleResolution)
+        throw new Problem(
+          409,
+          'rules_reference_resolved',
+          'This campaign has no unresolved rule reference'
+        );
+      const reference = campaign.ruleResolution.reference;
+      const candidate = await store!.pool.query(
+        'SELECT id FROM rule_systems WHERE system_key=$1 AND kind=$2',
+        [reference.systemKey, reference.kind]
+      );
+      const current = candidate.rows[0]
+        ? await getRuleLibrary().metadata(candidate.rows[0].id)
+        : null;
+      res.json({
+        data: {
+          reference,
+          candidate: current,
+          hashChanged: current ? current.contentHash !== reference.contentHash : null,
+        },
+      });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/rule-system/resolution',
+    wrap(async (req, res) => {
+      res.json({
+        data: await campaigns!.bindRules(
+          param(req, 'id'),
+          campaignRuleBindingSchema.parse(req.body),
+          true
+        ),
+      });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/turns/:turnId/rule-reads',
+    wrap(async (req, res) => {
+      const offset = z.coerce
+        .number()
+        .int()
+        .min(0)
+        .max(RULE_LIMITS.calls)
+        .default(0)
+        .parse(req.query.cursor);
+      res.json(await rules!.history(param(req, 'id'), param(req, 'turnId'), offset));
+    })
+  );
+  app.patch(
+    '/api/campaigns/:id/rule-system',
+    wrap(async (req, res) => {
+      res.json({
+        data: await campaigns!.bindRules(
+          param(req, 'id'),
+          campaignRuleBindingSchema.parse(req.body)
+        ),
+      });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/rule-system',
+    wrap(async (req, res) => {
+      const campaign = await store!.campaign(param(req, 'id'));
+      if (campaign.ruleResolution) {
+        res.json({ data: { unresolved: campaign.ruleResolution } });
+        return;
+      }
+      res.json({
+        data: await getRuleLibrary().metadata((await rules!.resolve(campaign)).systemId),
+      });
+    })
+  );
+  app.get(
+    '/api/rule-systems',
+    wrap(async (req, res) => {
+      const { limit, offset } = page(req);
+      const items = await rules!.list(limit + 1, offset);
+      res.json({
+        data: items.slice(0, limit),
+        pagination: { nextCursor: items.length > limit ? String(offset + limit) : null },
+      });
+    })
+  );
+  app.post(
+    '/api/rule-systems',
+    wrap(async (req, res) => {
+      const input = z
+        .object({ systemKey: ruleSlugSchema, name: z.string().min(1).max(RULE_LIMITS.nameChars) })
+        .strict()
+        .parse(req.body);
+      res.status(201).json({ data: await rules!.create(input.systemKey, input.name) });
+    })
+  );
+  app.get(
+    '/api/rule-systems/:id',
+    wrap(async (req, res) => {
+      res.json({ data: await getRuleLibrary().metadata(param(req, 'id')) });
+    })
+  );
+  app.patch(
+    '/api/rule-systems/:id/instructions',
+    wrap(async (req, res) => {
+      const input = z
+        .object({
+          revision: z.number().int().positive(),
+          requestId: z.uuid(),
+          instructions: z
+            .string()
+            .refine((value) => Buffer.byteLength(value) <= RULE_LIMITS.instructionsBytes),
+        })
+        .strict()
+        .parse(req.body);
+      res.json({
+        data: await getRuleLibrary().instructions(
+          param(req, 'id'),
+          input.revision,
+          input.instructions,
+          input.requestId
+        ),
+      });
+    })
+  );
+  app.post(
+    '/api/rule-systems/:id/imports',
+    ruleUpload.array('files', RULE_LIMITS.importFiles),
+    wrap(async (req, res) => {
+      const input = z
+        .object({ revision: z.coerce.number().int().positive() })
+        .strict()
+        .parse(req.body);
+      const files = req.files as Express.Multer.File[];
+      if (!files?.length)
+        throw new Problem(422, 'rules_files_missing', 'Upload manifest.json and its column files');
+      res.status(201).json({
+        data: await getRuleLibrary().preview(
+          param(req, 'id'),
+          input.revision,
+          files.map((file) => ({ name: file.originalname, bytes: file.buffer }))
+        ),
+      });
+    })
+  );
+  app.post(
+    '/api/rule-systems/:id/imports/:previewId/confirm',
+    wrap(async (req, res) => {
+      const input = z
+        .object({ revision: z.number().int().positive(), requestId: z.uuid() })
+        .strict()
+        .parse(req.body);
+      res.json({
+        data: await getRuleLibrary().confirm(param(req, 'id'), {
+          ...input,
+          previewId: param(req, 'previewId'),
+        }),
+      });
+    })
+  );
+  for (const [route, tool] of [
+    ['search', 'rules_search'],
+    ['nodes', 'rules_get'],
+    ['mapping', 'rules_map'],
+  ] as const) {
+    app.get(
+      `/api/rule-systems/:id/${route}`,
+      wrap(async (req, res) => {
+        const system = await rules!.get(param(req, 'id'));
+        const raw: Record<string, unknown> = { ...req.query };
+        const selectedTool = tool === 'rules_get' && raw.view === 'children' ? 'rules_list' : tool;
+        if (selectedTool === 'rules_list') delete raw.view;
+        if (typeof raw.columns === 'string') raw.columns = raw.columns.split(',');
+        res.json({ data: ruleLookup.execute(system, selectedTool, raw, 'browser') });
+      })
+    );
+  }
   app.get(
     '/api/campaigns',
     wrap(async (req, res) => {

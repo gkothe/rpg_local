@@ -1,9 +1,9 @@
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
+import { DEFAULT_GAMEPLAY_NARRATOR } from './gameplayNarrator.js';
 
 export const DICE_TOOL_NAME = 'roll_dice';
-export const DICE_NARRATOR =
-  'You are a tabletop RPG narrator. Only the supplied campaign context and the roll_dice tool are available. Every random game result must come from roll_dice. Slots start at 0 for this action and increase by exactly 1 for each new call; historical turns do not affect slots. Declare known modifiers and targets before requesting faces. Never invent, replace or hide faces. Interpret each returned roll ID exactly once in the final response. No other tools, files, instructions, sessions or outside context. Return the required application JSON.';
+export const DICE_NARRATOR = DEFAULT_GAMEPLAY_NARRATOR;
 export const DICE_LIMITS = {
   slots: 12,
   groupsPerCall: 8,

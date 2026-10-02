@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
 import { Store } from '../store.js';
 import { newCampaign } from '../domain/campaign.js';
@@ -27,7 +27,23 @@ import {
   ARCHIVE_FORMAT_VERSION,
   LEGACY_ARCHIVE_FORMAT_VERSION,
   DICE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+  DICE_ARCHIVE_FORMAT_VERSION,
+  RULE_ARCHIVE_FORMAT_VERSION,
 } from '../domain/versions.js';
+import {
+  ruleContextSchema,
+  ruleReferenceSchema,
+  ruleReadSchema,
+  ruleCitationSchema,
+  RULE_LIMITS,
+  RuleSystemKind,
+  canonicalRuleJson,
+  serializedBytes,
+  DEFAULT_RULE_SYSTEM_ID,
+  type RuleReference,
+} from '../domain/rules.js';
+import { RuleStore } from './ruleStore.js';
+import { validateRuleCitations } from '../domain/ruleResponse.js';
 import { DICE_LIMITS, diceRecordSchema, diceSessionSchema } from '../domain/dice.js';
 import { rollInterpretationSchema, validateRollInterpretations } from '../domain/diceResponse.js';
 import { diceDigest } from './dice.js';
@@ -63,6 +79,12 @@ const settings = z
   .strict();
 const campaign = z
   .object({
+    ruleSystemId: uuid.nullable().optional(),
+    ruleReference: ruleReferenceSchema.optional(),
+    ruleResolution: z
+      .object({ status: z.literal('unresolved'), reference: ruleReferenceSchema })
+      .strict()
+      .optional(),
     id: uuid,
     name: z.string().min(1).max(MAX_ENTITY_NAME_CHARS),
     description: z.string(),
@@ -129,6 +151,7 @@ const campaign = z
   .strict();
 const context = z
   .object({
+    ruleContext: ruleContextSchema.optional(),
     revision: z.number().int().nonnegative(),
     prompt: z.string(),
     estimatedTokens: z.number(),
@@ -140,6 +163,9 @@ const context = z
   .strict();
 const turn = z
   .object({
+    ruleContext: ruleContextSchema.optional(),
+    ruleReads: z.array(ruleReadSchema).max(RULE_LIMITS.calls).optional(),
+    ruleCitations: z.array(ruleCitationSchema).max(RULE_LIMITS.calls).optional(),
     diceSessionId: uuid.optional(),
     retryOfTurnId: uuid.optional(),
     rolls: z.array(diceRecordSchema).max(DICE_LIMITS.slots).optional(),
@@ -182,7 +208,11 @@ const snapshot = z
 const archiveSchema = z
   .object({
     format: z.literal(ARCHIVE_FORMAT_ID),
-    version: z.union([z.literal(LEGACY_ARCHIVE_FORMAT_VERSION), z.literal(ARCHIVE_FORMAT_VERSION)]),
+    version: z.union([
+      z.literal(LEGACY_ARCHIVE_FORMAT_VERSION),
+      z.literal(DICE_ARCHIVE_FORMAT_VERSION),
+      z.literal(RULE_ARCHIVE_FORMAT_VERSION),
+    ]),
     diceSessions: z.array(diceSessionSchema).max(MAX_ARCHIVE_TURNS).optional(),
     diceRecords: z
       .array(diceRecordSchema)
@@ -196,6 +226,29 @@ const archiveSchema = z
   .strict();
 export function remapArchive(raw: unknown): Archive {
   const parsed = archiveSchema.parse(raw);
+  const hasRules =
+    parsed.campaign.ruleSystemId ||
+    parsed.campaign.ruleReference ||
+    parsed.campaign.ruleResolution ||
+    parsed.turns.some(
+      (entry) =>
+        entry.ruleContext?.kind === RuleSystemKind.Library ||
+        entry.context?.ruleContext?.kind === RuleSystemKind.Library ||
+        entry.ruleReads?.length ||
+        entry.ruleCitations?.length
+    );
+  if (hasRules && parsed.version !== RULE_ARCHIVE_FORMAT_VERSION)
+    throw new Problem(
+      422,
+      'archive_invalid',
+      'Rule references and evidence require a version 3 archive'
+    );
+  if (
+    parsed.campaign.ruleSystemId &&
+    !parsed.campaign.ruleReference &&
+    !parsed.campaign.ruleResolution
+  )
+    throw new Problem(422, 'archive_invalid', 'Book selection requires a portable rule reference');
   if (
     parsed.version === LEGACY_ARCHIVE_FORMAT_VERSION &&
     ((parsed.diceSessions?.length ?? 0) ||
@@ -228,6 +281,7 @@ export function remapArchive(raw: unknown): Archive {
   archive.memories.forEach((m) => register(m.id));
   archive.diceSessions!.forEach((session) => register(session.id));
   archive.diceRecords!.forEach((record) => register(record.id));
+  for (const entry of archive.turns) for (const read of entry.ruleReads ?? []) register(read.id);
   const tids = new Set(archive.turns.map((t) => t.id));
   const sids = new Set(old.sources.map((s) => s.id));
   const mids = new Set(archive.memories.map((m) => m.id));
@@ -377,6 +431,41 @@ export function remapArchive(raw: unknown): Archive {
       throw new Problem(422, 'archive_invalid', 'Unresolved dice record references');
   }
   for (const turn of archive.turns) {
+    const reads = turn.ruleReads ?? [];
+    const captured = turn.ruleContext ?? turn.context?.ruleContext;
+    if ((reads.length || turn.ruleCitations?.length) && !captured)
+      throw new Problem(422, 'archive_invalid', 'Rule evidence requires captured context');
+    if (
+      new Set(reads.map((read) => read.transportRequestId)).size !== reads.length ||
+      reads.reduce((sum, read) => sum + serializedBytes(read.payload), 0) >
+        RULE_LIMITS.transcriptBytes
+    )
+      throw new Problem(422, 'archive_invalid', 'Rule receipt identities or size are invalid');
+    for (const read of reads) {
+      if (
+        read.campaignId !== old.id ||
+        read.turnId !== turn.id ||
+        canonicalRuleJson(read.context) !== canonicalRuleJson(captured) ||
+        read.payload.receipt !== read.id ||
+        read.resultHash !==
+          createHash('sha256').update(canonicalRuleJson(read.payload)).digest('hex')
+      )
+        throw new Problem(422, 'archive_invalid', 'Rule receipt provenance or hash is invalid');
+    }
+    if (captured)
+      validateRuleCitations(
+        {
+          version: RULE_ARCHIVE_FORMAT_VERSION,
+          narrative: turn.narrative ?? '',
+          operations: [],
+          rollInterpretations: [],
+          ruleCitations: turn.ruleCitations ?? [],
+        },
+        reads,
+        old.id,
+        turn.id,
+        captured
+      );
     const session = archive.diceSessions!.find((session) => session.id === turn.diceSessionId);
     const previous = archive.turns.find((previous) => previous.id === turn.retryOfTurnId);
     if (
@@ -440,6 +529,13 @@ export function remapArchive(raw: unknown): Archive {
   }
   for (const record of out.diceRecords!) remapRecord(record);
   out.campaign.id = mapped(old.id);
+  out.campaign.ruleSystemId = null;
+  if (out.campaign.ruleReference?.kind === RuleSystemKind.Library)
+    out.campaign.ruleResolution = { status: 'unresolved', reference: out.campaign.ruleReference };
+  if (parsed.version !== RULE_ARCHIVE_FORMAT_VERSION) {
+    delete out.campaign.ruleReference;
+    delete out.campaign.ruleResolution;
+  }
   for (const c of out.campaign.characters) c.id = mapped(c.id);
   for (const source of out.campaign.sources) {
     source.id = mapped(source.id);
@@ -457,6 +553,14 @@ export function remapArchive(raw: unknown): Archive {
   if (out.campaign.memory) remapMemory(out.campaign.memory);
   for (const m of out.memories) remapMemory(m);
   for (const t of out.turns) {
+    for (const read of t.ruleReads ?? []) {
+      read.id = mapped(read.id);
+      read.campaignId = out.campaign.id;
+      read.turnId = mapped(t.id);
+      read.payload.receipt = read.id;
+      read.resultHash = createHash('sha256').update(canonicalRuleJson(read.payload)).digest('hex');
+    }
+    for (const citation of t.ruleCitations ?? []) citation.receiptId = mapped(citation.receiptId);
     t.rolls ??= [];
     t.rollInterpretations ??= [];
     if (t.diceSessionId) t.diceSessionId = mapped(t.diceSessionId);
@@ -490,6 +594,33 @@ export function remapArchive(raw: unknown): Archive {
 }
 export class LibraryService {
   constructor(readonly store: Store) {}
+  private async resolveReference(c: Campaign, client: import('pg').PoolClient) {
+    const reference = c.ruleResolution?.reference ?? c.ruleReference;
+    c.ruleSystemId = null;
+    if (!reference || reference.kind === RuleSystemKind.ModelKnowledge) {
+      delete c.ruleResolution;
+      return;
+    }
+    const found = await client.query(
+      'SELECT id,kind,content_hash FROM rule_systems WHERE system_key=$1 FOR SHARE',
+      [reference.systemKey]
+    );
+    const row = found.rows[0];
+    if (row?.kind === reference.kind && row.content_hash === reference.contentHash) {
+      c.ruleSystemId = row.id;
+      delete c.ruleResolution;
+    } else c.ruleResolution = { status: 'unresolved', reference };
+  }
+  private async reference(c: Campaign, client: import('pg').PoolClient): Promise<RuleReference> {
+    if (c.ruleResolution) return c.ruleResolution.reference;
+    const system = await new RuleStore(this.store).get(
+      c.ruleSystemId ?? DEFAULT_RULE_SYSTEM_ID,
+      client,
+      'share'
+    );
+    const { systemKey, systemName, kind, contentHash } = system;
+    return { systemKey, systemName, kind, contentHash };
+  }
   async listTemplates(kind: 'campaign' | 'character', limit: number, offset: number) {
     const table = kind === 'campaign' ? 'templates' : 'character_templates';
     const result = await this.store.pool.query(
@@ -583,7 +714,7 @@ export class LibraryService {
           groups: row.groups,
           createdAt: new Date(row.created_at).toISOString(),
         })),
-        campaign: c,
+        campaign: { ...c, ruleSystemId: null, ruleReference: await this.reference(c, client) },
         turns,
         snapshots: snaps.rows.map((r) => r.document as Snapshot),
         memories: memories.rows.map((r) => r.document as Memory),
@@ -593,12 +724,32 @@ export class LibraryService {
   async import(raw: unknown): Promise<Campaign> {
     const archive = remapArchive(raw);
     return this.store.transaction(async (client) => {
+      await this.resolveReference(archive.campaign, client);
       await this.store.insert(archive.campaign, client);
       for (const t of archive.turns)
         await client.query(
           'INSERT INTO turns(id,campaign_id,request_id,payload_hash,status,document,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',
           [t.id, archive.campaign.id, t.requestId, 'imported', t.status, t, t.createdAt]
         );
+      for (const t of archive.turns)
+        for (const read of t.ruleReads ?? [])
+          await client.query(
+            'INSERT INTO turn_rule_reads(id,campaign_id,turn_id,system_id,captured_context,tool_name,transport_request_id,argument_digest,result_hash,payload,transcript_bytes,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+            [
+              read.id,
+              read.campaignId,
+              read.turnId,
+              read.context.systemId,
+              read.context,
+              read.tool,
+              read.transportRequestId,
+              read.argumentDigest,
+              read.resultHash,
+              read.payload,
+              serializedBytes(read.payload),
+              read.createdAt,
+            ]
+          );
       for (const s of archive.snapshots)
         await client.query('INSERT INTO snapshots(turn_id,campaign_id,document) VALUES($1,$2,$3)', [
           s.turnId,
@@ -661,6 +812,8 @@ export class LibraryService {
         throw conflict('Campaign changed; refresh before saving template');
       await this.store.assertIdle(c.id, client);
       const setup = {
+        ruleSystemId: null,
+        ruleReference: await this.reference(c, client),
         name: c.name,
         description: c.description,
         instructions: c.instructions,
@@ -702,6 +855,7 @@ export class LibraryService {
         ...pin,
         sourceId: map.get(pin.sourceId)!,
       }));
+      await this.resolveReference(c, client);
       await this.store.insert(c, client);
       await this.store.reindex(c, client);
       return c;

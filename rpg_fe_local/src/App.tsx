@@ -4,6 +4,12 @@ import LibraryPage from './pages/Library';
 import Setup from './pages/Setup';
 import PlayPage from './pages/Play';
 import SettingsPage from './pages/Settings';
+import Rules from './pages/Rules';
+import RuleSystemEditor from './features/rules/RuleSystemEditor';
+function RuleSystemRoute() {
+  const { id } = useParams();
+  return <RuleSystemEditor key={id} id={id!} />;
+}
 function CampaignRoute() {
   const { id } = useParams();
   return <PlayPage key={id} />;
@@ -30,6 +36,10 @@ export default function App() {
             <SettingsIcon size={17} />
             Settings
           </NavLink>
+          <NavLink to="/rules">
+            <BookOpen size={17} />
+            Rules
+          </NavLink>
         </nav>
       </header>
       <main id="main">
@@ -38,6 +48,8 @@ export default function App() {
           <Route path="/new" element={<Setup />} />
           <Route path="/campaigns/:id" element={<CampaignRoute />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/rules" element={<Rules />} />
+          <Route path="/rules/:id" element={<RuleSystemRoute />} />
           <Route
             path="*"
             element={

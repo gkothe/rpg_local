@@ -2,7 +2,13 @@ import { useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Send, Undo2, Download, BookmarkPlus } from 'lucide-react';
 import { useResource } from '../hooks/useResource';
-import type { CampaignDetail, Provider, Settings, Turn } from '../services/types';
+import type {
+  CampaignDetail,
+  Provider,
+  Settings,
+  Turn,
+  RuleSystemMetadata,
+} from '../services/types';
 import { request, requestCollection, json, errorMessage } from '../services/client';
 import { ErrorNotice, Empty } from '../components/Controls';
 import ProviderPicker from '../features/providers/ProviderPicker';
@@ -14,11 +20,14 @@ import { useTurn } from '../features/play/useTurn';
 import { ReadAloud } from '../features/audio/ReadAloud';
 import { Dictation } from '../features/audio/Dictation';
 import { DiceRolls } from '../features/play/DiceRolls';
+import RuleSystemPicker from '../features/rules/RuleSystemPicker';
+import RuleEvidence from '../features/rules/RuleEvidence';
 export default function PlayPage() {
   const { id } = useParams();
   const [search] = useSearchParams();
   const resource = useResource<CampaignDetail>(`/campaigns/${id}`),
     providers = useResource<Provider[]>('/providers'),
+    ruleSystem = useResource<RuleSystemMetadata>(`/campaigns/${id}/rule-system`),
     settings = useResource<Settings>('/settings');
   const [tab, setTab] = useState(search.get('setup') === '1' ? 'sources' : 'play'),
     [draft, setDraft] = useState(''),
@@ -40,7 +49,21 @@ export default function PlayPage() {
         )}
       </div>
     );
-  const playable = !!settings.data && validProvider(providers.data || [], campaign.settings);
+  const provider = providers.data?.find((provider) => provider.id === campaign.settings.provider);
+  const model = provider?.models.find((model) => model.id === campaign.settings.model);
+  const bookSelected = !!campaign.ruleSystemId;
+  const rulesBlocked = campaign.ruleResolution
+    ? 'Resolve the saved rule-library reference before playing.'
+    : bookSelected &&
+        (!provider?.rules?.supported ||
+          !model?.rules?.supported ||
+          !model.rules.efforts?.includes(campaign.settings.effort ?? ''))
+      ? (model?.rules?.reason ??
+        provider?.rules?.reason ??
+        'Book gameplay requires a verified CLI/model with medium effort.')
+      : '';
+  const playable =
+    !!settings.data && !rulesBlocked && validProvider(providers.data || [], campaign.settings);
   async function exportCampaign() {
     if (savingGuard.current) return;
     savingGuard.current = true;
@@ -107,6 +130,38 @@ export default function PlayPage() {
       <ErrorNotice message={error || resource.error || providers.error} />
       {feedback && <p role="status">{feedback}</p>}
       <div className="panel provider-panel">
+        <RuleSystemPicker
+          campaignId={campaign.id}
+          value={campaign.ruleSystemId ?? null}
+          unresolved={campaign.ruleResolution?.reference}
+          disabled={game.busy || saving}
+          onChange={async (systemId) => {
+            if (savingGuard.current) return;
+            savingGuard.current = true;
+            setSaving(true);
+            try {
+              await request(
+                `/campaigns/${id}/rule-system${campaign.ruleResolution ? '/resolution' : ''}`,
+                json(campaign.ruleResolution ? 'POST' : 'PATCH', {
+                  revision: campaign.revision,
+                  systemId,
+                  requestId: crypto.randomUUID(),
+                })
+              );
+              await resource.reload();
+              await ruleSystem.reload();
+              setError('');
+              setFeedback(
+                'Rule selection saved. The next new action uses the latest published rules.'
+              );
+            } catch (error) {
+              setError(errorMessage(error));
+            } finally {
+              savingGuard.current = false;
+              setSaving(false);
+            }
+          }}
+        />
         <h2>Game master</h2>
         <p className="muted">
           Change CLI, model or effort between turns. Your campaign, characters and saved context
@@ -228,6 +283,14 @@ export default function PlayPage() {
                     <DiceRolls
                       turn={t}
                       characters={campaign.characters}
+                      terminal={
+                        !!settings.data?.turnStatusOptions.find((option) => option.id === t.status)
+                          ?.terminal
+                      }
+                    />
+                    <RuleEvidence
+                      turn={t}
+                      current={ruleSystem.data ?? undefined}
                       terminal={
                         !!settings.data?.turnStatusOptions.find((option) => option.id === t.status)
                           ?.terminal
@@ -415,7 +478,11 @@ export default function PlayPage() {
                 Send action
               </button>
             </div>
-            {!playable && <p className="muted">Select an available CLI and model above to play.</p>}
+            {!playable && (
+              <p className="muted">
+                {rulesBlocked || 'Select an available CLI and model above to play.'}
+              </p>
+            )}
             {settings.data && !settings.data.audio.available && (
               <small className="muted">
                 Dictation unavailable:{' '}

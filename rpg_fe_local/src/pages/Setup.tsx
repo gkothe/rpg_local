@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Field, ErrorNotice } from '../components/Controls';
 import { useResource } from '../hooks/useResource';
 import ProviderPicker from '../features/providers/ProviderPicker';
+import RuleSystemPicker from '../features/rules/RuleSystemPicker';
 import type { Campaign, Provider, ProviderSettings } from '../services/types';
 import { request, json, errorMessage } from '../services/client';
 export default function Setup() {
@@ -11,6 +12,7 @@ export default function Setup() {
     [name, setName] = useState(''),
     [description, setDescription] = useState(''),
     [instructions, setInstructions] = useState(''),
+    [ruleSystemId, setRuleSystemId] = useState<string | null>(null),
     [settings, setSettings] = useState<ProviderSettings>({ provider: '', model: '', effort: null }),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
@@ -37,7 +39,13 @@ export default function Setup() {
           try {
             const c = await request<Campaign>(
               '/campaigns',
-              json('POST', { name: name.trim(), description, instructions, settings })
+              json('POST', {
+                name: name.trim(),
+                description,
+                instructions,
+                settings,
+                systemId: ruleSystemId,
+              })
             );
             navigate(`/campaigns/${c.id}?setup=1`);
           } catch (e) {
@@ -79,6 +87,7 @@ export default function Setup() {
           />
         </Field>
         <h2>Game master</h2>
+        <RuleSystemPicker value={ruleSystemId} onChange={setRuleSystemId} disabled={busy} />
         <ProviderPicker
           providers={providers.data || []}
           value={settings}

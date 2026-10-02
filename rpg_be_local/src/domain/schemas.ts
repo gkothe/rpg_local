@@ -74,10 +74,18 @@ export const memoryJsonSchema = z.toJSONSchema(memorySchema);
 export const draftJsonSchema = z.toJSONSchema(draftSchema);
 export const campaignCreateSchema = z
   .object({
+    systemId: idSchema.nullable().optional(),
     name: z.string().trim().min(1).max(MAX_ENTITY_NAME_CHARS),
     description: z.string().max(MAX_LONG_TEXT_CHARS).default(''),
     instructions: z.string().max(MAX_LONG_TEXT_CHARS).default(''),
     settings: settingsSchema.optional(),
+  })
+  .strict();
+export const campaignRuleBindingSchema = z
+  .object({
+    revision: z.number().int().nonnegative(),
+    requestId: z.uuid(),
+    systemId: idSchema.nullable(),
   })
   .strict();
 export const campaignPatchSchema = z

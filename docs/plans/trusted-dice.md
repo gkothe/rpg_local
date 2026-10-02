@@ -77,37 +77,37 @@ The finished chat answer shows the actual faces, original declaration and the GM
 
 ## Requirements and coverage
 
-| ID      | Requirement                                                                               | Tasks                           |
-| ------- | ----------------------------------------------------------------------------------------- | ------------------------------- |
-| FR-001  | All requested game randomness uses cryptographic backend dice; generic faces only.        | T003–T006                       |
-| FR-002  | Automatic bounded calls using fresh per-turn application context and verified provider phases.                         | T010–T017, T024–T025            |
-| FR-003  | Pre-result declarations, immutable faces, explicit later interpretation/corrections.      | T005–T009, T020–T025, T038–T039 |
-| FR-004  | Only owned dice tool, no ambient MCP/tools/customizations.                                | T001, T010–T017                 |
-| FR-005  | Persist before revealing; exact replay and ordered recovery across failures.              | T007–T009, T026–T029            |
-| FR-006  | Preserve uncertain request-ID behavior; explicit terminal retry contract.                 | T028–T035                       |
-| FR-007  | Cancellation, ownership/revision checks, atomic state commit and undo.                    | T024–T029                       |
-| FR-008  | All recorded dice visible in terminal chat/audit, no live roll UI.                        | T036–T039                       |
-| FR-009  | Archive upgrade with backward import and valid remapped references.                       | T030–T031                       |
-| FR-010  | Provider switching with saved context and explicit dice capability diagnostics.           | T018–T019, T028–T029, T036–T037 |
-| FR-011  | No dice in compaction/extraction; no future roll pool or hidden fallback.                 | T016–T017, T022–T025            |
-| NFR-001 | Enforce numeric dice, byte, call, deadline and context limits below.                      | T003–T006, T010–T017, T024–T025 |
-| NFR-002 | No tokens, private notes, MCP capability secrets or raw CLI logs in public artifacts.     | T010–T011, T040–T043            |
-| NFR-003 | Mocked boundary, isolated DB and Windows live-provider evidence all required for release. | T001, T007–T039, T042–T044      |
+| ID      | Requirement                                                                                    | Tasks                           |
+| ------- | ---------------------------------------------------------------------------------------------- | ------------------------------- |
+| FR-001  | All requested game randomness uses cryptographic backend dice; generic faces only.             | T003–T006                       |
+| FR-002  | Automatic bounded calls using fresh per-turn application context and verified provider phases. | T010–T017, T024–T025            |
+| FR-003  | Pre-result declarations, immutable faces, explicit later interpretation/corrections.           | T005–T009, T020–T025, T038–T039 |
+| FR-004  | Only owned dice tool, no ambient MCP/tools/customizations.                                     | T001, T010–T017                 |
+| FR-005  | Persist before revealing; exact replay and ordered recovery across failures.                   | T007–T009, T026–T029            |
+| FR-006  | Preserve uncertain request-ID behavior; explicit terminal retry contract.                      | T028–T035                       |
+| FR-007  | Cancellation, ownership/revision checks, atomic state commit and undo.                         | T024–T029                       |
+| FR-008  | All recorded dice visible in terminal chat/audit, no live roll UI.                             | T036–T039                       |
+| FR-009  | Archive upgrade with backward import and valid remapped references.                            | T030–T031                       |
+| FR-010  | Provider switching with saved context and explicit dice capability diagnostics.                | T018–T019, T028–T029, T036–T037 |
+| FR-011  | No dice in compaction/extraction; no future roll pool or hidden fallback.                      | T016–T017, T022–T025            |
+| NFR-001 | Enforce numeric dice, byte, call, deadline and context limits below.                           | T003–T006, T010–T017, T024–T025 |
+| NFR-002 | No tokens, private notes, MCP capability secrets or raw CLI logs in public artifacts.          | T010–T011, T040–T043            |
+| NFR-003 | Mocked boundary, isolated DB and Windows live-provider evidence all required for release.      | T001, T007–T039, T042–T044      |
 
 ## Decisions
 
-| Decision                                                      | Why                                                                                        | Alternatives rejected                                                        |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Generic numeric dice groups, individual faces only            | Tool handles randomness, AI handles all game interpretation                                | Combat engine; Vampire-specific critical/Hunger calculation                  |
-| Automatic GM calls for every random check                     | User does not want a manual roll interaction                                               | Dice tray button; approval of each roll                                      |
-| Declare known modifiers and target before reveal              | Discourages retroactive outcome shaping                                                    | Silent modifier changes after a poor roll                                    |
-| Tool results authoritative; AI interpretation separate        | Preserves original dice and explains rule corrections                                      | AI returning supposedly authoritative faces                                  |
-| Provider-specific bounded phases, fresh campaign context each turn | Keeps only application-owned bounded history; Codex interrupts before hidden continuation                               | Long-lived campaign session or unverifiable opaque continuation                           |
-| Owned private MCP listener bound to loopback                  | Backend can persist each call before replying, without giving a child database credentials | CLI tool with DB credentials; general-purpose user MCP; public dice endpoint |
-| No visible future random pool                                 | GM cannot inspect upcoming faces before choosing a check                                   | Brainstorm entropy ledger                                                    |
-| Exact ordered replay on retry                                 | Keeps already revealed randomness fixed despite provider failure                           | Regenerate on retry; merge arbitrary model-selected old results              |
-| Store dice audit separately from canonical state              | Undo must not erase evidence of previous randomness                                        | Delete rolls when undoing or failing a turn                                  |
-| No guaranteed cache savings or latency promise                | Subscription usage and provider caching differ                                             | Treat API cache discounts as subscription savings                            |
+| Decision                                                           | Why                                                                                        | Alternatives rejected                                                        |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Generic numeric dice groups, individual faces only                 | Tool handles randomness, AI handles all game interpretation                                | Combat engine; Vampire-specific critical/Hunger calculation                  |
+| Automatic GM calls for every random check                          | User does not want a manual roll interaction                                               | Dice tray button; approval of each roll                                      |
+| Declare known modifiers and target before reveal                   | Discourages retroactive outcome shaping                                                    | Silent modifier changes after a poor roll                                    |
+| Tool results authoritative; AI interpretation separate             | Preserves original dice and explains rule corrections                                      | AI returning supposedly authoritative faces                                  |
+| Provider-specific bounded phases, fresh campaign context each turn | Keeps only application-owned bounded history; Codex interrupts before hidden continuation  | Long-lived campaign session or unverifiable opaque continuation              |
+| Owned private MCP listener bound to loopback                       | Backend can persist each call before replying, without giving a child database credentials | CLI tool with DB credentials; general-purpose user MCP; public dice endpoint |
+| No visible future random pool                                      | GM cannot inspect upcoming faces before choosing a check                                   | Brainstorm entropy ledger                                                    |
+| Exact ordered replay on retry                                      | Keeps already revealed randomness fixed despite provider failure                           | Regenerate on retry; merge arbitrary model-selected old results              |
+| Store dice audit separately from canonical state                   | Undo must not erase evidence of previous randomness                                        | Delete rolls when undoing or failing a turn                                  |
+| No guaranteed cache savings or latency promise                     | Subscription usage and provider caching differ                                             | Treat API cache discounts as subscription savings                            |
 
 ## Data and interfaces
 
@@ -115,7 +115,7 @@ The finished chat answer shows the actual faces, original declaration and the GM
 
 Canonical constants and validators belong in `rpg_be_local/src/domain/dice.ts`; the frontend consumes the served contract rather than duplicating bounds or enums.
 
-The only gameplay tool is `roll_dice`; Claude attaches it through private MCP and Codex through native dynamic tools. The session capability is bearer authorization for an application-owned endpoint, not a provider API key. Its strict input contains:
+The only gameplay tool is `roll_dice`; Claude attaches it through private MCP, Codex through native dynamic tools, and Antigravity through explicit application-managed JSON tool requests between fresh isolated no-native-tools CLI phases. The session capability is bearer authorization for an application-owned endpoint, not a provider API key. Its strict input contains:
 
 - `slot`: integer 0..11, sequential within an attempt. This is a stable logical roll position, not a provider-generated tool-call ID.
 - `groups`: 1..8 ordered objects `{label, count, sides}`. Label: 1..80 characters, unique within the call; count: 1..50; sides: integer 2..1,000,000. At most 100 faces per call, 200 newly drawn faces per logical turn.
@@ -169,14 +169,14 @@ Render a `DiceRolls` section under each terminal chat attempt with original face
 
 ## Complexity
 
-| Addition/deviation                               | Why needed                                                                           | Simpler alternative rejected because                                                                                             |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| Codex fresh-phase dynamic-tool transport | Native MCP adds helpers and no verified output-token override exists; interrupting before a tool reply bounds application-owned context | Opaque native continuation or ambient MCP helpers would violate isolation/budget gates |
-| Official MCP SDK dependency in backend workspace | Standard transport/protocol validation and lifecycle                                 | Handwritten MCP protocol adds compatibility and parsing risks                                                                    |
-| Private per-attempt MCP listener                 | Calls reach backend audit without exposing DB credentials to a CLI child             | Public dice HTTP route increases accidental exposure; independent stdio dice child cannot safely persist without an extra bridge |
-| Provider-specific dice launch contracts          | Current no-tools adapters intentionally reject this behavior                         | Simply enabling global MCP would import unrelated tools/customizations                                                           |
-| Logical roll session + explicit retry route      | Idempotent results must survive terminal failures and changed CLI call IDs           | Existing uncertain-request retry does not restart generation                                                                     |
-| Separate dice response and archive versions      | Existing strict schemas reject new fields; interpretations need validated references | Reusing version 1 ambiguously breaks existing imports/consumers                                                                  |
+| Addition/deviation                               | Why needed                                                                                                                              | Simpler alternative rejected because                                                                                             |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Codex fresh-phase dynamic-tool transport         | Native MCP adds helpers and no verified output-token override exists; interrupting before a tool reply bounds application-owned context | Opaque native continuation or ambient MCP helpers would violate isolation/budget gates                                           |
+| Official MCP SDK dependency in backend workspace | Standard transport/protocol validation and lifecycle                                                                                    | Handwritten MCP protocol adds compatibility and parsing risks                                                                    |
+| Private per-attempt MCP listener                 | Calls reach backend audit without exposing DB credentials to a CLI child                                                                | Public dice HTTP route increases accidental exposure; independent stdio dice child cannot safely persist without an extra bridge |
+| Provider-specific dice launch contracts          | Current no-tools adapters intentionally reject this behavior                                                                            | Simply enabling global MCP would import unrelated tools/customizations                                                           |
+| Logical roll session + explicit retry route      | Idempotent results must survive terminal failures and changed CLI call IDs                                                              | Existing uncertain-request retry does not restart generation                                                                     |
+| Separate dice response and archive versions      | Existing strict schemas reject new fields; interpretations need validated references                                                    | Reusing version 1 ambiguously breaks existing imports/consumers                                                                  |
 
 ## Clarifications
 
@@ -194,7 +194,7 @@ Render a `DiceRolls` section under each terminal chat attempt with original face
 - Undo retains audit, while a deliberately new action draws fresh randomness. Only explicit failed/cancelled recovery preserves a logical session.
 - A failed retry after edited gameplay context is refused; it never silently borrows a newer context. Explain this in the UI/docs.
 - **Unverified technical gate:** installed CLI versions must accept a verified private MCP or native dynamic-tool transport, expose only the owned tool, complete multiple tool steps with structured final output, and enforce bounded continuation. Official support alone is insufficient.
-- Antigravity currently excludes inherited MCP and discovers its owned agent globally. If it cannot attach only the per-attempt MCP server without modifying shared config or inheriting other tools, report that capability as unsupported; stop and revise that adapter's approach before feature release.
+- Antigravity excludes inherited MCP and discovers its uniquely owned temporary agent globally. Installed 1.2.14 did not attach private MCP. The revised transport accepts explicit application JSON dice requests, executes persistent DiceService, and sends canonical request/result history into a fresh isolated no-native-tools CLI phase. Each phase has a 12,800-byte serialized input ceiling, checked single-inference usage, aggregate output and whole-attempt deadline; no opaque provider history is reused.
 - No product questions remain. Transport isolation, usage reporting and Windows model entitlement are verification work, not user decisions. Do not present this plan as a completed compatibility test.
 
 ## Risks and mitigations
@@ -248,8 +248,8 @@ Tasks are sequential. Each test/implementation pair is one green checkpoint; wor
 - [x] T013 [US1] Add an explicit dice-only Codex launch/output path in `rpg_be_local/src/providers/codexDice.ts`, retaining existing no-tools launch, strict payload transport, clean environment and per-version isolation gates.
 - [x] T014 [US1] Write failing Claude dice-only MCP/final-output contract tests in `rpg_be_local/tests/diceProtocol.test.ts` (pair with T015).
 - [x] T015 [US1] Implement the verified Claude dice-only launch/parser contract in `rpg_be_local/src/providers/claudeDice.ts`; restrict availability as well as approvals, retain strict MCP configuration and no ambient customization.
-- [ ] T016 [US1] Write failing Antigravity owned-MCP and multi-step final-output tests in `rpg_be_local/tests/antigravityDice.test.ts` (pair with T017).
-- [ ] T017 [US1] Implement the verified Antigravity dice-only launch/parser in `rpg_be_local/src/providers/antigravityDice.ts`, preserving the owned-agent isolation boundary; fail closed if T001 cannot establish it.
+- [x] T016 [US1] Write failing Antigravity app-managed tool phase, isolation, cancellation and context tests in `rpg_be_local/tests/antigravityDice.test.ts` (pair with T017).
+- [x] T017 [US1] Implement the verified Antigravity app-managed JSON dice launch/parser in `rpg_be_local/src/providers/antigravityDice.ts`, preserving the owned-agent isolation boundary; fail closed if T001 cannot establish it.
 - [x] T018 [US1] Write failing gameplay-versus-no-tools dispatch and provider/model dice-capability tests in `rpg_be_local/tests/providers.test.ts` (pair with T019).
 - [x] T019 [US1] Extend generation purpose/options and explicit dice diagnostics in `rpg_be_local/src/providers/service.ts`; only gameplay receives the owned dice capability, and compaction/extraction remain tool-free. Capacity includes provider-specific continuation reserves and rejects unverifiable budgets.
 - [x] T020 [US1] Add backward-compatible dice/retry audit fields and explicit legacy/new archive types to `rpg_be_local/src/domain/types.ts`; keep old turns readable and canonical faces owned by persisted records. Derive version members from the named constants introduced in T002.
@@ -296,7 +296,7 @@ Tasks are sequential. Each test/implementation pair is one green checkpoint; wor
 
 - [x] T041 Update the public dice/retry/diagnostics/archive contract in `rpg_be_local/docs/api-contract.md` with all identities, numeric/byte limits, failures and compatibility semantics.
 - [x] T042 Add Windows browser acceptance for all-visible terminal dice, provider switching, preserved retry and undo/export/import in `rpg_fe_local/tests/e2e/dice.spec.ts`; real subscription calls remain explicit opt-in checks.
-- [ ] T043 Record actual Windows native and live Codex/Claude/Antigravity results, versions/models, tool isolation, preserved retry, bounded usage and measured latency in `docs/reviews/dice-provider-capabilities.md`; run public audit and report unverified/blocked models explicitly, without raw private logs.
+- [x] T043 Record actual Windows native and live Codex/Claude/Antigravity results, versions/models, tool isolation, preserved retry, bounded usage and measured latency in `docs/reviews/dice-provider-capabilities.md`; run public audit and report unverified/blocked models explicitly, without raw private logs.
 - [x] T044 Document user-facing dice-only behavior, visible corrections, limits, retry conflicts and archive compatibility in `README.md`.
 - [x] T045 Reconcile requirements/tasks and actual verification evidence in `docs/plans/trusted-dice.md`; mark only evidenced work complete. Do not call a blocked provider release complete.
 
@@ -323,7 +323,6 @@ The shared dice feature is connected to production gameplay, explicit recovery, 
 
 Retained tests are consolidated rather than split into every originally proposed filename. PostgreSQL integration covers failed final validation, crash recovery, cancellation with late output, unchanged ordered replay, provider switching/capacity, Supertest retry identity/status, full undo, v2 remapping and malformed archive rejection. Existing v1 import/compaction regressions remain. Native anonymous Codex checks prove only-dice exposure and fresh phase boundaries; actual subscription checks are separately labelled. Browser fixtures cover terminal faces, draft-preserving retry, undo audit and export/import. See the capability report for actual totals and limitations.
 
-Open work is explicit: T016/T017 Antigravity owned attachment/budget/native acceptance is blocked by installed-version evidence; no unsupported adapter is shipped. T043 all-provider release acceptance remains open because Antigravity is unsupported. All feasible shared, Codex/Claude, recovery, archive, frontend and retained-test tasks are implemented. T018 now has retained provider/model gating tests; T024 includes a deterministic whole-attempt timeout preserving dice; T036 includes direct model-specific picker gating. T042 browser fixtures verify export/import UI audit, while actual archive validation/remapping is proven separately in PostgreSQL integration. These are 42 implemented tasks and 3 open all-provider gate tasks, rather than full release completion.
+Antigravity 1.2.14 now has a verified alternative to unavailable owned MCP attachment: explicit application-managed JSON tool calls through the real subscription CLI, with fresh isolated phases and persistent backend crypto rolls. Two actual Gemini 3.8 Flash/low PostgreSQL turns completed; a post-provider failure followed by explicit retry preserved the exact stored UUID, face 6 and declaration. Retained fixtures cover canonical result transport, rejected native/foreign capabilities, cancelled setup, context overflow and installed-model gating with a separate phase reserve. T016/T017/T043 are complete on this evidenced transport; all 45 tasks are implemented. See the provider capability report for current counts and tested-model limits.
 
-No Android/macOS/Linux acceptance is claimed. All-provider release is not complete. Antigravity requires documented exclusive owned attachment/budget controls or a future explicit scope decision; neither simulated rolls nor ambient tooling is an acceptable workaround.
-
+No Android/macOS/Linux acceptance is claimed. Unverified CLI versions fail closed, and individual model entitlement remains a real-call check.

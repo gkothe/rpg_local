@@ -4,7 +4,16 @@ import { z } from 'zod';
 import type { ProviderSettings } from '../domain/types.js';
 import type { Executable } from './discovery.js';
 import { Problem } from '../errors.js';
-import { DICE_LIMITS, DICE_TOOL_NAME, type DiceResult } from '../domain/dice.js';
+import { DICE_LIMITS, DICE_TOOL_NAME } from '../domain/dice.js';
+import { RULE_LIMITS } from '../domain/rules.js';
+import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
+import { ruleResponseSchema } from '../domain/ruleResponse.js';
+import { diceResponseSchema } from '../domain/diceResponse.js';
+import {
+  gameplayToolDefinitions,
+  type BookGameplayAdapter,
+  type GameplayToolResult,
+} from './gameplayTools.js';
 import {
   CODEX_TRANSPORT_SCHEMA,
   codexEnvironment,
@@ -21,7 +30,6 @@ import {
   DICE_CLI_LIMITS,
   DICE_NARRATOR,
   DiceProtocol,
-  diceToolSchema,
   type RollCallback,
 } from './diceProtocol.js';
 import { runProcess } from './processRunner.js';
@@ -53,8 +61,10 @@ export async function generateCodexDice(
   cwd: string,
   env: NodeJS.ProcessEnv,
   roll: RollCallback,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  book?: BookGameplayAdapter
 ): Promise<unknown> {
+  const narrator = book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR;
   const inspected = await inspectCodex(executable, env);
   const metadata = inspected.metadata as { models: { slug: string; context_window?: number }[] };
   const model = inspected.models.find((option) => option.id === settings.model);
@@ -84,14 +94,14 @@ export async function generateCodexDice(
       JSON.stringify({
         models: metadata.models.map((model) => ({
           ...model,
-          base_instructions: DICE_NARRATOR,
+          base_instructions: narrator,
           supports_parallel_tool_calls: false,
         })),
       })
     );
     await writeFile(
       instructionsPath,
-      `${DICE_NARRATOR} Return a transport object with payload_json encoding the application JSON.`
+      `${narrator} Return a transport object with payload_json encoding the application JSON.`
     );
     const config = {
       ...isolatedCodexConfig(catalogPath, instructionsPath),
@@ -106,7 +116,8 @@ export async function generateCodexDice(
       { ...codexEnvironment(env), CODEX_HOME: isolatedHome },
       config,
       roll,
-      signal
+      signal,
+      book
     );
   } finally {
     await cleanDiceHome(home, isolatedHome);
@@ -129,21 +140,25 @@ export async function runCodexDicePhases(
   env: NodeJS.ProcessEnv,
   config: Record<string, unknown>,
   roll: RollCallback,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  book?: BookGameplayAdapter
 ): Promise<unknown> {
   const args = [...executable.prefix, 'app-server', '--stdio'];
   for (const [key, value] of Object.entries(config))
     args.push('-c', `${key}=${JSON.stringify(value)}`);
   const protocol = new DiceProtocol(roll);
-  const transcript: { arguments: unknown; result: DiceResult }[] = [];
+  const transcript: { tool?: string; arguments: unknown; result: GameplayToolResult }[] = [];
+  const definitions = gameplayToolDefinitions(!!book);
   const deadline = Date.now() + DICE_LIMITS.attemptMs;
   let outputBytes = 0;
   for (let phase = 0; phase < DICE_CLI_LIMITS.modelTurns; phase++) {
     const phasePrompt =
       prompt +
-      '\nApplication-owned dice transcript (already executed; do not request these slots again): ' +
+      '\nApplication-owned gameplay transcript (already executed; do not repeat these calls): ' +
       JSON.stringify(transcript) +
-      '\nRequest at most ONE next roll in this phase. Otherwise return the final schema response acknowledging every roll ID. No other tools or external context.';
+      (book
+        ? '\nRequest at most ONE owned gameplay tool in this phase. Otherwise return the final version 3 response acknowledging every roll ID and rule citation.'
+        : '\nRequest at most ONE next roll in this phase. Otherwise return the final schema response acknowledging every roll ID. No other tools or external context.');
     if (
       Buffer.byteLength(phasePrompt, 'utf8') > DICE_CLI_LIMITS.codexPhaseInputBytes ||
       Date.now() >= deadline ||
@@ -194,15 +209,10 @@ export async function runCodexDicePhases(
                 approvalPolicy: 'never',
                 sandbox: 'read-only',
                 ephemeral: true,
-                dynamicTools: [
-                  {
-                    type: 'function',
-                    name: DICE_TOOL_NAME,
-                    description:
-                      'Persist trusted dice faces only. Request one roll, then the application provides a fresh bounded phase.',
-                    inputSchema: diceToolSchema,
-                  },
-                ],
+                dynamicTools: definitions.map((definition) => ({
+                  type: 'function',
+                  ...definition,
+                })),
               },
             });
           } else if (message.id === CODEX_DICE_REQUEST_ID.Thread && message.result) {
@@ -221,14 +231,17 @@ export async function runCodexDicePhases(
           } else if (message.id === CODEX_DICE_REQUEST_ID.Turn && message.result) {
             turnId = z.object({ turn: z.object({ id: z.string() }) }).parse(message.result).turn.id;
           } else if (message.method === CODEX_DICE_RPC.ToolCall) {
-            const call = toolCallSchema.parse(message.params);
+            const call = (
+              book ? toolCallSchema.extend({ tool: z.string() }) : toolCallSchema
+            ).parse(message.params);
             if (
               called ||
               !threadId ||
               call.namespace ||
               call.threadId !== threadId ||
               (turnId && call.turnId !== turnId) ||
-              message.id === undefined
+              message.id === undefined ||
+              !definitions.some((definition) => definition.name === call.tool)
             )
               throw new Problem(
                 502,
@@ -236,12 +249,16 @@ export async function runCodexDicePhases(
                 'Codex requested an unapproved or concurrent dice capability'
               );
             called = true;
-            const result = await protocol.call(
+            const result = await (book ? book.dispatch : protocol.call.bind(protocol))(
               call.tool,
               call.arguments,
               `${phase}:${call.callId}`
             );
-            transcript.push({ arguments: call.arguments, result });
+            transcript.push({
+              ...(book ? { tool: call.tool } : {}),
+              arguments: call.arguments,
+              result,
+            });
             // Never reply to the pending dynamic call: that would allow a hidden continuation.
             // The next fresh phase receives this exact application-owned result instead.
             send({
@@ -255,7 +272,12 @@ export async function runCodexDicePhases(
             const usage = z
               .object({
                 threadId: z.string(),
-                tokenUsage: z.object({ last: z.object({ inputTokens: z.number() }) }),
+                tokenUsage: z.object({
+                  last: z.object({
+                    inputTokens: z.number().int().nonnegative(),
+                    outputTokens: z.number().int().nonnegative().optional(),
+                  }),
+                }),
               })
               .parse(message.params);
             if (
@@ -267,6 +289,12 @@ export async function runCodexDicePhases(
                 'context_overflow',
                 'Codex dice phase exceeded its context budget'
               );
+            book?.observe?.({
+              provider: 'codex',
+              phase,
+              inputTokens: usage.tokenUsage.last.inputTokens,
+              outputTokens: usage.tokenUsage.last.outputTokens,
+            });
           } else if (message.method === CODEX_DICE_RPC.TurnCompleted) {
             const result = z
               .object({
@@ -329,8 +357,11 @@ export async function runCodexDicePhases(
     });
     if (!completed)
       throw new Problem(502, 'codex_protocol', 'Codex closed before completing its dice phase');
-    if (!called) return final;
-    if (Buffer.byteLength(JSON.stringify(transcript), 'utf8') > DICE_LIMITS.transcriptBytes)
+    if (!called) return (book ? ruleResponseSchema : diceResponseSchema).parse(final);
+    if (
+      Buffer.byteLength(JSON.stringify(transcript), 'utf8') >
+      DICE_LIMITS.transcriptBytes + (book ? RULE_LIMITS.transcriptBytes : 0)
+    )
       throw new Problem(
         422,
         'dice_limit',

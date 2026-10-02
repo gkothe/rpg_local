@@ -3,8 +3,10 @@ import type { Campaign, Turn, ContextManifest } from './types.js';
 import { Problem } from '../errors.js';
 import { responseJsonSchema, memoryJsonSchema } from './schemas.js';
 import { CharacterType, SourceStatus, TurnStatus } from './options.js';
-import { diceResponseJsonSchema } from './diceResponse.js';
 import { DICE_NARRATOR } from './dice.js';
+import { BOOK_GAMEPLAY_NARRATOR } from './gameplayNarrator.js';
+import { gameplayResponseContract } from './ruleResponse.js';
+import { RULE_LIMITS, RuleSystemKind, type RulePrompt } from './rules.js';
 // UTF-8 bytes is a deliberately pessimistic upper estimate: no raw text is assumed to compress.
 export const estimateTokens = (text: string) => Buffer.byteLength(text, 'utf8');
 export const uncovered = (c: Campaign, turns: Turn[]) =>
@@ -41,8 +43,19 @@ export function buildContext(
   action: string,
   rules: { id: string; version: number; text: string }[],
   capacity: number,
-  trustedDice = false
+  trustedDice = false,
+  rulePrompt?: RulePrompt
 ): ContextManifest {
+  if (
+    rulePrompt &&
+    (Buffer.byteLength(rulePrompt.instructions) > RULE_LIMITS.instructionsBytes ||
+      Buffer.byteLength(rulePrompt.overview) > RULE_LIMITS.overviewBytes)
+  )
+    throw new Problem(
+      422,
+      'rules_context_overflow',
+      'Rules instructions or overview exceeds its context limit'
+    );
   const ceiling = Math.min(c.budgets.gameplay, capacity);
   const history = uncovered(c, turns);
   const pinned = c.sources
@@ -70,8 +83,19 @@ export function buildContext(
   );
   const base = {
     instructions: trustedDice
-      ? `${instructions.replace('No tools, file access, or external actions.', '')} ${DICE_NARRATOR}`
+      ? rulePrompt?.context.kind === RuleSystemKind.Library
+        ? BOOK_GAMEPLAY_NARRATOR
+        : DICE_NARRATOR
       : instructions,
+    ...(rulePrompt
+      ? {
+          ruleContext: rulePrompt.context,
+          systemInstructions: rulePrompt.instructions,
+          ...(rulePrompt.context.kind === RuleSystemKind.Library
+            ? { rulesOverview: rulePrompt.overview }
+            : {}),
+        }
+      : {}),
     campaignInstructions: c.instructions,
     description: c.description,
     pinnedFacts: c.pinnedFacts,
@@ -85,7 +109,9 @@ export function buildContext(
       description: char.description,
     })),
     state: c.state,
-    schema: trustedDice ? diceResponseJsonSchema : responseJsonSchema,
+    schema: trustedDice
+      ? gameplayResponseContract(rulePrompt?.context).jsonSchema
+      : responseJsonSchema,
     action,
   };
   if (
@@ -125,6 +151,7 @@ export function buildContext(
   }
   const prompt = JSON.stringify(payload);
   return {
+    ...(rulePrompt ? { ruleContext: rulePrompt.context } : {}),
     revision: c.revision,
     prompt,
     estimatedTokens: estimateTokens(prompt),

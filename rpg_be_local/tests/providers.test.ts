@@ -155,3 +155,57 @@ test('Antigravity excludes ambient customizations and parses only one bounded is
     /isolated/
   );
 });
+
+test('rules capability is independent, requires its verified effort and preserves existing default/no-tools reserves', async () => {
+  class FixtureProviders extends ProviderService {
+    provider: Provider = {
+      id: 'codex',
+      name: 'Original fixture',
+      available: true,
+      supported: true,
+      version: '0.159.2',
+      reason: null,
+      catalogProvenance: 'Original fixture',
+      dice: { supported: true, reason: null },
+      rules: { supported: false, reason: 'Unverified rules' },
+      models: [
+        {
+          id: 'gpt-5.6-sol',
+          label: 'Original fixture',
+          efforts: ['low', 'medium'],
+          inputTokens: 8000,
+          dice: { supported: true, reason: null },
+          rules: { supported: false, reason: 'Unverified rules model' },
+        },
+      ],
+    };
+    override async list() {
+      return [this.provider];
+    }
+  }
+  const service = new FixtureProviders();
+  const settings = { provider: 'codex', model: 'gpt-5.6-sol', effort: 'medium' };
+  assert.equal(await service.capacity(settings), 4800);
+  assert.equal(await service.gameplayCapacity(settings), 4800);
+  await assert.rejects(service.bookGameplayCapacity(settings), /Unverified rules model/);
+  service.provider.rules = { supported: true, reason: null };
+  service.provider.models[0]!.rules = {
+    supported: true,
+    reason: null,
+    efforts: ['medium'],
+    limits: { ruleCalls: 12, diceCalls: 12, combinedCalls: 24, promptBytes: 8000 },
+  };
+  assert.equal(await service.bookGameplayCapacity(settings), 8000);
+  assert.equal(await service.bookGameplayCapacity(settings, 7000), 7000);
+  await assert.rejects(
+    service.bookGameplayCapacity({ ...settings, effort: 'low' }),
+    /only with medium effort/
+  );
+  assert.equal(await service.capacity(settings), 4800);
+  assert.deepEqual(await service.bookGameplayLimits(settings), {
+    ruleCalls: 12,
+    diceCalls: 12,
+    combinedCalls: 24,
+    promptBytes: 8000,
+  });
+});

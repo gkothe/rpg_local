@@ -8,6 +8,9 @@ import { sourceSections } from '../domain/sourceSections.js';
 import type { Character } from '../domain/types.js';
 import type { Generator } from '../providers/service.js';
 import { SourceStatus } from '../domain/options.js';
+import { RuleStore, ruleContext } from './ruleStore.js';
+import { DEFAULT_RULE_SYSTEM_ID } from '../domain/rules.js';
+import { campaignRuleBindingSchema } from '../domain/schemas.js';
 export class CampaignService {
   constructor(
     readonly store: Store,
@@ -16,8 +19,56 @@ export class CampaignService {
   async create(input: z.infer<typeof campaignCreateSchema>) {
     if (input.settings?.provider) await this.generator.capacity(input.settings);
     const c = newCampaign(input);
-    await this.store.insert(c);
+    await this.store.transaction(async (client) => {
+      await new RuleStore(this.store).resolve(c, client);
+      if (c.ruleSystemId === DEFAULT_RULE_SYSTEM_ID) c.ruleSystemId = null;
+      await this.store.insert(c, client);
+    });
     return c;
+  }
+  async bindRules(id: string, input: z.infer<typeof campaignRuleBindingSchema>, resolving = false) {
+    return this.store.transaction(async (client) => {
+      const campaign = await this.store.campaign(id, client, true);
+      const identity = { revision: input.revision, systemId: input.systemId, resolving };
+      const prior = await client.query(
+        'SELECT identity,result FROM campaign_rule_bindings WHERE campaign_id=$1 AND request_id=$2',
+        [id, input.requestId]
+      );
+      if (prior.rows[0]) {
+        const stored = prior.rows[0].identity;
+        if (
+          stored.revision !== identity.revision ||
+          stored.systemId !== identity.systemId ||
+          stored.resolving !== resolving
+        )
+          throw conflict('Rule binding request identity reused with changed input');
+        return prior.rows[0].result;
+      }
+      if (campaign.revision !== input.revision)
+        throw conflict('Campaign changed; refresh before selecting rules');
+      await this.store.assertIdle(id, client);
+      if (resolving && !campaign.ruleResolution)
+        throw conflict('This campaign has no unresolved rule reference');
+      const candidate = { ...campaign, ruleSystemId: input.systemId };
+      delete candidate.ruleResolution;
+      const selected = await new RuleStore(this.store).resolve(candidate, client);
+      campaign.ruleSystemId =
+        selected.systemId === DEFAULT_RULE_SYSTEM_ID ? null : selected.systemId;
+      delete campaign.ruleReference;
+      delete campaign.ruleResolution;
+      campaign.revision++;
+      await this.store.save(campaign, client);
+      const result = {
+        revision: campaign.revision,
+        ruleSystemId: campaign.ruleSystemId,
+        system: ruleContext(selected),
+      };
+      await client.query(
+        'INSERT INTO campaign_rule_bindings(campaign_id,request_id,identity,result) VALUES($1,$2,$3,$4)',
+        [id, input.requestId, identity, result]
+      );
+      return result;
+    });
   }
   async patch(
     id: string,

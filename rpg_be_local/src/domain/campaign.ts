@@ -7,10 +7,12 @@ export function newCampaign(input: {
   description?: string;
   instructions?: string;
   settings?: ProviderSettings;
+  systemId?: string | null;
 }): Campaign {
   const now = new Date().toISOString();
   return {
     id: randomUUID(),
+    ruleSystemId: input.systemId ?? null,
     name: input.name,
     description: input.description ?? '',
     instructions: input.instructions ?? '',

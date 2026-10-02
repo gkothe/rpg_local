@@ -30,8 +30,8 @@ export const diceResponseJsonSchema = z.toJSONSchema(diceResponseSchema);
 export type DiceResponse = z.infer<typeof diceResponseSchema>;
 export type RollInterpretation = z.infer<typeof rollInterpretationSchema>;
 
-export function validateRollInterpretations(
-  response: DiceResponse,
+export function validateRollInterpretations<T extends Pick<DiceResponse, 'rollInterpretations'>>(
+  response: T,
   rollIds: readonly string[]
 ): void {
   const actual = response.rollInterpretations.map((entry) => entry.rollId);

@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
@@ -38,6 +38,9 @@ before(async () => {
   );
   await store.pool.query(
     await readFile(path.join(appRoot, 'migrationssql/0004_dice_rolls.sql'), 'utf8')
+  );
+  await store.pool.query(
+    await readFile(path.join(appRoot, 'migrationssql/0005_rule_systems.sql'), 'utf8')
   );
 });
 after(async () => {
@@ -92,7 +95,8 @@ test(
       await ready;
       context.mock.timers.tick(DICE_LIMITS.attemptMs + 1);
       let terminal = await store.turn(campaign.id, submitted.id);
-      for (let count = 0; terminal.status !== TurnStatus.Failed && count < 100; count++) {
+      const cleanupDeadline = Date.now() + 5000;
+      while (terminal.status !== TurnStatus.Failed && Date.now() < cleanupDeadline) {
         await new Promise<void>((resolve) => setImmediate(resolve));
         terminal = await store.turn(campaign.id, submitted.id);
       }
@@ -317,7 +321,7 @@ test(
       );
       const library = new LibraryService(store);
       const archive = await library.export(campaign.id);
-      assert.equal(archive.version, 2);
+      assert.equal(archive.version, 3);
       assert.equal(archive.diceRecords?.length, 3);
       const malformed = structuredClone(archive);
       malformed.diceRecords![0]!.groups[0]!.faces[0] = 7;
@@ -471,7 +475,9 @@ test(
         assert.equal(
           (await migrated.pool.query('SELECT count(*)::int AS count FROM migration_history'))
             .rows[0].count,
-          4
+          (await readdir(path.join(appRoot, 'migrationssql'))).filter((name) =>
+            name.endsWith('.sql')
+          ).length
         );
         assert.equal((await run()).stdout.trim(), '');
         assert.equal(

@@ -12,11 +12,17 @@ import { runProcess } from './processRunner.js';
 import { parseProviderOutput, providerArgs } from './adapters.js';
 import { Problem } from '../errors.js';
 import type { ProviderSettings } from '../domain/types.js';
+import type { GameplayToolDispatch, BookGameplayLimits } from './gameplayTools.js';
+import { VERIFIED_BOOK_LIMITS } from './gameplayTools.js';
 import { z } from 'zod';
 import { generateCodexDice } from './codexDice.js';
 import { CLAUDE_DICE_VERSION, generateClaudeDice } from './claudeDice.js';
 import { DICE_CLI_LIMITS, type RollCallback } from './diceProtocol.js';
 import { DICE_LIMITS } from '../domain/dice.js';
+import {
+  ANTIGRAVITY_DICE_PHASE_RESERVE_BYTES,
+  generateAntigravityDice,
+} from './antigravityDice.js';
 import {
   ANTIGRAVITY_ISOLATED_VERSION,
   generateAntigravity,
@@ -31,12 +37,19 @@ import {
   PROVIDER_IDS,
   type ProviderId,
 } from './options.js';
+export type RulesCapability = {
+  supported: boolean;
+  reason: string | null;
+  efforts?: string[];
+  limits?: BookGameplayLimits;
+};
 export type ModelOption = {
   id: string;
   label: string;
   efforts: string[];
   inputTokens: number;
   dice?: { supported: boolean; reason: string | null };
+  rules?: RulesCapability;
 };
 const CLAUDE_CLI_INPUT_TOKENS = 8000;
 export type Provider = {
@@ -49,8 +62,18 @@ export type Provider = {
   models: ModelOption[];
   catalogProvenance: string;
   dice?: { supported: boolean; reason: string | null };
+  rules?: RulesCapability;
 };
 export interface Generator {
+  bookGameplayLimits?(settings: ProviderSettings): Promise<BookGameplayLimits>;
+  generateBookGameplay?(
+    settings: ProviderSettings,
+    prompt: string,
+    schema: unknown,
+    tools: GameplayToolDispatch,
+    signal?: AbortSignal
+  ): Promise<unknown>;
+  bookGameplayCapacity?(settings: ProviderSettings, ceiling?: number): Promise<number>;
   generate(
     settings: ProviderSettings,
     prompt: string,
@@ -263,9 +286,30 @@ export class ProviderService implements Generator {
           ((id === PROVIDER_ID.Claude &&
             claudeDiceVerified &&
             parseClaudeHelpCatalog(help).some((alias) => alias.id === model.id)) ||
-            (id === PROVIDER_ID.Codex && codexDiceModels.has(model.id)));
+            (id === PROVIDER_ID.Codex && codexDiceModels.has(model.id)) ||
+            (id === PROVIDER_ID.Antigravity &&
+              agyIsolated &&
+              antigravityModels.some((entry) => entry.id === model.id)));
+        const rulesSupported =
+          process.platform === 'win32' &&
+          supported &&
+          model.efforts.includes('medium') &&
+          ((id === PROVIDER_ID.Claude &&
+            version === CLAUDE_DICE_VERSION &&
+            model.id === 'sonnet') ||
+            (id === PROVIDER_ID.Codex &&
+              version === CODEX_ISOLATED_VERSION &&
+              model.id === 'gpt-5.6-sol'));
         return {
           ...model,
+          rules: {
+            supported: rulesSupported,
+            reason: rulesSupported
+              ? null
+              : 'Book gameplay is verified only for Claude 2.1.232 sonnet medium and Codex 0.159.2 gpt-5.6-sol medium on Windows',
+            efforts: rulesSupported ? ['medium'] : [],
+            ...(rulesSupported ? { limits: VERIFIED_BOOK_LIMITS } : {}),
+          },
           dice: {
             supported,
             reason: supported
@@ -279,6 +323,7 @@ export class ProviderService implements Generator {
         };
       });
       const diceSupported = diceModels.some((model) => model.dice.supported);
+      const rulesSupported = diceModels.some((model) => model.rules.supported);
       result.push({
         id,
         name,
@@ -287,12 +332,18 @@ export class ProviderService implements Generator {
         reason,
         version,
         models: diceModels,
+        rules: {
+          supported: rulesSupported,
+          reason: rulesSupported
+            ? null
+            : 'Book gameplay is not verified for this installed CLI/model combination',
+        },
         dice: {
           supported: diceSupported,
           reason: diceSupported
             ? null
             : id === PROVIDER_ID.Antigravity
-              ? 'Trusted dice is unavailable: exclusive native dice-tool attachment is not verified on this CLI'
+              ? (reason ?? 'Trusted dice requires a model from the verified installed CLI catalog')
               : id === PROVIDER_ID.Codex
                 ? (reason ??
                   'Trusted dice requires a verified account model with a sufficient context window')
@@ -426,7 +477,99 @@ export class ProviderService implements Generator {
           `Claude trusted dice requires verified CLI ${CLAUDE_DICE_VERSION}`
         );
     }
-    return capacity;
+    return settings.provider === PROVIDER_ID.Antigravity
+      ? Math.max(0, capacity - ANTIGRAVITY_DICE_PHASE_RESERVE_BYTES)
+      : capacity;
+  }
+  async bookGameplayCapacity(
+    settings: ProviderSettings,
+    ceiling = MAX_PROVIDER_INPUT_TOKENS
+  ): Promise<number> {
+    await this.capacity(settings, ceiling);
+    const provider = (await this.list()).find((option) => option.id === settings.provider)!;
+    const model = provider.models.find((option) => option.id === settings.model)!;
+    if (!provider.rules?.supported || !model.rules?.supported || !model.rules.limits)
+      throw new Problem(
+        503,
+        'rules_provider_unavailable',
+        model.rules?.reason ?? provider.rules?.reason ?? 'Book gameplay is not verified'
+      );
+    if (!model.rules.efforts?.includes(settings.effort ?? ''))
+      throw new Problem(
+        503,
+        'rules_effort_unavailable',
+        'Book gameplay is verified only with medium effort for this model'
+      );
+    await this.gameplayCapacity(settings, ceiling);
+    // Schema and narrator are already included in book-mode context. Native
+    // continuation reserves are bounded independently by the verified 24 calls.
+    return Math.min(model.inputTokens, model.rules.limits!.promptBytes, ceiling);
+  }
+  async bookGameplayLimits(settings: ProviderSettings): Promise<BookGameplayLimits> {
+    await this.bookGameplayCapacity(settings);
+    return (await this.list())
+      .find((provider) => provider.id === settings.provider)!
+      .models.find((model) => model.id === settings.model)!.rules!.limits!;
+  }
+  async generateBookGameplay(
+    settings: ProviderSettings,
+    prompt: string,
+    _schema: unknown,
+    tools: GameplayToolDispatch,
+    signal?: AbortSignal
+  ): Promise<unknown> {
+    const capacity = await this.bookGameplayCapacity(settings);
+    if (Buffer.byteLength(prompt, 'utf8') > capacity)
+      throw new Problem(
+        422,
+        'context_overflow',
+        'Book gameplay prompt exceeds its verified reserve'
+      );
+    const executable = this.locations.get(settings.provider)!;
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-rules-cli-'));
+    const roll: RollCallback = async () => {
+      throw new Problem(503, 'rules_dispatch', 'Use the owned gameplay registry');
+    };
+    try {
+      const book = { dispatch: tools };
+      if (settings.provider === PROVIDER_ID.Codex)
+        return await generateCodexDice(
+          executable,
+          settings,
+          prompt,
+          dir,
+          process.env,
+          roll,
+          signal,
+          book
+        );
+      if (settings.provider === PROVIDER_ID.Claude)
+        return await generateClaudeDice(
+          executable,
+          settings,
+          prompt,
+          dir,
+          process.env,
+          roll,
+          signal,
+          book
+        );
+      const model = (await this.list())
+        .find((provider) => provider.id === settings.provider)!
+        .models.find((model) => model.id === settings.model)!;
+      return await generateAntigravityDice(
+        executable,
+        { ...settings, model: modelSlug(settings, model.efforts) },
+        prompt,
+        dir,
+        process.env,
+        roll,
+        signal,
+        book
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   }
   async generateGameplay(
     settings: ProviderSettings,
@@ -464,6 +607,20 @@ export class ProviderService implements Generator {
           roll,
           signal
         );
+      if (settings.provider === PROVIDER_ID.Antigravity) {
+        const model = (await this.list())
+          .find((provider) => provider.id === PROVIDER_ID.Antigravity)!
+          .models.find((model) => model.id === settings.model)!;
+        return await generateAntigravityDice(
+          executable,
+          { ...settings, model: modelSlug(settings, model.efforts) },
+          prompt,
+          dir,
+          process.env,
+          roll,
+          signal
+        );
+      }
       throw new Problem(503, 'dice_provider', 'Trusted dice is unavailable for this CLI');
     } finally {
       await rm(dir, { recursive: true, force: true });

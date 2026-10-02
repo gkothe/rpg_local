@@ -1,10 +1,25 @@
 import { createHash } from 'node:crypto';
 import type { Campaign, Turn } from './types.js';
+import type { RuleContext } from './rules.js';
 export function diceDigest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
-export function gameplayDigest(campaign: Campaign, history: Turn[]): string {
+export function gameplayDigest(
+  campaign: Campaign,
+  history: Turn[],
+  ruleContext?: RuleContext
+): string {
   return diceDigest({
+    ...(ruleContext
+      ? {
+          rules: {
+            systemId: ruleContext.systemId,
+            revision: ruleContext.revision,
+            kind: ruleContext.kind,
+            contentHash: ruleContext.contentHash,
+          },
+        }
+      : {}),
     description: campaign.description,
     instructions: campaign.instructions,
     characters: campaign.characters.map(

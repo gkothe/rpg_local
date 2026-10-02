@@ -13,6 +13,7 @@ import type {
 } from './versions.js';
 import type { DiceRecord, DiceSession } from './dice.js';
 import type { RollInterpretation } from './diceResponse.js';
+import type { RuleContext, RuleReference, RuleRead, RuleCitation } from './rules.js';
 
 export type JsonObject = Record<string, unknown>;
 export type ProviderSettings = { provider: string; model: string; effort: string | null };
@@ -51,6 +52,9 @@ export type Memory = {
   createdAt: string;
 };
 export type Campaign = {
+  ruleSystemId?: string | null;
+  ruleReference?: RuleReference;
+  ruleResolution?: { status: 'unresolved'; reference: RuleReference };
   id: string;
   name: string;
   description: string;
@@ -71,6 +75,9 @@ export type Campaign = {
   updatedAt: string;
 };
 export type Turn = {
+  ruleContext?: RuleContext;
+  ruleReads?: RuleRead[];
+  ruleCitations?: RuleCitation[];
   diceSessionId?: string;
   retryOfTurnId?: string;
   rolls?: DiceRecord[];
@@ -91,6 +98,7 @@ export type Turn = {
   completedAt: string | null;
 };
 export type ContextManifest = {
+  ruleContext?: RuleContext;
   revision: number;
   prompt: string;
   estimatedTokens: number;

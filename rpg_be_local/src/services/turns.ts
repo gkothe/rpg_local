@@ -27,6 +27,17 @@ import {
 } from '../domain/diceResponse.js';
 import { GM_RESPONSE_SCHEMA_VERSION } from '../domain/versions.js';
 import { DICE_LIMITS } from '../domain/dice.js';
+import { RuleStore, ruleContext } from './ruleStore.js';
+import { RuleLookup } from './ruleLookup.js';
+import { generateRuleMapping } from '../domain/ruleMapping.js';
+import { RuleSystemKind, type RuleSystem, type RulePrompt } from '../domain/rules.js';
+import { GameplayTools } from '../providers/gameplayTools.js';
+import {
+  ruleResponseSchema,
+  ruleResponseJsonSchema,
+  validateRuleCitations,
+  type RuleResponse,
+} from '../domain/ruleResponse.js';
 const TURN_LEASE_SECONDS = 45;
 const TURN_HEARTBEAT_INTERVAL_MS = 10_000;
 const AUTO_COMPACTION_HISTORY_THRESHOLD_TOKENS = 6_000;
@@ -42,6 +53,28 @@ export class TurnService {
       this.generator.gameplayCapacity?.(settings, ceiling) ??
       this.generator.capacity(settings, ceiling)
     );
+  }
+  private rulePrompt(system: RuleSystem): RulePrompt {
+    return {
+      context: ruleContext(system),
+      instructions: system.instructions,
+      overview: system.kind === RuleSystemKind.Library ? generateRuleMapping(system).overview : '',
+    };
+  }
+  private async selectedCapacity(
+    campaign: Campaign,
+    settings: ProviderSettings,
+    ceiling: number
+  ): Promise<number> {
+    const selected = await new RuleStore(this.store).resolve(campaign);
+    if (selected.kind !== RuleSystemKind.Library) return this.gameplayCapacity(settings, ceiling);
+    if (!this.generator.generateBookGameplay || !this.generator.bookGameplayCapacity)
+      throw new Problem(
+        503,
+        'rules_provider_unavailable',
+        'Book gameplay is not verified for the selected CLI/model; explicitly choose the default or another supported provider'
+      );
+    return this.generator.bookGameplayCapacity(settings, ceiling);
   }
   async submit(
     campaignId: string,
@@ -60,7 +93,8 @@ export class TurnService {
       return this.store.turn(campaignId, prior.rows[0].document.id);
     }
     const initialCampaign = await this.store.campaign(campaignId);
-    const capacity = await this.gameplayCapacity(
+    const capacity = await this.selectedCapacity(
+      initialCampaign,
       input.settings ?? initialCampaign.settings,
       initialCampaign.budgets.gameplay
     );
@@ -80,6 +114,7 @@ export class TurnService {
         throw conflict('Campaign changed; refresh before submitting');
       await this.store.assertIdle(campaignId, client);
       const settings = input.settings ?? c.settings;
+      const system = await new RuleStore(this.store).resolve(c, client);
       const t: Turn = {
         id: randomUUID(),
         campaignId,
@@ -94,6 +129,7 @@ export class TurnService {
         context: null,
         createdAt: new Date().toISOString(),
         completedAt: null,
+        ruleContext: ruleContext(system),
       };
       const history = await this.store.activeTurns(c.id, client);
       const rules = await this.store.retrieve(c, t.action, client);
@@ -105,7 +141,8 @@ export class TurnService {
           t.action,
           rules,
           capacity,
-          !!this.generator.generateGameplay
+          !!this.generator.generateGameplay || system.kind === RuleSystemKind.Library,
+          this.rulePrompt(system)
         );
       } catch (e) {
         if (!(e instanceof Problem && e.code === 'context_overflow')) throw e;
@@ -119,6 +156,7 @@ export class TurnService {
         sourceVersions: [],
         historyIds: history.map((x) => x.id),
         memoryId: c.memory?.id ?? null,
+        ruleContext: t.ruleContext,
       };
       await client.query(
         "INSERT INTO turns(id,campaign_id,request_id,payload_hash,status,document,owner,lease_until) VALUES($1,$2,$3,$4,$5,$6,$7,now()+($8 * interval '1 second'))",
@@ -148,6 +186,7 @@ export class TurnService {
       throw new Problem(409, 'cancelled', 'Turn is no longer active');
     if (campaign.revision !== t.context!.revision)
       throw conflict('Campaign was edited during generation; output was discarded');
+    if (t.ruleContext) await new RuleStore(this.store).guard(t.ruleContext, client);
     return { campaign, turn };
   }
   async retry(
@@ -168,7 +207,8 @@ export class TurnService {
       return this.store.turn(campaignId, prior.rows[0].document.id);
     }
     const initial = await this.store.campaign(campaignId);
-    const capacity = await this.gameplayCapacity(
+    const capacity = await this.selectedCapacity(
+      initial,
       input.settings ?? initial.settings,
       initial.budgets.gameplay
     );
@@ -188,6 +228,17 @@ export class TurnService {
         throw conflict('Campaign changed; refresh before retrying');
       await this.store.assertIdle(campaignId, client);
       const previous = await this.store.turn(campaignId, turnId, client, true);
+      if (
+        previous.ruleContext &&
+        (await new RuleStore(this.store).resolve(campaign, client)).systemId !==
+          previous.ruleContext.systemId
+      )
+        throw new Problem(
+          409,
+          'rules_context_changed',
+          'Campaign rule selection changed; start a new action'
+        );
+      if (previous.ruleContext) await new RuleStore(this.store).guard(previous.ruleContext, client);
       if (
         ![TurnStatus.Failed, TurnStatus.Cancelled, TurnStatus.Interrupted].includes(
           previous.status as TurnStatus
@@ -211,7 +262,11 @@ export class TurnService {
         !saved ||
         saved.imported ||
         saved.context_digest !==
-          gameplayDigest(campaign, await this.store.activeTurns(campaignId, client))
+          gameplayDigest(
+            campaign,
+            await this.store.activeTurns(campaignId, client),
+            previous.ruleContext
+          )
       )
         throw conflict(
           'Game context changed or this archive session is non-executable; start a new action'
@@ -238,6 +293,8 @@ export class TurnService {
         context: { ...previous.context, prompt: saved.frozen_prompt, revision: campaign.revision },
         createdAt: new Date().toISOString(),
         completedAt: null,
+        ruleReads: [],
+        ruleCitations: [],
       };
       delete turn.diceRetry;
       await client.query(
@@ -265,13 +322,26 @@ export class TurnService {
       ctl.abort();
     }, DICE_LIMITS.attemptMs);
     this.aborts.set(t.id, ctl);
+    let heartbeatBusy = false;
+    let heartbeatFailure: unknown;
     const heartbeat = setInterval(() => {
-      void this.store.pool
-        .query(
-          "UPDATE turns SET lease_until=now()+($4 * interval '1 second') WHERE id=$1 AND owner=$2 AND status IN ($3,$5)",
-          [t.id, ownerId, TurnStatus.Pending, TURN_LEASE_SECONDS, TurnStatus.Running]
-        )
-        .catch(() => ctl.abort());
+      if (heartbeatBusy || ctl.signal.aborted) return;
+      heartbeatBusy = true;
+      void this.store
+        .transaction(async (client) => {
+          await this.lockedOwned(t, client);
+          await client.query(
+            "UPDATE turns SET lease_until=now()+($4 * interval '1 second') WHERE id=$1 AND owner=$2 AND status IN ($3,$5)",
+            [t.id, ownerId, TurnStatus.Pending, TURN_LEASE_SECONDS, TurnStatus.Running]
+          );
+        })
+        .catch((error) => {
+          heartbeatFailure = error;
+          ctl.abort();
+        })
+        .finally(() => {
+          heartbeatBusy = false;
+        });
     }, TURN_HEARTBEAT_INTERVAL_MS);
     try {
       await this.store.transaction(async (client) => {
@@ -281,7 +351,7 @@ export class TurnService {
       });
       let c = await this.store.campaign(t.campaignId);
       let history = await this.store.activeTurns(c.id);
-      const capacity = await this.gameplayCapacity(t.settings, c.budgets.gameplay);
+      const capacity = await this.selectedCapacity(c, t.settings, c.budgets.gameplay);
       let needs =
         uncoveredHistoryTokens(c, history) > AUTO_COMPACTION_HISTORY_THRESHOLD_TOKENS ||
         !t.context?.prompt ||
@@ -335,22 +405,25 @@ export class TurnService {
             t.action,
             rules,
             capacity,
-            !!this.generator.generateGameplay
+            !!this.generator.generateGameplay || t.ruleContext?.kind === RuleSystemKind.Library,
+            t.ruleContext
+              ? this.rulePrompt(await new RuleStore(this.store).guard(t.ruleContext, client))
+              : undefined
           );
           t.context = turn.context;
           await this.store.saveTurn(turn, client);
         });
       const dice = new DiceService(this.store);
-      let diceResponse: DiceResponse | undefined;
+      let diceResponse: DiceResponse | RuleResponse | undefined;
       let response: GMResponse;
-      if (this.generator.generateGameplay) {
+      if (this.generator.generateGameplay || t.ruleContext?.kind === RuleSystemKind.Library) {
         if (!t.diceSessionId) {
           c = await this.store.campaign(t.campaignId);
           history = await this.store.activeTurns(c.id);
           const characters = JSON.parse(t.context!.prompt).mandatory.characters as { id: string }[];
           t.diceSessionId = await dice.createSession(
             t,
-            gameplayDigest(c, history),
+            gameplayDigest(c, history, t.ruleContext),
             characters.map((character) => character.id)
           );
         }
@@ -378,14 +451,40 @@ export class TurnService {
             ? '\nReplay the original requests in order with exactly these specifications before appending any dice: ' +
               JSON.stringify(specifications)
             : '');
-        diceResponse = diceResponseSchema.parse(
-          await this.generator.generateGameplay(
-            t.settings,
-            prompt,
-            (input) => dice.roll(t.diceSessionId!, t, input),
-            ctl.signal
-          )
-        );
+        if (t.ruleContext?.kind === RuleSystemKind.Library) {
+          const rules = new RuleStore(this.store);
+          const lookup = new RuleLookup();
+          const registry = new GameplayTools({
+            book: true,
+            limits: await this.generator.bookGameplayLimits?.(t.settings),
+            signal: ctl.signal,
+            roll: (input) => dice.roll(t.diceSessionId!, t, input),
+            read: async (tool, input, requestId) =>
+              (await rules.read(t, tool, input, requestId, lookup, ctl.signal)).payload,
+            assertActive: async () => {
+              await this.store.transaction(async (client) => {
+                await this.lockedOwned(t, client);
+              });
+            },
+          });
+          diceResponse = ruleResponseSchema.parse(
+            await this.generator.generateBookGameplay!(
+              t.settings,
+              prompt,
+              ruleResponseJsonSchema,
+              registry.call,
+              ctl.signal
+            )
+          );
+        } else
+          diceResponse = diceResponseSchema.parse(
+            await this.generator.generateGameplay!(
+              t.settings,
+              prompt,
+              (input) => dice.roll(t.diceSessionId!, t, input),
+              ctl.signal
+            )
+          );
         response = {
           version: GM_RESPONSE_SCHEMA_VERSION,
           narrative: diceResponse.narrative,
@@ -421,6 +520,26 @@ export class TurnService {
           );
           turn.rollInterpretations = diceResponse.rollInterpretations;
           turn.rolls = records;
+          if ('ruleCitations' in diceResponse && t.ruleContext) {
+            const rows = await client.query(
+              'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
+              [t.id]
+            );
+            const reads = rows.rows.map((row) => ({
+              id: row.id,
+              campaignId: row.campaign_id,
+              turnId: row.turn_id,
+              context: row.captured_context,
+              tool: row.tool_name,
+              transportRequestId: row.transport_request_id,
+              argumentDigest: row.argument_digest,
+              resultHash: row.result_hash,
+              payload: row.payload,
+              createdAt: new Date(row.created_at).toISOString(),
+            }));
+            validateRuleCitations(diceResponse, reads, t.campaignId, t.id, t.ruleContext);
+            turn.ruleCitations = diceResponse.ruleCitations;
+          }
         }
         const applied = applyResponse(campaign, response, t.id);
         applied.campaign.revision++;
@@ -446,9 +565,11 @@ export class TurnService {
           turn.completedAt = new Date().toISOString();
           turn.error = timedOut
             ? 'The GM attempt exceeded its time limit; retry keeps its recorded dice'
-            : e instanceof Problem
-              ? e.message
-              : 'Invalid local AI response or unavailable local service; no game-state changes were applied';
+            : heartbeatFailure instanceof Problem
+              ? heartbeatFailure.message
+              : e instanceof Problem
+                ? e.message
+                : 'Invalid local AI response or unavailable local service; no game-state changes were applied';
           await this.store.saveTurn(turn, client);
         })
         .catch(() => {});

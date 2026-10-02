@@ -7,6 +7,7 @@ import type { Campaign, Turn, Memory, Snapshot } from './domain/types.js';
 import { SourceStatus, TurnStatus } from './domain/options.js';
 import { gameplayDigest } from './domain/diceContext.js';
 import type { DiceRecord } from './domain/dice.js';
+import { DEFAULT_RULE_SYSTEM_ID, type RuleRead } from './domain/rules.js';
 export class Store {
   readonly pool: pg.Pool;
   constructor(url = databaseUrl()) {
@@ -28,21 +29,27 @@ export class Store {
   }
   async campaign(id: string, client?: PoolClient, lock = false): Promise<Campaign> {
     const r = await (client ?? this.pool).query(
-      'SELECT document FROM campaigns WHERE id=$1' + (lock ? ' FOR UPDATE' : ''),
+      'SELECT document,rule_system_id FROM campaigns WHERE id=$1' + (lock ? ' FOR UPDATE' : ''),
       [id]
     );
     if (!r.rows[0]) throw new Problem(404, 'not_found', 'Campaign not found');
-    return r.rows[0].document as Campaign;
+    const campaign = r.rows[0].document as Campaign;
+    if ((campaign.ruleSystemId ?? null) !== r.rows[0].rule_system_id)
+      throw new Problem(503, 'rules_campaign_mirror', 'Campaign rule selection is inconsistent');
+    return campaign;
   }
   async save(c: Campaign, client: PoolClient): Promise<void> {
     c.updatedAt = new Date().toISOString();
-    await client.query('UPDATE campaigns SET document=$2,updated_at=now() WHERE id=$1', [c.id, c]);
+    await client.query(
+      'UPDATE campaigns SET document=$2,rule_system_id=$3,updated_at=now() WHERE id=$1',
+      [c.id, c, c.ruleSystemId ?? null]
+    );
   }
   async insert(c: Campaign, client?: PoolClient): Promise<void> {
-    await (client ?? this.pool).query('INSERT INTO campaigns(id,document) VALUES($1,$2)', [
-      c.id,
-      c,
-    ]);
+    await (client ?? this.pool).query(
+      'INSERT INTO campaigns(id,document,rule_system_id) VALUES($1,$2,$3)',
+      [c.id, c, c.ruleSystemId ?? null]
+    );
   }
   async list(limit: number, offset: number): Promise<Campaign[]> {
     const r = await this.pool.query(
@@ -88,9 +95,7 @@ export class Store {
   }
   private async hydrateTurns(turns: Turn[], client?: PoolClient): Promise<Turn[]> {
     const terminal = turns.filter(
-      (turn) =>
-        turn.diceSessionId &&
-        ![TurnStatus.Pending, TurnStatus.Running].includes(turn.status as TurnStatus)
+      (turn) => ![TurnStatus.Pending, TurnStatus.Running].includes(turn.status as TurnStatus)
     );
     if (!terminal.length) return turns;
     const db = client ?? this.pool;
@@ -115,10 +120,31 @@ export class Store {
       turn.rolls = byTurn.get(turn.id) ?? [];
       turn.rollInterpretations ??= [];
     }
-    const failures = terminal.filter((turn) =>
-      [TurnStatus.Failed, TurnStatus.Cancelled, TurnStatus.Interrupted].includes(
-        turn.status as TurnStatus
-      )
+    const readRows = await db.query(
+      'SELECT * FROM turn_rule_reads WHERE turn_id=ANY($1::uuid[]) AND campaign_id=$2 ORDER BY created_at,id',
+      [terminal.map((turn) => turn.id), terminal[0]!.campaignId]
+    );
+    for (const turn of terminal)
+      turn.ruleReads = readRows.rows
+        .filter((row) => row.turn_id === turn.id)
+        .map((row): RuleRead => ({
+          id: row.id,
+          campaignId: row.campaign_id,
+          turnId: row.turn_id,
+          context: row.captured_context,
+          tool: row.tool_name,
+          transportRequestId: row.transport_request_id,
+          argumentDigest: row.argument_digest,
+          resultHash: row.result_hash,
+          payload: row.payload,
+          createdAt: new Date(row.created_at).toISOString(),
+        }));
+    const failures = terminal.filter(
+      (turn) =>
+        turn.diceSessionId &&
+        [TurnStatus.Failed, TurnStatus.Cancelled, TurnStatus.Interrupted].includes(
+          turn.status as TurnStatus
+        )
     );
     if (!failures.length) return turns;
     // Every Store turn collection belongs to one campaign. Derived retry state is never persisted.
@@ -135,20 +161,36 @@ export class Store {
       "SELECT document FROM turns WHERE campaign_id=$1 AND status=$2 AND NOT (document->>'undone')::boolean ORDER BY created_at,id",
       [campaignId, TurnStatus.Completed]
     );
-    const digest = gameplayDigest(
-      await this.campaign(campaignId, client),
-      history.rows.map((row) => row.document)
+    const campaign = await this.campaign(campaignId, client);
+    const heads = await db.query(
+      'SELECT id,revision,kind,content_hash FROM rule_systems WHERE id=$1',
+      [campaign.ruleSystemId ?? DEFAULT_RULE_SYSTEM_ID]
     );
     for (const turn of failures) {
       const session = sessions.rows.find((row) => row.id === turn.diceSessionId);
+      const digest = gameplayDigest(
+        campaign,
+        history.rows.map((row) => row.document),
+        turn.ruleContext
+      );
+      const head = heads.rows[0];
+      const outdatedRules =
+        turn.ruleContext &&
+        (!head ||
+          head.id !== turn.ruleContext.systemId ||
+          head.revision !== turn.ruleContext.revision ||
+          head.kind !== turn.ruleContext.kind ||
+          head.content_hash !== turn.ruleContext.contentHash);
       const reason =
         !session || session.imported
           ? 'Imported dice are preserved for audit and cannot be executed'
           : latest.rows[0]?.id !== turn.id
             ? 'A later action superseded this attempt'
-            : session.context_digest !== digest
-              ? 'Game context changed; start a new action'
-              : null;
+            : outdatedRules || campaign.ruleResolution
+              ? 'Rule library changed or is unresolved; start a new action after selecting current rules'
+              : session.context_digest !== digest
+                ? 'Game context changed; start a new action'
+                : null;
       turn.diceRetry = { available: reason === null, reason };
     }
     return turns;

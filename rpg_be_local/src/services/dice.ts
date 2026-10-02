@@ -13,12 +13,14 @@ import {
 } from '../domain/dice.js';
 
 import { diceDigest } from '../domain/diceContext.js';
+import { RuleStore } from './ruleStore.js';
 export { diceDigest, gameplayDigest } from '../domain/diceContext.js';
 export class DiceService {
   constructor(readonly store: Store) {}
   async createSession(turn: Turn, contextDigest: string, characterIds: string[]): Promise<string> {
     return this.store.transaction(async (client) => {
       await this.assertOwned(turn, client);
+      if (turn.ruleContext) await new RuleStore(this.store).guard(turn.ruleContext, client);
       const id = randomUUID();
       await client.query(
         'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids) VALUES($1,$2,$3,$4,$5,$6,$7)',
@@ -100,6 +102,7 @@ export class DiceService {
           'dice_session',
           'No executable local dice session belongs to this attempt'
         );
+      if (turn.ruleContext) await new RuleStore(this.store).guard(turn.ruleContext, client);
       if (session.frozen_prompt !== turn.context?.prompt)
         throw new Problem(409, 'dice_context', 'Dice attempt must use its original frozen context');
       const requests = Math.min(attempt.requests + 1, DICE_LIMITS.requestsPerAttempt + 1);

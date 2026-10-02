@@ -130,3 +130,55 @@ test('refresh reports failed help inspection and cannot keep a previously usable
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test('Antigravity dice enables installed catalog models and reserves fresh-phase context only for gameplay', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-catalog-'));
+  const keys = ['RPG_CLAUDE_BIN', 'RPG_CODEX_BIN', 'RPG_AGY_BIN', 'RPG_MODEL_CATALOG'];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  try {
+    const entrypoint = path.join(home, 'cli.mjs');
+    await writeFile(
+      entrypoint,
+      `
+const args=process.argv.slice(2);
+if(args.includes('changelog')) console.log('1.2.14:');
+else if(args.includes('/hooks')) console.log(JSON.stringify({command:{data:{hooks:[]}}}));
+else if(args.includes('models')) console.log('gemini-fixture-low\\tGemini Fixture (Low)');
+else console.log('--agent');
+`
+    );
+    process.env.RPG_AGY_BIN = entrypoint;
+    process.env.RPG_CLAUDE_BIN = path.join(home, 'missing.exe');
+    process.env.RPG_CODEX_BIN = path.join(home, 'missing.exe');
+    delete process.env.RPG_MODEL_CATALOG;
+    const service = new ProviderService();
+    const installed = (await service.list()).find((provider) => provider.id === 'agy')!;
+    assert.equal(installed.dice?.supported, true);
+    assert.deepEqual(installed.models[0]?.efforts, ['low']);
+    const settings = { provider: 'agy', model: 'gemini-fixture', effort: 'low' };
+    assert.equal(await service.capacity(settings), 12800);
+    assert.equal(await service.gameplayCapacity(settings), 9600);
+    process.env.RPG_MODEL_CATALOG = JSON.stringify([
+      {
+        provider: 'agy',
+        models: [{ id: 'unverified', label: 'Custom', efforts: [], inputTokens: 16000 }],
+      },
+    ]);
+    const custom = (await service.list(true)).find((provider) => provider.id === 'agy')!;
+    assert.equal(custom.models[0]?.dice?.supported, false);
+    await assert.rejects(
+      service.gameplayCapacity({ provider: 'agy', model: 'unverified', effort: null }),
+      /verified installed CLI catalog/
+    );
+    assert.equal(
+      await service.capacity({ provider: 'agy', model: 'unverified', effort: null }),
+      12800
+    );
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+    await rm(home, { recursive: true, force: true });
+  }
+});

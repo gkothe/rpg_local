@@ -3,7 +3,93 @@ export interface ProviderSettings {
   model: string;
   effort: string | null;
 }
+export interface RuleContext {
+  systemId: string;
+  systemKey: string;
+  systemName: string;
+  kind: string;
+  revision: number;
+  contentHash: string;
+}
+export type RuleReference = Pick<RuleContext, 'systemKey' | 'systemName' | 'kind' | 'contentHash'>;
+export interface RuleSystemOption extends RuleContext {
+  isDefault: boolean;
+  selectable: boolean;
+}
+export interface RuleRead {
+  id: string;
+  campaignId: string;
+  turnId: string;
+  context: RuleContext;
+  tool: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+export interface RuleCitation {
+  receiptId: string;
+  path: string;
+  quote: string;
+  source: string;
+  systemId: string;
+  revision: number;
+  contentHash: string;
+  precision: string;
+  pdfPages: number[];
+  printedPages: string[];
+}
+export interface RuleSystemMetadata extends RuleContext {
+  booksAllowed: boolean;
+  limits: {
+    instructionsBytes: number;
+    importFiles: number;
+    importFileBytes: number;
+    importBytes: number;
+    backupBytes: number;
+  };
+  instructions: string;
+  sources: { slug: string; title: string; pageCount: number; pdfHash: string | null }[];
+  populatedColumns: string[];
+}
+export interface RulePageProvenance {
+  precision: string;
+  pdfPages: (number | null)[];
+  printedPages: (string | null)[];
+}
+export interface RuleLookupResult {
+  revision: number;
+  contentHash: string;
+  receipt: string;
+  complete: boolean;
+  omitted: boolean;
+  cursor: string | null;
+  path?: string;
+  source?: string;
+  text?: string;
+  start?: number;
+  end?: number;
+  pages?: RulePageProvenance | null;
+  entries?: {
+    path?: string;
+    name?: string;
+    source?: string;
+    snippet?: string;
+    locator?: string | null;
+    derived?: boolean;
+    pages?: RulePageProvenance;
+  }[];
+}
+export interface RuleImportPreview {
+  previewId: string;
+  expiresAt: string;
+  source: { slug: string; title: string };
+  nodeCount: number;
+  replacing: boolean;
+  warnings: string[];
+  coverage: { description: string; omissions: string[] };
+  columns: string[];
+}
 export interface Provider {
+  rules?: { supported: boolean; reason: string | null };
   id: string;
   name: string;
   available: boolean;
@@ -16,6 +102,12 @@ export interface Provider {
     efforts: string[];
     inputTokens: number;
     dice?: { supported: boolean; reason: string | null };
+    rules?: {
+      supported: boolean;
+      reason: string | null;
+      efforts?: string[];
+      limits?: { ruleCalls: number; diceCalls: number; combinedCalls: number; promptBytes: number };
+    };
   }[];
   catalogProvenance: string;
   dice?: { supported: boolean; reason: string | null };
@@ -42,6 +134,9 @@ export interface Source {
   originalAvailable?: boolean;
 }
 export interface Turn {
+  ruleContext?: RuleContext;
+  ruleReads?: RuleRead[];
+  ruleCitations?: RuleCitation[];
   diceSessionId?: string;
   retryOfTurnId?: string;
   diceRetry?: { available: boolean; reason: string | null };
@@ -78,6 +173,9 @@ export interface Turn {
   completedAt: string | null;
 }
 export interface Campaign {
+  ruleSystemId?: string | null;
+  ruleReference?: RuleReference;
+  ruleResolution?: { status: string; reference: RuleReference };
   id: string;
   name: string;
   description: string;

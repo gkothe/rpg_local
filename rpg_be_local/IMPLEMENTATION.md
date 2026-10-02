@@ -30,7 +30,29 @@ turns and retained every roll reference. Browser and fixture evidence covers fai
 provider switching, undo and archive preservation. Codex dynamic-tool transport now interrupts before native tool replies and uses fresh bounded
 application-owned phases. Native only-dice/fresh-phase evidence and two actual gameplay
 turns passed; a real Claude-to-Codex retry preserved the identical stored roll/face.
-No ignored max-output override is used. Antigravity owned-tool attachment remains
-unsupported. This is not all-provider release completion. Latest evidence and gates:
+No ignored max-output override is used. Antigravity 1.2.14 now uses explicit application-managed
+JSON dice requests through fresh isolated subscription CLI phases; native MCP remains unavailable.
+Two actual Gemini 3.8 Flash/low PostgreSQL turns completed, and explicit retry after an injected
+post-provider failure preserved the identical saved roll UUID and face 6. Latest evidence and gates:
 `../docs/reviews/dice-provider-capabilities.md`. No real user campaigns or shared CLI/MCP
 configuration were altered; no commit/push was made.
+
+## Rules library (2026-10-01)
+
+Implemented the reviewed shared current-row library, protected instructions-only default, deterministic annotated Markdown preview/publication, bounded browsing and owned rule tools alongside existing crypto dice. Migrations 0005–0007 add protected identities, campaign mirrors, append-only receipts and transactional budgets, historical archive identity without a private-library foreign key, and generated lightweight publication metadata. Existing applied migrations were retained.
+
+Every gameplay attempt captures system identity/revision/kind/hash. Acceptance, compaction/rebuild, session creation, read/replay, dice draw, heartbeat, retry and final commit check current ownership and head under PostgreSQL locks. A changed head retains short evidence/dice but cannot apply late canonical changes or resume the old action. New actions use latest rules. Original UTF-16 quote/page spans are validated against persisted text receipts. Default gameplay retains v2/model knowledge; book gameplay uses strict v3 and exactly five owned tools. Compaction/extraction remain no-tools.
+
+Campaign archives now export v3 references and bounded historical audit without full books; named v1/v2 imports remain supported. Missing/differing private libraries are explicitly unresolved until the user chooses a verified exact-key candidate or the default. Private backup v1 separately stages at most 32 MiB and restores local identity with monotonic revisions, explicit replacement and persisted confirmation replay. Book uploads reject the combined 20 MiB limit during streaming, without raising ordinary JSON upload limits.
+
+Validation used the disposable PostgreSQL 18 cluster on 127.0.0.1:55439, database rpg_rules_release_test, and separately owned schemas. All migrations ran on the fresh release database. Consolidated rules.database.test.ts covers publication/no-op/replay, default/FK mirrors, HTTP access and routing, backups/archives/resolution, selection and upload limits. Its additional real lock-contention test races publishing with session creation and drawing; no new session/face is stored. Historical receipt pagination counts full metadata within 16 KiB and visits each receipt once. ruleGameplay.database.test.ts covers publication during compaction (no memory/gameplay/session), persist-before-reveal, late-final rejection, new-action latest citations and retry identity. Ordinary adapter fixtures are not native evidence.
+
+Actual Windows native evidence: Claude 2.1.232/sonnet/medium and Codex 0.159.2/gpt-5.6-sol/medium each completed rule→dice→rule→v3. Two complete campaign runs retained failed old-head audit, rejected retry, switched CLI and completed a latest-head cited action. Production discovery exposes only these independently verified exact model/effort combinations, with 12 rule/12 dice/24 combined calls and an 8000-byte prompt ceiling; existing native context/output/turn limits were not raised. Antigravity 1.2.14 discovery recovered; its Gemini 3.8 Flash/medium direct native book probe passed after duplicate fixed definitions moved into the owned temporary agent. Two complete campaign tests then emitted unapproved native tool events and were rejected, so book mode remains unavailable. See ../docs/reviews/rules-library-capabilities.md for measured usage and all unsuccessful probes.
+
+Latest maximum-size benchmark after migration 0007: 30 sequential warm/cold queries per fixture; 596 nodes/169823 bytes p95 1.261/4.172 ms, 10000 nodes/exact 20971520 bytes p95 49.630/151.823 ms. Both satisfy 500 ms/2 s targets. Prompt correctness separately verifies bounded instructions/overview and no whole-book injection.
+
+Final validation totals and commands are recorded in ../docs/plans/rules-library.md. Typecheck, zero-warning lint, format, production build and public audit passed. The official portable Gitleaks 8.30.1 scanner was run from an owned local TEMP directory; no shared skill/global installation was changed. Private books, extraction scripts, user campaigns and shared CLI/MCP configuration were untouched; no commit/push.
+
+External extraction gate: exact package/header/marker/LF/UTF-16 handoff is not confirmed by the extraction owner. The reviewed format is implemented and tested against original fixtures, but compatibility with unseen private packages is not claimed. Three-provider full acceptance remains incomplete because Antigravity complete campaign isolation validation failed; Android/macOS/Linux are excluded.
+
+A repeated full regression run exposed the existing dice timeout test polling cleanup only 100 immediate iterations; on the loaded native Windows test host it observed running before terminal persistence. The test now waits a bounded five real seconds for cleanup, retaining the failure/face/no-state assertions. No production timeout was changed. Later full regression and static checks passed.
