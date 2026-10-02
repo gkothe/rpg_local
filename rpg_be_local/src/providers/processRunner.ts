@@ -77,7 +77,7 @@ export function runProcess(
       kill();
     };
     const cancel = () => stop(new Problem(409, 'cancelled', 'Request cancelled'));
-    const timer = setTimeout(
+    const timer = options.timeoutMs === 0 ? undefined : setTimeout(
       () => stop(new Problem(504, 'provider_timeout', 'Local process timed out')),
       options.timeoutMs ?? 180000
     );

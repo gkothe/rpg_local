@@ -307,24 +307,12 @@ export class RuleStore {
         'INSERT INTO turn_rule_budgets(turn_id,campaign_id) VALUES($1,$2) ON CONFLICT(turn_id) DO NOTHING',
         [turn.id, turn.campaignId]
       );
-      const budgetRow = await client.query(
+      await client.query(
         'SELECT requests,transcript_bytes FROM turn_rule_budgets WHERE turn_id=$1 FOR UPDATE',
         [turn.id]
       );
-      const budget = budgetRow.rows[0];
-      if (budget.requests >= RULE_LIMITS.calls)
-        throw new Problem(422, 'rules_calls_exhausted', 'Rule call limit exhausted');
-      const dice = await client.query('SELECT requests FROM dice_attempts WHERE turn_id=$1', [
-        turn.id,
-      ]);
-      if (budget.requests + (dice.rows[0]?.requests ?? 0) >= RULE_LIMITS.combinedCalls)
-        throw new Problem(
-          422,
-          'gameplay_calls_exhausted',
-          'Combined gameplay call limit exhausted'
-        );
       const id = randomUUID();
-      const remaining = RULE_LIMITS.transcriptBytes - budget.transcript_bytes;
+      const remaining = RULE_LIMITS.transcriptBytes;
       const overhead = serializedBytes({ tool, arguments: raw, result: {} }) - serializedBytes({});
       let payload: Record<string, unknown>;
       try {

@@ -7,6 +7,7 @@ import type { ProviderSettings } from '../domain/types.js';
 import type { Executable } from './discovery.js';
 import type { ModelOption } from './service.js';
 import { runProcess } from './processRunner.js';
+import { logPrompt } from './promptLog.js';
 import { MODEL_EFFORTS } from './options.js';
 
 // Tested evidence baseline only; version differences produce a warning, never a gate.
@@ -243,6 +244,7 @@ export async function generateCodex(
     await writeFile(catalogPath, JSON.stringify(inspected.metadata), 'utf8');
     await writeFile(instructionsPath, narrator, 'utf8');
     await writeFile(transportSchemaPath, JSON.stringify(CODEX_TRANSPORT_SCHEMA), 'utf8');
+    await logPrompt('generateCodex', settings, prompt, narrator);
     return await runProcess(
       executable.binary,
       [
@@ -258,8 +260,8 @@ export async function generateCodex(
         cwd,
         env: { ...codexEnvironment(env), CODEX_HOME: isolatedHome },
         signal,
-        timeoutMs: 180000,
-        maxOutputBytes: 2_000_000,
+        timeoutMs: 0,
+        maxOutputBytes: Infinity,
       }
     );
   } finally {

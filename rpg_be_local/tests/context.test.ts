@@ -4,6 +4,42 @@ import { buildContext, compactionBatch, estimateTokens } from '../src/domain/con
 import { newCampaign } from '../src/domain/campaign.js';
 import type { Turn } from '../src/domain/types.js';
 import { TurnStatus } from '../src/domain/options.js';
+import { RuleSystemKind } from '../src/domain/rules.js';
+
+test('book context fits ordinary instructions and a character without the old byte cap', () => {
+  const c = newCampaign({ name: 'Book context' });
+  c.budgets.gameplay = 16000;
+  c.characters = [
+    {
+      id: 'player',
+      name: 'Sigurd',
+      type: 'player',
+      attributes: { dossier: 'x'.repeat(2800) },
+      inventory: {},
+      description: {},
+      notes: '',
+      revision: 1,
+    },
+  ];
+  const rules = {
+    context: {
+      systemId: '00000000-0000-4000-8000-000000000005',
+      systemKey: 'vampire',
+      systemName: 'Vampire',
+      kind: RuleSystemKind.Library,
+      revision: 2,
+      contentHash: 'a'.repeat(64),
+    },
+    instructions: 'x'.repeat(5961),
+    overview: 'Available rule categories.',
+  };
+  const context = buildContext(c, [], 'start', [], 16000, true, rules);
+  assert.ok(Buffer.byteLength(context.prompt) > 8000);
+  assert.ok(context.estimatedTokens <= 16000);
+  assert.equal(JSON.parse(context.prompt).mandatory.systemInstructions, rules.instructions);
+  c.state = { oversized: 'x'.repeat(40000) };
+  assert.throws(() => buildContext(c, [], 'start', [], 16000, true, rules), /Mandatory state/);
+});
 const turn = (id: string, narrative: string): Turn => ({
   id,
   campaignId: 'c',

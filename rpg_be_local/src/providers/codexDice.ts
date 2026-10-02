@@ -4,8 +4,7 @@ import { z } from 'zod';
 import type { ProviderSettings } from '../domain/types.js';
 import type { Executable } from './discovery.js';
 import { Problem } from '../errors.js';
-import { DICE_LIMITS, DICE_TOOL_NAME } from '../domain/dice.js';
-import { RULE_LIMITS } from '../domain/rules.js';
+import { DICE_TOOL_NAME } from '../domain/dice.js';
 import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
 import { ruleResponseSchema } from '../domain/ruleResponse.js';
 import { diceResponseSchema } from '../domain/diceResponse.js';
@@ -27,12 +26,12 @@ import {
   CODEX_DICE_ITEM_TYPES,
   CODEX_DICE_REQUEST_ID,
   CODEX_DICE_STATUS,
-  DICE_CLI_LIMITS,
   DICE_NARRATOR,
   DiceProtocol,
   type RollCallback,
 } from './diceProtocol.js';
 import { runProcess } from './processRunner.js';
+import { logPrompt } from './promptLog.js';
 
 const rpcSchema = z
   .object({
@@ -68,13 +67,8 @@ export async function generateCodexDice(
   const inspected = await inspectCodex(executable, env);
   const metadata = inspected.metadata as { models: { slug: string; context_window?: number }[] };
   const model = inspected.models.find((option) => option.id === settings.model);
-  const contextWindow = metadata.models.find(
-    (option) => option.slug === settings.model
-  )?.context_window;
   if (!model || (settings.effort && !model.efforts.includes(settings.effort)))
     throw new Problem(422, 'codex_model', 'Select a supported Codex model and effort');
-  if (!contextWindow || contextWindow < DICE_CLI_LIMITS.contextTokens)
-    throw new Problem(503, 'dice_context', 'Codex model lacks a verified dice continuation budget');
   const home = codexHome(env);
   const isolatedHome = await mkdtemp(path.join(home, 'rpg-isolated-'));
   try {
@@ -105,8 +99,6 @@ export async function generateCodexDice(
     );
     const config = {
       ...isolatedCodexConfig(catalogPath, instructionsPath),
-      model_context_window: DICE_CLI_LIMITS.contextTokens,
-      model_auto_compact_token_limit: DICE_CLI_LIMITS.contextTokens,
     };
     return await runCodexDicePhases(
       executable,
@@ -149,11 +141,8 @@ export async function runCodexDicePhases(
   const protocol = new DiceProtocol(roll);
   const transcript: { tool?: string; arguments: unknown; result: GameplayToolResult }[] = [];
   const definitions = book?.definitions ?? gameplayToolDefinitions(!!book);
-  const deadline = Date.now() + DICE_LIMITS.attemptMs;
-  let outputBytes = 0;
   {
     let phase = 0;
-    let outputTokens = 0;
     const phasePrompt =
       prompt +
       '\nApplication-owned gameplay transcript (already executed; do not repeat these calls): ' +
@@ -161,30 +150,23 @@ export async function runCodexDicePhases(
       (book
         ? '\nUse the owned gameplay tools sequentially as needed. Return the final version 3 response acknowledging every roll ID and rule citation.'
         : '\nUse the owned roll tool sequentially as needed. Return the final schema response acknowledging every roll ID. No other tools or external context.');
-    if (
-      Buffer.byteLength(phasePrompt, 'utf8') > DICE_CLI_LIMITS.codexPhaseInputBytes ||
-      Date.now() >= deadline ||
-      outputBytes >= DICE_CLI_LIMITS.protocolBytes
-    )
-      throw new Problem(
-        422,
-        'context_overflow',
-        'Codex dice phase exceeds its reserved context or time budget'
-      );
     let threadId = '';
     let turnId = '';
     let completed = false;
     const calls = new Map<string, string>();
     let final: unknown;
+    await logPrompt(
+      book ? 'generateCodexBookGameplay' : 'generateCodexGameplay',
+      settings,
+      phasePrompt,
+      book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR
+    );
     await runProcess(executable.binary, args, '', {
       cwd,
       env,
       signal,
-      timeoutMs: deadline - Date.now(),
-      maxOutputBytes: DICE_CLI_LIMITS.protocolBytes - outputBytes,
-      onOutputBytes(bytes) {
-        outputBytes += bytes;
-      },
+      timeoutMs: 0,
+      maxOutputBytes: Infinity,
       protocol: {
         start(send) {
           send({
@@ -252,8 +234,6 @@ export async function runCodexDicePhases(
             const identity = JSON.stringify({ tool: call.tool, arguments: call.arguments });
             if (calls.has(call.callId) && calls.get(call.callId) !== identity)
               throw new Problem(409, 'gameplay_transport_conflict', 'Native tool identity changed');
-            if (!calls.has(call.callId) && calls.size >= DICE_LIMITS.requestsPerAttempt)
-              throw new Problem(422, 'dice_limit', 'Codex exhausted its owned tool call budget');
             calls.set(call.callId, identity);
             const result = await (book ? book.dispatch : protocol.call.bind(protocol))(
               call.tool,
@@ -265,15 +245,6 @@ export async function runCodexDicePhases(
               arguments: call.arguments,
               result,
             });
-            if (
-              Buffer.byteLength(JSON.stringify(transcript), 'utf8') >
-              DICE_LIMITS.transcriptBytes + (book ? RULE_LIMITS.transcriptBytes : 0)
-            )
-              throw new Problem(
-                422,
-                'dice_limit',
-                'Codex tool transcript exceeded its byte budget'
-              );
             // Installed app-server DynamicToolCallResponse schema: text content + success.
             send({
               id: message.id,
@@ -298,10 +269,7 @@ export async function runCodexDicePhases(
               })
               .parse(message.params);
             if (
-              usage.threadId !== threadId ||
-              usage.tokenUsage.last.inputTokens > DICE_CLI_LIMITS.contextTokens ||
-              (usage.tokenUsage.last.outputTokens ?? 0) > DICE_CLI_LIMITS.modelOutputTokens ||
-              phase >= DICE_CLI_LIMITS.modelTurns
+              usage.threadId !== threadId
             )
               throw new Problem(
                 422,
@@ -315,13 +283,6 @@ export async function runCodexDicePhases(
               outputTokens: usage.tokenUsage.last.outputTokens,
               cacheReadTokens: usage.tokenUsage.last.cachedInputTokens,
             });
-            outputTokens += usage.tokenUsage.last.outputTokens ?? 0;
-            if (outputTokens > DICE_CLI_LIMITS.modelTurns * DICE_CLI_LIMITS.modelOutputTokens)
-              throw new Problem(
-                422,
-                'context_overflow',
-                'Codex exceeded its turn output token budget'
-              );
             phase++;
           } else if (message.method === CODEX_DICE_RPC.TurnCompleted) {
             const result = z

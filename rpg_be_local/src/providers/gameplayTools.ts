@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { DICE_LIMITS, DICE_TOOL_NAME, diceInputSchema, type DiceResult } from '../domain/dice.js';
-import { RULE_TOOLS, RULE_LIMITS, serializedBytes, type RuleTool } from '../domain/rules.js';
+import { DICE_TOOL_NAME, diceInputSchema, type DiceResult } from '../domain/dice.js';
+import { RULE_TOOLS, serializedBytes, type RuleTool } from '../domain/rules.js';
 import { ruleToolSchemas } from '../services/ruleLookup.js';
 import { Problem } from '../errors.js';
 export type GameplayToolResult = DiceResult | Record<string, unknown>;
@@ -76,10 +76,9 @@ function ownedRegistrations(
   ];
 }
 export const VERIFIED_BOOK_LIMITS = {
-  ruleCalls: 12,
-  diceCalls: 12,
-  combinedCalls: 24,
-  promptBytes: 8000,
+  ruleCalls: Number.MAX_SAFE_INTEGER,
+  diceCalls: Number.MAX_SAFE_INTEGER,
+  combinedCalls: Number.MAX_SAFE_INTEGER,
 } as const;
 export type BookGameplayLimits = {
   ruleCalls: number;
@@ -161,14 +160,14 @@ export class GameplayTools {
         );
       return existing.result;
     }
-    if (this.calls >= (this.options.limits?.combinedCalls ?? RULE_LIMITS.combinedCalls))
+    if (this.calls >= (this.options.limits?.combinedCalls ?? Infinity))
       throw new Problem(422, 'gameplay_calls_exhausted', 'Combined gameplay call limit exhausted');
     const registration = this.registrations.find((tool) => tool.name === name)!;
     const rule = registration.capability === 'rules';
     if (
       rule
-        ? this.ruleCalls >= (this.options.limits?.ruleCalls ?? RULE_LIMITS.calls)
-        : this.diceCalls >= (this.options.limits?.diceCalls ?? DICE_LIMITS.requestsPerAttempt)
+        ? this.ruleCalls >= (this.options.limits?.ruleCalls ?? Infinity)
+        : this.diceCalls >= (this.options.limits?.diceCalls ?? Infinity)
     )
       throw new Problem(422, 'gameplay_calls_exhausted', 'Gameplay tool call limit exhausted');
     this.calls++;
@@ -189,16 +188,6 @@ export class GameplayTools {
             );
           })();
     const bytes = serializedBytes({ tool: name, arguments: input, result });
-    if (
-      rule
-        ? this.ruleBytes + bytes > RULE_LIMITS.transcriptBytes
-        : this.diceBytes + bytes > DICE_LIMITS.transcriptBytes
-    )
-      throw new Problem(
-        422,
-        'gameplay_transcript_exhausted',
-        'Gameplay transcript byte limit exhausted'
-      );
     if (rule) this.ruleBytes += bytes;
     else this.diceBytes += bytes;
     if (this.options.signal?.aborted)

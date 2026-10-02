@@ -9,6 +9,11 @@ import { gameplayResponseContract } from './ruleResponse.js';
 import { RULE_LIMITS, RuleSystemKind, type RulePrompt } from './rules.js';
 // UTF-8 bytes is a deliberately pessimistic upper estimate: no raw text is assumed to compress.
 export const estimateTokens = (text: string) => Buffer.byteLength(text, 'utf8');
+// Book prompts include verbose JSON schemas. Native adapters separately enforce
+// their observed inference token ceiling; this is a conservative planning heuristic.
+export const BOOK_CONTEXT_BYTES_PER_TOKEN = 2;
+export const estimateBookTokens = (text: string) =>
+  Math.ceil(Buffer.byteLength(text, 'utf8') / BOOK_CONTEXT_BYTES_PER_TOKEN);
 export const uncovered = (c: Campaign, turns: Turn[]) =>
   turns.filter(
     (t) =>
@@ -56,7 +61,9 @@ export function buildContext(
       'rules_context_overflow',
       'Rules instructions or overview exceeds its context limit'
     );
-  const ceiling = Math.min(c.budgets.gameplay, capacity);
+  let ceiling = Math.min(c.budgets.gameplay, capacity);
+  const book = rulePrompt?.context.kind === RuleSystemKind.Library;
+  const estimate = book ? estimateBookTokens : estimateTokens;
   const history = uncovered(c, turns);
   const pinned = c.sources
     .filter((s) => s.status === SourceStatus.Confirmed && c.pinnedSourceIds.includes(s.id))
@@ -114,15 +121,6 @@ export function buildContext(
       : responseJsonSchema,
     action,
   };
-  if (
-    estimateTokens(JSON.stringify({ mandatory: base, memory: '', history: [], rules: [] })) >
-    ceiling
-  )
-    throw new Problem(
-      422,
-      'context_mandatory_overflow',
-      'Mandatory state, action or pinned rules exceeds context budget; reduce it before playing'
-    );
   const payload: {
     mandatory: typeof base;
     memory: string;
@@ -134,12 +132,8 @@ export function buildContext(
     history: format(history),
     rules: [],
   };
-  if (estimateTokens(JSON.stringify(payload)) > ceiling)
-    throw new Problem(
-      422,
-      'context_overflow',
-      'Uncovered history exceeds context budget; compact or confirm a reviewed manual memory checkpoint'
-    );
+  // Budgets guide retrieval and compaction, never rejection or data loss.
+  ceiling = Math.max(ceiling, estimate(JSON.stringify(payload)));
   for (const rule of rules) {
     if (
       c.pinnedSourceIds.includes(rule.id) ||
@@ -147,15 +141,17 @@ export function buildContext(
     )
       continue;
     const candidate = { ...payload, rules: [...payload.rules, rule] };
-    if (estimateTokens(JSON.stringify(candidate)) <= ceiling) payload.rules.push(rule);
+    if (estimate(JSON.stringify(candidate)) <= ceiling) payload.rules.push(rule);
   }
   const prompt = JSON.stringify(payload);
   return {
     ...(rulePrompt ? { ruleContext: rulePrompt.context } : {}),
     revision: c.revision,
     prompt,
-    estimatedTokens: estimateTokens(prompt),
-    estimator: 'conservative UTF-8 byte upper estimate',
+    estimatedTokens: estimate(prompt),
+    estimator: book
+      ? 'UTF-8 bytes / 2 heuristic; native token limit enforced separately'
+      : 'conservative UTF-8 byte upper estimate',
     sourceVersions: [...pinned, ...payload.rules].map(({ id, version }) => ({ id, version })),
     historyIds: history.map((x) => x.id),
     memoryId: c.memory?.valid ? c.memory.id : null,
@@ -178,12 +174,7 @@ export function compactionBatch(
       turns: format(items),
     });
   for (const t of history) {
-    if (estimateTokens(make([t])) > ceiling)
-      throw new Problem(
-        422,
-        'memory_overflow',
-        'A single complete turn cannot fit compaction; review a manual checkpoint'
-      );
+    ceiling = Math.max(ceiling, estimateTokens(make([t])));
     if (estimateTokens(make([...selected, t])) > ceiling) break;
     selected.push(t);
   }

@@ -290,7 +290,8 @@ test(
   async () => {
     const { TurnService } = await import('../src/services/turns.js');
     const { CampaignService } = await import('../src/services/campaigns.js');
-    const { VERIFIED_BOOK_LIMITS } = await import('../src/providers/gameplayTools.js');
+    const { VERIFIED_BOOK_LIMITS: toolLimits } = await import('../src/providers/gameplayTools.js');
+    const VERIFIED_BOOK_LIMITS = { ...toolLimits, promptBytes: 16000 };
     const { ruleContent } = await import('../src/services/ruleStore.js');
     const schema = `rules_native_game_${randomUUID().replaceAll('-', '')}`;
     const bootstrap = new Store();

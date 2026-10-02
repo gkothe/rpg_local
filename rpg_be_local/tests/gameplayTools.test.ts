@@ -45,7 +45,7 @@ test('verified native reserves independently bound invalid rule requests, dice a
     rolls = 0;
   const registry = new GameplayTools({
     book: true,
-    limits: VERIFIED_BOOK_LIMITS,
+    limits: { ...VERIFIED_BOOK_LIMITS, promptBytes: 16000 },
     assertActive: async () => {},
     read: async () => {
       reads++;

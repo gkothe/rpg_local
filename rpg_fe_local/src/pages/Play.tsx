@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { Send, Undo2, Download, BookmarkPlus } from 'lucide-react';
+import { Send, Undo2, Download, BookmarkPlus, LoaderCircle } from 'lucide-react';
 import { useResource } from '../hooks/useResource';
 import type {
   CampaignDetail,
@@ -451,6 +451,7 @@ export default function PlayPage() {
           {game.busy && (
             <div className="row">
               <p role="status">
+                <LoaderCircle className="loading-spinner" aria-hidden="true" />{' '}
                 {game.submitting ? 'Submitting action…' : 'GM is preparing your turn…'}
               </p>
               {!game.submitting && <button onClick={() => void game.cancel()}>Cancel turn</button>}
@@ -505,8 +506,8 @@ export default function PlayPage() {
                 className="primary"
                 disabled={game.busy || saving || !draft.trim() || !playable}
               >
-                <Send size={16} />
-                Send action
+                {game.busy ? <LoaderCircle size={16} className="loading-spinner" aria-hidden="true" /> : <Send size={16} />}
+                {game.busy ? 'GM is responding…' : 'Send action'}
               </button>
             </div>
             {!playable && (

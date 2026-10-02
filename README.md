@@ -4,6 +4,14 @@ A local, system-agnostic AI game master. One repository contains a TypeScript ba
 
 ## Development status
 
+AI CLI prompts are saved locally in `log/`, which Git ignores. Filenames use
+`YYYYMMdd__HHmmss__functionName.json` in the computer's local time; repeated calls
+within the same second add a numeric suffix to the function name. Each file contains
+the full prompt, provider/model/effort, timestamp and explicit system instructions
+where supplied. This includes gameplay, character parsing and memory calls. Logs
+contain private campaign text; they do not include CLI credentials or environment
+variables. You can delete old logs when you no longer need them.
+
 The base local application is implemented. Real gameplay checks have exercised Antigravity and a back-and-forth campaign switching between Codex and Claude, including state changes and bounded memory compaction. See the [completion reconciliation](docs/reviews/completion.md), [Codex/Claude evidence](docs/reviews/live-codex-claude.md) and [Antigravity evidence](docs/reviews/antigravity-integration.md) for the actual tested versions/models and limits. No AI is simulated as a production fallback.
 
 **Trusted dice is implemented for Codex, Claude and Antigravity on the verified Windows versions (2026-10-01).** Shared gameplay, recovery, archive and chat integration is present. Antigravity uses explicit application-managed JSON tool requests through isolated subscription CLI calls. Its [plan](docs/plans/trusted-dice.md) and [provider capability evidence](docs/reviews/dice-provider-capabilities.md) track the current work. Existing narration availability does not prove dice-tool support, and preliminary transport checks do not prove completed gameplay, retry, undo or archive acceptance. Check these living documents before continuing that implementation.

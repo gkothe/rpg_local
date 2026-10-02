@@ -2,7 +2,6 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Problem } from '../errors.js';
-import { DICE_LIMITS } from '../domain/dice.js';
 import { RULE_LIMITS, canonicalRuleJson, serializedBytes } from '../domain/rules.js';
 import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
 import { ruleResponseSchema, ruleResponseJsonSchema } from '../domain/ruleResponse.js';
@@ -13,8 +12,8 @@ import { generateAntigravity } from './antigravity.js';
 import { antigravityDiceEnvironment } from './antigravityDice.js';
 import { startGameplayMcp } from './gameplayMcp.js';
 import { gameplayToolDefinitions, type BookGameplayAdapter } from './gameplayTools.js';
-import { DICE_CLI_LIMITS, DICE_NARRATOR } from './diceProtocol.js';
-import { MAX_PROVIDER_INPUT_TOKENS } from './options.js';
+import { DICE_NARRATOR } from './diceProtocol.js';
+import { logPrompt } from './promptLog.js';
 
 const MCP_SERVER = 'local_rpg';
 const MCP_GATEWAY = 'call_mcp_tool';
@@ -41,12 +40,11 @@ export async function generateAntigravityMcpBook(
   selectedBook = true
 ): Promise<unknown> {
   const profile = await mkdtemp(path.join(os.tmpdir(), PROFILE_PREFIX));
-  const deadline = Date.now() + DICE_LIMITS.attemptMs;
+  const deadline = Infinity;
   const controller = new AbortController();
   const boundedSignal = AbortSignal.any([
     controller.signal,
     ...(signal ? [signal] : []),
-    AbortSignal.timeout(DICE_LIMITS.attemptMs),
   ]);
   const env = { ...antigravityDiceEnvironment(sourceEnv), USERPROFILE: profile };
   const definitions = book.definitions ?? gameplayToolDefinitions(selectedBook);
@@ -61,7 +59,6 @@ export async function generateAntigravityMcpBook(
   let initialized = false;
   let completed = false;
   let final: unknown;
-  let calls = 0;
   const check = () => {
     if (boundedSignal.aborted || Date.now() >= deadline)
       throw new Problem(409, 'cancelled', 'Antigravity book attempt is no longer active');
@@ -85,7 +82,7 @@ export async function generateAntigravityMcpBook(
         });
       }
       check();
-      if (!initialized || !inferences.size || ++calls > DICE_LIMITS.requestsPerAttempt)
+      if (!initialized || !inferences.size)
         throw new Problem(
           422,
           'rules_calls_exhausted',
@@ -132,9 +129,9 @@ export async function generateAntigravityMcpBook(
         ownedProfile: profile,
         privateMcp: { name: MCP_SERVER, endpoint },
         agentPrompt: `${selectedBook ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR} Use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests. This is one bounded logical game turn. The supplied frozen campaign context and application tool results are authoritative. Return only the complete final GM JSON.\nOwned MCP argument schemas:${JSON.stringify(definitions)}`,
-        timeoutMs: deadline - Date.now(),
+        timeoutMs: 0,
         deadlineMs: deadline,
-        maxOutputBytes: DICE_CLI_LIMITS.protocolBytes,
+        maxOutputBytes: Infinity,
         protocol: (agentName) => ({
           start(_send, end) {
             end(JSON.stringify({ event: 'user', message: { content: phasePrompt } }) + '\n');
@@ -179,25 +176,17 @@ export async function generateAntigravityMcpBook(
                   if (
                     !Number.isInteger(input) ||
                     input! < 0 ||
-                    input! > MAX_PROVIDER_INPUT_TOKENS ||
                     !Number.isInteger(step.usage.output_tokens) ||
                     step.usage.output_tokens! < 0 ||
-                    step.usage.output_tokens! > DICE_CLI_LIMITS.modelOutputTokens ||
                     !Number.isInteger(step.step_index)
                   )
                     throw new Problem(
                       422,
                       'context_overflow',
-                      'Antigravity inference exceeded or omitted its verified context window'
+                      `Antigravity reported invalid usage metadata: input=${input ?? 'missing'}, output=${step.usage.output_tokens ?? 'missing'}, step=${step.step_index ?? 'missing'}`
                     );
                   if (!inferences.has(step.step_index!)) {
                     inferences.set(step.step_index!, input!);
-                    if (inferences.size > DICE_CLI_LIMITS.modelTurns)
-                      throw new Problem(
-                        422,
-                        'rules_calls_exhausted',
-                        'Antigravity exhausted its bounded model inferences'
-                      );
                     book.observe?.({
                       provider: 'agy',
                       phase: inferences.size - 1,
@@ -245,7 +234,7 @@ export async function generateAntigravityMcpBook(
                       'dice_isolation',
                       'Antigravity reused an invalid native tool identity'
                     );
-                  if (!inferences.size || pending.length >= DICE_LIMITS.requestsPerAttempt)
+                  if (!inferences.size)
                     throw new Problem(
                       422,
                       'rules_calls_exhausted',
@@ -258,12 +247,14 @@ export async function generateAntigravityMcpBook(
                   });
                   notify();
                 }
-              } else if (step.step_type !== 'user_input')
+              } else if (step.step_type !== 'user_input') {
+                await logPrompt('antigravityUnexpectedStep', settings, JSON.stringify(event));
                 throw new Problem(
                   502,
                   'dice_isolation',
                   `Antigravity emitted unapproved native activity (${typeof step.step_type === 'string' && /^[a-z_]{1,80}$/.test(step.step_type) ? step.step_type : 'unrecognized'})`
                 );
+              }
             } else if (event.event === 'result') {
               const result = event.result as {
                 status?: string;
@@ -280,7 +271,6 @@ export async function generateAntigravityMcpBook(
                 !inferences.size ||
                 !Number.isInteger(total) ||
                 total! < 0 ||
-                total! > DICE_CLI_LIMITS.modelTurns * MAX_PROVIDER_INPUT_TOKENS ||
                 typeof result.response !== 'string' ||
                 pending.some((entry) => !entry.claimed)
               )
@@ -290,6 +280,7 @@ export async function generateAntigravityMcpBook(
                   'Antigravity did not complete one bounded private MCP turn'
                 );
               const text = result.response.trim();
+              await logPrompt('antigravityFinalResponse', settings, text);
               const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(text);
               final = responseSchema.parse(JSON.parse(fenced ? fenced[1]! : text));
               completed = true;

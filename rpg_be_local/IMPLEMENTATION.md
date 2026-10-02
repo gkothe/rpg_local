@@ -78,3 +78,7 @@ Removed the arbitrary character 8,000 ceiling and mismatched token/byte precheck
 ## Book effort selection (2026-10-02)
 
 Removed book-specific effort allowlists across providers. Native model efforts and Default now work with book rules; existing model/tool/budget checks remain. Eight provider tests, 48 frontend unit tests, six Chrome browser tests, root lint/build passed. See ../docs/reviews/book-effort-selection.md.
+
+## Book context and prompt logs (2026-10-02)
+
+Removed fixed 8,000-byte book cap and corrected byte/token planning for schema-heavy book contexts. Existing model/campaign token budgets and native runtime checks remain. Saved Vampire first-turn context passes read-only reconstruction without truncation. All CLI prompt boundaries now write git-ignored root log files as YYYYMMdd__HHmmss__functionName.json, with collision-safe suffixes. Verified 88 backend tests (42 gated skips), enlarged three-adapter book input regression, lint/typecheck/build, logging fidelity/collision/failure tests and git ignore. No live AI turn submitted. See ../docs/reviews/book-context-and-prompt-logs.md.

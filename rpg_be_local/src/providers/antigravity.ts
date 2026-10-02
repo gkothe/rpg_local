@@ -8,11 +8,12 @@ import { runProcess, type RunOptions } from './processRunner.js';
 import type { GameplayMcpEndpoint } from './gameplayMcp.js';
 import type { ModelOption } from './service.js';
 import { MAX_PROVIDER_INPUT_TOKENS } from './options.js';
+import { logPrompt } from './promptLog.js';
 // Tested evidence baseline only; version differences produce a warning, never a gate.
 export const ANTIGRAVITY_ISOLATED_VERSION = '1.2.14';
 export const ANTIGRAVITY_INPUT_BYTES = 12_800;
-const ANTIGRAVITY_PROCESS_OUTPUT_BYTES = 2_000_000;
-const ANTIGRAVITY_PROCESS_TIMEOUT_MS = 180_000;
+const ANTIGRAVITY_PROCESS_OUTPUT_BYTES = Infinity;
+const ANTIGRAVITY_PROCESS_TIMEOUT_MS = 0;
 const ANTIGRAVITY_MODEL_EFFORTS = ['low', 'medium', 'high', 'max'] as const;
 const effortPattern = ANTIGRAVITY_MODEL_EFFORTS.join('|');
 const effortLabelPattern = ANTIGRAVITY_MODEL_EFFORTS.map(
@@ -39,6 +40,7 @@ ${prompt ?? 'You are a tabletop RPG narrator. Use only the supplied campaign con
 }
 
 export type AntigravityLaunchOptions = {
+  inputBytes?: number;
   ownedProfile?: string;
   privateMcp?: { name: string; endpoint: GameplayMcpEndpoint };
   protocol?: (agentName: string) => RunOptions['protocol'];
@@ -139,12 +141,7 @@ export async function generateAntigravity(
         'The bounded prompt must include its response schema'
       );
     const input = JSON.stringify({ event: 'user', message: { content: prompt } }) + '\n';
-    if (Buffer.byteLength(input, 'utf8') > ANTIGRAVITY_INPUT_BYTES)
-      throw new Problem(
-        422,
-        'context_overflow',
-        'Antigravity schema and prompt exceed input allowance'
-      );
+    await logPrompt('generateAntigravity', settings, prompt, options.agentPrompt);
     return await runProcess(
       executable.binary,
       [
@@ -166,7 +163,7 @@ export async function generateAntigravity(
         cwd,
         env,
         signal,
-        timeoutMs: Math.max(
+        timeoutMs: (options.timeoutMs ?? ANTIGRAVITY_PROCESS_TIMEOUT_MS) === 0 ? 0 : Math.max(
           1,
           Math.min(
             options.timeoutMs ?? ANTIGRAVITY_PROCESS_TIMEOUT_MS,

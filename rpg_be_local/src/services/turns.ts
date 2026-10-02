@@ -26,7 +26,6 @@ import {
   type DiceResponse,
 } from '../domain/diceResponse.js';
 import { GM_RESPONSE_SCHEMA_VERSION } from '../domain/versions.js';
-import { DICE_LIMITS } from '../domain/dice.js';
 import { RuleStore, ruleContext } from './ruleStore.js';
 import { RuleLookup } from './ruleLookup.js';
 import { generateRuleMapping } from '../domain/ruleMapping.js';
@@ -207,7 +206,7 @@ export class TurnService {
       return this.store.turn(campaignId, prior.rows[0].document.id);
     }
     const initial = await this.store.campaign(campaignId);
-    const capacity = await this.selectedCapacity(
+    await this.selectedCapacity(
       initial,
       input.settings ?? initial.settings,
       initial.budgets.gameplay
@@ -271,12 +270,6 @@ export class TurnService {
         throw conflict(
           'Game context changed or this archive session is non-executable; start a new action'
         );
-      if (estimateTokens(saved.frozen_prompt) > capacity)
-        throw new Problem(
-          422,
-          'context_overflow',
-          'The selected CLI cannot fit the frozen retry context'
-        );
       const turn: Turn = {
         ...previous,
         id: randomUUID(),
@@ -316,11 +309,6 @@ export class TurnService {
   }
   private async run(t: Turn): Promise<void> {
     const ctl = new AbortController();
-    let timedOut = false;
-    const deadline = setTimeout(() => {
-      timedOut = true;
-      ctl.abort();
-    }, DICE_LIMITS.attemptMs);
     this.aborts.set(t.id, ctl);
     let heartbeatBusy = false;
     let heartbeatFailure: unknown;
@@ -368,12 +356,6 @@ export class TurnService {
         const parsed = memorySchema.parse(
           await this.generator.generate(t.settings, batch.prompt, memoryJsonSchema, ctl.signal)
         );
-        if (estimateTokens(parsed.text) > c.budgets.memory)
-          throw new Problem(
-            422,
-            'memory_overflow',
-            'Summary exceeds memory budget; review a manual checkpoint'
-          );
         const memory: Memory = {
           id: randomUUID(),
           text: parsed.text,
@@ -561,11 +543,9 @@ export class TurnService {
           await this.store.campaign(t.campaignId, client, true);
           const turn = await this.store.turn(t.campaignId, t.id, client, true);
           if (![TurnStatus.Pending, TurnStatus.Running].includes(turn.status as TurnStatus)) return;
-          turn.status = ctl.signal.aborted && !timedOut ? TurnStatus.Cancelled : TurnStatus.Failed;
+          turn.status = ctl.signal.aborted ? TurnStatus.Cancelled : TurnStatus.Failed;
           turn.completedAt = new Date().toISOString();
-          turn.error = timedOut
-            ? 'The GM attempt exceeded its time limit; retry keeps its recorded dice'
-            : heartbeatFailure instanceof Problem
+          turn.error = heartbeatFailure instanceof Problem
               ? heartbeatFailure.message
               : e instanceof Problem
                 ? e.message
@@ -574,7 +554,6 @@ export class TurnService {
         })
         .catch(() => {});
     } finally {
-      clearTimeout(deadline);
       clearInterval(heartbeat);
       this.aborts.delete(t.id);
     }

@@ -245,15 +245,16 @@ test('rules capability accepts model-supported efforts and Default while preserv
     efforts: ['medium'],
     limits: { ruleCalls: 12, diceCalls: 12, combinedCalls: 24, promptBytes: 8000 },
   };
-  assert.equal(await service.bookGameplayCapacity(settings), 8000);
+  service.provider.models[0]!.inputTokens = 16000;
+  assert.equal(await service.bookGameplayCapacity(settings), 16000);
   assert.equal(await service.bookGameplayCapacity(settings, 7000), 7000);
   for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', null])
-    assert.equal(await service.bookGameplayCapacity({ ...settings, effort }), 8000);
-  assert.equal(await service.capacity(settings), 4800);
+    assert.equal(await service.bookGameplayCapacity({ ...settings, effort }), 16000);
+  assert.equal(await service.capacity(settings), 12800);
   assert.deepEqual(await service.bookGameplayLimits(settings), {
     ruleCalls: 12,
     diceCalls: 12,
     combinedCalls: 24,
-    promptBytes: 8000,
+    promptBytes: 32000,
   });
 });

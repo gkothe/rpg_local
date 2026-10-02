@@ -1,9 +1,8 @@
 import type { Executable } from './discovery.js';
 import type { ProviderSettings } from '../domain/types.js';
 import { Problem } from '../errors.js';
-import { DICE_LIMITS, DICE_TOOL_NAME } from '../domain/dice.js';
+import { DICE_TOOL_NAME } from '../domain/dice.js';
 import {
-  DICE_CLI_LIMITS,
   DICE_NARRATOR,
   DiceProtocol,
   type RollCallback,
@@ -14,6 +13,7 @@ import {
 } from './diceProtocol.js';
 import { startDiceMcp } from './diceMcp.js';
 import { runProcess } from './processRunner.js';
+import { logPrompt } from './promptLog.js';
 import { startGameplayMcp } from './gameplayMcp.js';
 import { gameplayToolDefinitions, type BookGameplayAdapter } from './gameplayTools.js';
 import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
@@ -37,10 +37,6 @@ export function claudeDiceEnvironment(source: NodeJS.ProcessEnv): NodeJS.Process
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
     CLAUDE_CODE_DISABLE_ORG_MEMORY: '1',
     CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS: '1',
-    CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(DICE_CLI_LIMITS.modelOutputTokens),
-    CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(DICE_CLI_LIMITS.contextTokens),
-    CLAUDE_CODE_MAX_RETRIES: '0',
-    DISABLE_COMPACT: '1',
   };
 }
 export async function generateClaudeDice(
@@ -72,6 +68,12 @@ export async function generateClaudeDice(
     let initialized = false;
     let completed = false;
     let final: unknown;
+    await logPrompt(
+      book ? 'generateClaudeBookGameplay' : 'generateClaudeGameplay',
+      settings,
+      prompt,
+      book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR
+    );
     await runProcess(
       executable.binary,
       [
@@ -99,8 +101,6 @@ export async function generateClaudeDice(
         '--model',
         settings.model,
         ...(settings.effort ? ['--effort', settings.effort] : []),
-        '--max-turns',
-        String(DICE_CLI_LIMITS.modelTurns),
         '--system-prompt',
         book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR,
       ],
@@ -109,8 +109,8 @@ export async function generateClaudeDice(
         cwd,
         env: isolated,
         signal,
-        timeoutMs: DICE_LIMITS.attemptMs,
-        maxOutputBytes: DICE_CLI_LIMITS.protocolBytes,
+        timeoutMs: 0,
+        maxOutputBytes: Infinity,
         protocol: {
           start(_send, end) {
             end(prompt);
@@ -156,8 +156,7 @@ export async function generateClaudeDice(
                 event.is_error ||
                 typeof event.result !== 'string' ||
                 !Number.isInteger(event.num_turns) ||
-                (event.num_turns as number) < 1 ||
-                (event.num_turns as number) > DICE_CLI_LIMITS.modelTurns
+                (event.num_turns as number) < 1
               )
                 throw new Problem(
                   502,
@@ -174,17 +173,10 @@ export async function generateClaudeDice(
                 !Object.values(usage).every(
                   (value) =>
                     typeof value.contextWindow === 'number' &&
-                    value.contextWindow >= DICE_CLI_LIMITS.contextTokens &&
+                    value.contextWindow > 0 &&
                     typeof value.outputTokens === 'number' &&
-                    value.outputTokens >= 0 &&
-                    value.outputTokens <=
-                      DICE_CLI_LIMITS.modelTurns * DICE_CLI_LIMITS.modelOutputTokens
-                ) ||
-                Object.values(usage).reduce(
-                  (total, value) => total + (value.outputTokens ?? 0),
-                  0
-                ) >
-                  DICE_CLI_LIMITS.modelTurns * DICE_CLI_LIMITS.modelOutputTokens
+                    value.outputTokens >= 0
+                )
               )
                 throw new Problem(
                   502,

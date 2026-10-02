@@ -59,12 +59,15 @@ test('all three candidate adapters positively accept selected book-v3 and preser
       const executable = { binary: process.execPath, prefix: [filename] };
       const settings = { provider: name, model: 'fixture', effort: null };
       for (const book of [undefined, { dispatch: unexpected }]) {
+        const prompt = book
+          ? 'Original synthetic context ' + 'x'.repeat(18000)
+          : 'Original synthetic context';
         const output =
           name === 'claude'
             ? await generateClaudeDice(
                 executable,
                 settings,
-                'Original synthetic context',
+                prompt,
                 directory,
                 process.env,
                 unexpected,
@@ -75,7 +78,7 @@ test('all three candidate adapters positively accept selected book-v3 and preser
               ? await runCodexDicePhases(
                   executable,
                   settings,
-                  'Original synthetic context',
+                  prompt,
                   directory,
                   process.env,
                   {},
@@ -86,7 +89,7 @@ test('all three candidate adapters positively accept selected book-v3 and preser
               : await generateAntigravityDice(
                   executable,
                   settings,
-                  'Original synthetic context',
+                  prompt,
                   directory,
                   process.env,
                   unexpected,

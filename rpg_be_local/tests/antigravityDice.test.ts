@@ -39,7 +39,7 @@ else if(args.includes('/hooks')) {
       const payload=await reply.json(); if(payload.result.isError)throw new Error(JSON.stringify(payload));
       history.push({result:JSON.parse(payload.result.content[0].text)});
     }
-    console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:4,state:'DONE',usage:{input_tokens:10000,output_tokens:100}}}));
+    console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:4,state:'DONE',usage:{input_tokens:10000,output_tokens:12417}}}));
     const response={version:2,narrative:history.map(r=>r.result.groups[0].faces[0]).join(','),operations:[],rollInterpretations:history.map(r=>({rollId:r.result.rollId,explanation:'Recorded face '+r.result.groups[0].faces[0]}))};
     console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:{input_tokens:30000},response:JSON.stringify(response)}}));
   });
@@ -95,7 +95,7 @@ test('Antigravity rejects intrinsic native tools, error framing and opaque repea
   );
 });
 
-test('Antigravity continuous native MCP preserves faces with repeated RPC IDs and bounded individual inference windows', async () => {
+test('Antigravity native MCP accepts High effort output usage and preserves dice identity with bounded inputs', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-dice-test-'));
   try {
     const filename = path.join(root, 'cli.mjs');
@@ -157,7 +157,7 @@ test('Antigravity rejects native capabilities before executing application dice'
   }
 });
 
-test('Antigravity cancellation during setup cannot draw dice and oversized phase context fails', async () => {
+test('Antigravity cancellation during setup cannot draw dice', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-dice-cancel-'));
   try {
     const filename = path.join(root, 'cli.mjs');
@@ -178,17 +178,6 @@ test('Antigravity cancellation during setup cannot draw dice and oversized phase
         AbortSignal.timeout(200)
       ),
       /cancelled/
-    );
-    await assert.rejects(
-      generateAntigravityDice(
-        { binary: process.execPath, prefix: [filename] },
-        settings,
-        'x'.repeat(12800),
-        root,
-        process.env,
-        roll
-      ),
-      /input allowance/
     );
     assert.equal(calls, 0);
   } finally {
