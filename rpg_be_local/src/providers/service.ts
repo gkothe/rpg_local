@@ -64,6 +64,14 @@ export type Provider = {
   rules?: RulesCapability;
 };
 export interface Generator {
+  generateOwnedGameplay?(
+    settings: ProviderSettings,
+    prompt: string,
+    schema: unknown,
+    systemPrompt: string,
+    tools: GameplayToolDispatch,
+    signal?: AbortSignal
+  ): Promise<unknown>;
   bookGameplayLimits?(settings: ProviderSettings): Promise<BookGameplayLimits>;
   generateBookGameplay?(
     settings: ProviderSettings,
@@ -539,6 +547,69 @@ export class ProviderService implements Generator {
         roll,
         signal,
         book
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+  async generateOwnedGameplay(
+    settings: ProviderSettings,
+    prompt: string,
+    schema: unknown,
+    systemPrompt: string,
+    tools: GameplayToolDispatch,
+    signal?: AbortSignal
+  ): Promise<unknown> {
+    const book = tools.definitions?.some((tool) => tool.name === 'rules_get') ?? false;
+    if (book) await this.bookGameplayCapacity(settings);
+    else await this.gameplayCapacity(settings);
+    if (!tools.definitions?.length)
+      throw new Problem(
+        503,
+        'gameplay_registry',
+        'Owned gameplay requires explicit tool definitions'
+      );
+    const executable = this.locations.get(settings.provider)!;
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-owned-cli-'));
+    const roll: RollCallback = async () => {
+      throw new Problem(503, 'gameplay_dispatch', 'Use the owned gameplay registry');
+    };
+    const adapter = { dispatch: tools, definitions: tools.definitions, schema, systemPrompt };
+    try {
+      if (settings.provider === PROVIDER_ID.Codex)
+        return await generateCodexDice(
+          executable,
+          settings,
+          prompt,
+          dir,
+          process.env,
+          roll,
+          signal,
+          adapter
+        );
+      if (settings.provider === PROVIDER_ID.Claude)
+        return await generateClaudeDice(
+          executable,
+          settings,
+          prompt,
+          dir,
+          process.env,
+          roll,
+          signal,
+          adapter
+        );
+      const model = (await this.list())
+        .find((provider) => provider.id === settings.provider)!
+        .models.find((model) => model.id === settings.model)!;
+      return await generateAntigravityDice(
+        executable,
+        { ...settings, model: modelSlug(settings, model.efforts) },
+        prompt,
+        dir,
+        process.env,
+        roll,
+        signal,
+        adapter
       );
     } finally {
       await rm(dir, { recursive: true, force: true });

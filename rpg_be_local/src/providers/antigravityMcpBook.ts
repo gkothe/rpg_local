@@ -4,8 +4,9 @@ import path from 'node:path';
 import { Problem } from '../errors.js';
 import { RULE_LIMITS, canonicalRuleJson, serializedBytes } from '../domain/rules.js';
 import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
-import { ruleResponseSchema, ruleResponseJsonSchema } from '../domain/ruleResponse.js';
-import { diceResponseSchema, diceResponseJsonSchema } from '../domain/diceResponse.js';
+import { ruleResponseJsonSchema } from '../domain/ruleResponse.js';
+import { diceResponseJsonSchema } from '../domain/diceResponse.js';
+import { nativeGameplaySchema } from './gameplayContract.js';
 import type { ProviderSettings } from '../domain/types.js';
 import type { Executable } from './discovery.js';
 import { generateAntigravity } from './antigravity.js';
@@ -15,6 +16,7 @@ import { gameplayToolDefinitions, type BookGameplayAdapter } from './gameplayToo
 import { DICE_NARRATOR } from './diceProtocol.js';
 import { logPrompt } from './promptLog.js';
 import { responseRetryFeedback } from '../domain/responseRetry.js';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const MCP_SERVER = 'local_rpg';
 const MCP_GATEWAY = 'call_mcp_tool';
@@ -96,6 +98,7 @@ export async function generateAntigravityMcpBook(
     await cleanProfile(profile);
     throw error;
   });
+  let generationFailure: unknown;
   try {
     const settingsDirectory = path.join(profile, '.gemini', 'antigravity-cli');
     await mkdir(settingsDirectory, { recursive: true });
@@ -109,8 +112,9 @@ export async function generateAntigravityMcpBook(
       }),
       { flag: 'wx' }
     );
-    const responseJsonSchema = selectedBook ? ruleResponseJsonSchema : diceResponseJsonSchema;
-    const responseSchema = selectedBook ? ruleResponseSchema : diceResponseSchema;
+    const responseJsonSchema =
+      book.schema ?? (selectedBook ? ruleResponseJsonSchema : diceResponseJsonSchema);
+    const responseSchema = nativeGameplaySchema(book, selectedBook);
     const schema = JSON.stringify(responseJsonSchema);
     const phasePrompt = prompt.includes(schema)
       ? prompt
@@ -126,7 +130,10 @@ export async function generateAntigravityMcpBook(
       {
         ownedProfile: profile,
         privateMcp: { name: MCP_SERVER, endpoint },
-        agentPrompt: `${selectedBook ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR} Use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests. This is one bounded logical game turn. The supplied frozen campaign context and application tool results are authoritative. Return only the complete final GM JSON.\nOwned MCP argument schemas:${JSON.stringify(definitions)}`,
+        agentPrompt:
+          book.systemPrompt !== undefined
+            ? `${book.systemPrompt}\nNative transport: use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests.\nOwned MCP argument schemas:${JSON.stringify(definitions)}`
+            : `${selectedBook ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR} Use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests. This is one bounded logical game turn. The supplied frozen campaign context and application tool results are authoritative. Return only the complete final GM JSON.\nOwned MCP argument schemas:${JSON.stringify(definitions)}`,
         timeoutMs: 0,
         deadlineMs: deadline,
         maxOutputBytes: Infinity,
@@ -339,21 +346,51 @@ export async function generateAntigravityMcpBook(
         'Antigravity ended before its complete native MCP final'
       );
     check();
-    return final;
+  } catch (error) {
+    generationFailure = error;
   } finally {
     controller.abort();
     notify();
-    await endpoint.close();
-    await cleanProfile(profile);
+    try {
+      await endpoint.close();
+    } catch (closeError) {
+      if (generationFailure instanceof Error) generationFailure.cause = closeError;
+      else generationFailure = closeError;
+    }
+    try {
+      await cleanProfile(profile);
+    } catch (cleanupError) {
+      if (generationFailure instanceof Error) generationFailure.cause = cleanupError;
+      else generationFailure = cleanupError;
+    }
   }
+  if (generationFailure !== undefined) throw generationFailure;
+  return final;
 }
 
-async function cleanProfile(profile: string): Promise<void> {
+const PROFILE_CLEANUP_RETRIES = 10;
+const PROFILE_CLEANUP_RETRY_DELAY_MS = 250;
+export async function cleanProfile(profile: string, remove: typeof rm = rm): Promise<void> {
   if (path.dirname(profile) !== os.tmpdir() || !path.basename(profile).startsWith(PROFILE_PREFIX))
     throw new Problem(
       500,
       'antigravity_cleanup',
       'Owned private profile cleanup path validation failed'
     );
-  await rm(profile, { recursive: true, force: true });
+  // The CLI's Windows updater can briefly retain a lock after stdout closes.
+  // Retry only transient filesystem errors, within this validated owned profile.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await remove(profile, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (
+        attempt >= PROFILE_CLEANUP_RETRIES ||
+        !['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(code ?? '')
+      )
+        throw error;
+      await delay(PROFILE_CLEANUP_RETRY_DELAY_MS);
+    }
+  }
 }

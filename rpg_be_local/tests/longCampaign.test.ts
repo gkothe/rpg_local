@@ -10,8 +10,36 @@ import {
   uncoveredHistoryTokens,
 } from '../src/domain/context.js';
 import type { Turn } from '../src/domain/types.js';
+import {
+  applyKnowledgeChanges,
+  KnowledgeKind,
+  KnowledgeOrigin,
+  KnowledgeCertainty,
+  KnowledgeStatus,
+} from '../src/domain/knowledge.js';
+import { createKnowledgeRecall, freezeKnowledge } from '../src/domain/knowledgeRecall.js';
 test('1000-turn synthetic campaign preserves pinned facts and never sends full transcripts to gameplay or memory', () => {
   const c = newCampaign({ name: 'Long campaign' });
+  c.knowledge = applyKnowledgeChanges(
+    [],
+    [
+      {
+        op: 'create',
+        kind: KnowledgeKind.Place,
+        title: 'Old harbor',
+        text: 'Dockworkers claim that the harbor has a hidden cave.',
+        origin: KnowledgeOrigin.Gm,
+        certainty: KnowledgeCertainty.Rumor,
+        status: KnowledgeStatus.Active,
+        characterIds: [],
+        evidence: [],
+      },
+    ],
+    [],
+    new Map(),
+    { campaignId: c.id, turnId: randomUUID() }
+  ).records;
+  const originalFact = structuredClone(c.knowledge[0]!);
   c.pinnedFacts = ['Marta owes you a favor.'];
   const turns: Turn[] = [];
   let summaries = 0;
@@ -53,4 +81,13 @@ test('1000-turn synthetic campaign preserves pinned facts and never sends full t
   }
   assert.ok(summaries > 50);
   assert.equal(turns.length, 1000);
+  assert.deepEqual(c.knowledge[0], originalFact);
+  const captured = createKnowledgeRecall(freezeKnowledge(c));
+  c.settings = { provider: 'antigravity', model: 'fixture', effort: null };
+  c.knowledge[0]!.text = 'A later scene replaced this description.';
+  const remembered = captured.get({ id: originalFact.id });
+  assert.equal(remembered.text, originalFact.text);
+  assert.equal(remembered.certainty, KnowledgeCertainty.Rumor);
+  assert.equal(remembered.origin, KnowledgeOrigin.Gm);
+  assert.equal(captured.search({ query: 'harbor' }).records[0]!.id, originalFact.id);
 });

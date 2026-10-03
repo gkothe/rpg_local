@@ -29,6 +29,7 @@ import {
   DICE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
   DICE_ARCHIVE_FORMAT_VERSION,
   RULE_ARCHIVE_FORMAT_VERSION,
+  KNOWLEDGE_ARCHIVE_FORMAT_VERSION,
 } from '../domain/versions.js';
 import {
   ruleContextSchema,
@@ -47,6 +48,12 @@ import { validateRuleCitations } from '../domain/ruleResponse.js';
 import { DICE_LIMITS, diceRecordSchema, diceSessionSchema } from '../domain/dice.js';
 import { rollInterpretationSchema, validateRollInterpretations } from '../domain/diceResponse.js';
 import { diceDigest } from './dice.js';
+import {
+  knowledgeRecordSchema,
+  sourceSpanSchema,
+  type CampaignKnowledge,
+} from '../domain/knowledge.js';
+import { frozenKnowledgeSchema, type FrozenKnowledge } from '../domain/knowledgeRecall.js';
 const uuid = z.uuid();
 const object = z.record(z.string(), z.unknown());
 const character = z
@@ -205,6 +212,13 @@ const snapshot = z
       .optional(),
   })
   .strict();
+const knowledgeContext = context.extend({
+  systemPrompt: z.string().optional(),
+  promptContractVersion: z.literal(KNOWLEDGE_ARCHIVE_FORMAT_VERSION).optional(),
+  diceSessionId: uuid.optional(),
+  frozenKnowledge: frozenKnowledgeSchema.optional(),
+  sourceSpans: z.array(sourceSpanSchema).optional(),
+});
 const archiveSchema = z
   .object({
     format: z.literal(ARCHIVE_FORMAT_ID),
@@ -224,8 +238,46 @@ const archiveSchema = z
     memories: z.array(memory),
   })
   .strict();
+const knowledgeArchiveSchema = archiveSchema.extend({
+  version: z.literal(KNOWLEDGE_ARCHIVE_FORMAT_VERSION),
+  campaign: campaign.extend({ knowledge: z.array(knowledgeRecordSchema) }),
+  turns: z.array(turn.extend({ context: knowledgeContext.nullable() })).max(MAX_ARCHIVE_TURNS),
+  snapshots: z.array(
+    snapshot.extend({
+      beforeKnowledge: z.array(knowledgeRecordSchema).optional(),
+      afterKnowledge: z.array(knowledgeRecordSchema).optional(),
+    })
+  ),
+});
 export function remapArchive(raw: unknown): Archive {
-  const parsed = archiveSchema.parse(raw);
+  const isKnowledge =
+    typeof raw === 'object' &&
+    raw !== null &&
+    'version' in raw &&
+    raw.version === KNOWLEDGE_ARCHIVE_FORMAT_VERSION;
+  const parsed = isKnowledge ? knowledgeArchiveSchema.parse(raw) : archiveSchema.parse(raw);
+  const metadata = [
+    'promptContractVersion',
+    'digestVersion',
+    'systemPrompt',
+    'frozenKnowledge',
+    'toolDefinitions',
+  ] as const;
+  for (const session of parsed.diceSessions ?? []) {
+    const count = metadata.filter((key) => session[key] !== undefined).length;
+    if ((!isKnowledge && count) || (count !== 0 && count !== metadata.length))
+      throw new Problem(
+        422,
+        'archive_invalid',
+        'Frozen session metadata requires a complete version 4 contract'
+      );
+    if (
+      session.toolDefinitions &&
+      new Set(session.toolDefinitions.map((tool) => tool.name)).size !==
+        session.toolDefinitions.length
+    )
+      throw new Problem(422, 'archive_invalid', 'Duplicate frozen tool definition');
+  }
   const hasRules =
     parsed.campaign.ruleSystemId ||
     parsed.campaign.ruleReference ||
@@ -237,7 +289,7 @@ export function remapArchive(raw: unknown): Archive {
         entry.ruleReads?.length ||
         entry.ruleCitations?.length
     );
-  if (hasRules && parsed.version !== RULE_ARCHIVE_FORMAT_VERSION)
+  if (hasRules && parsed.version < RULE_ARCHIVE_FORMAT_VERSION)
     throw new Problem(
       422,
       'archive_invalid',
@@ -268,6 +320,8 @@ export function remapArchive(raw: unknown): Archive {
     diceSessions: parsed.diceSessions ?? [],
     diceRecords: parsed.diceRecords ?? [],
   };
+  if (isKnowledge || ARCHIVE_FORMAT_VERSION >= KNOWLEDGE_ARCHIVE_FORMAT_VERSION)
+    archive.campaign.knowledge ??= [];
   const old = archive.campaign;
   const ids = new Map<string, string>();
   const register = (id: string) => {
@@ -292,7 +346,184 @@ export function remapArchive(raw: unknown): Archive {
     ...mids,
     ...archive.diceSessions!.map((session) => session.id),
     ...archive.diceRecords!.map((record) => record.id),
+    ...archive.turns.flatMap((turn) => (turn.ruleReads ?? []).map((read) => read.id)),
   ]);
+  const knowledgeCollections = [
+    old.knowledge ?? [],
+    ...archive.snapshots.flatMap((snap) => [snap.beforeKnowledge ?? [], snap.afterKnowledge ?? []]),
+    ...archive.diceSessions!.map((session) => session.frozenKnowledge?.records ?? []),
+    ...archive.turns.map((turn) => turn.context?.frozenKnowledge?.records ?? []),
+  ];
+  const knowledgeIds = new Set<string>();
+  for (const records of knowledgeCollections) {
+    if (new Set(records.map((record) => record.id)).size !== records.length)
+      throw new Problem(422, 'archive_invalid', 'Duplicate knowledge record ID');
+    for (const record of records) {
+      if (!knowledgeIds.has(record.id)) {
+        register(record.id);
+        knowledgeIds.add(record.id);
+        nonCharacterIds.add(record.id);
+      }
+    }
+  }
+  const historicalSources = new Set(sids);
+  const historicalCharacters = new Set(old.characters.map((char) => char.id));
+  for (const snap of archive.snapshots)
+    for (const char of [...snap.beforeCharacters, ...snap.afterCharacters])
+      historicalCharacters.add(char.id);
+  for (const session of archive.diceSessions!)
+    for (const id of session.characterIds) historicalCharacters.add(id);
+  const sourceLink = (id: string) => {
+    if (
+      historicalCharacters.has(id) ||
+      knowledgeIds.has(id) ||
+      (ids.has(id) && !historicalSources.has(id))
+    )
+      throw new Problem(
+        422,
+        'archive_invalid',
+        'Historical source ID collides with another entity'
+      );
+    if (!ids.has(id)) ids.set(id, randomUUID());
+    historicalSources.add(id);
+    nonCharacterIds.add(id);
+  };
+  const characterLink = (id: string) => {
+    if (nonCharacterIds.has(id))
+      throw new Problem(
+        422,
+        'archive_invalid',
+        'Historical character ID collides with another entity'
+      );
+    if (!ids.has(id)) ids.set(id, randomUUID());
+    historicalCharacters.add(id);
+  };
+  const frozen = [
+    ...archive.diceSessions!.flatMap((session) =>
+      session.frozenKnowledge ? [session.frozenKnowledge] : []
+    ),
+    ...archive.turns.flatMap((turn) =>
+      turn.context?.frozenKnowledge ? [turn.context.frozenKnowledge] : []
+    ),
+  ];
+  for (const captured of frozen) {
+    if (
+      captured.campaignId !== old.id ||
+      new Set(captured.characters.map((char) => char.id)).size !== captured.characters.length ||
+      new Set(captured.sourceIds).size !== captured.sourceIds.length
+    )
+      throw new Problem(422, 'archive_invalid', 'Invalid frozen knowledge campaign or identities');
+    captured.characters.forEach((char) => characterLink(char.id));
+    captured.sourceIds.forEach(sourceLink);
+    if (captured.sourceVersions) {
+      if (
+        new Set(captured.sourceVersions.map((source) => source.id)).size !==
+          captured.sourceVersions.length ||
+        captured.sourceVersions.length !== captured.sourceIds.length ||
+        captured.sourceVersions.some((source) => !captured.sourceIds.includes(source.id))
+      )
+        throw new Problem(
+          422,
+          'archive_invalid',
+          'Frozen source versions must match captured source identities'
+        );
+      captured.sourceVersions.forEach((source) => sourceLink(source.id));
+    }
+  }
+  for (const turn of archive.turns) {
+    turn.context?.sourceVersions.forEach((source) => sourceLink(source.id));
+    for (const span of turn.context?.sourceSpans ?? []) {
+      sourceLink(span.id);
+      if (span.end !== span.start + span.text.length)
+        throw new Problem(422, 'archive_invalid', 'Invalid frozen source span coordinates');
+    }
+  }
+  for (const records of knowledgeCollections)
+    for (const record of records) {
+      if (
+        new Set(record.characterIds).size !== record.characterIds.length ||
+        record.characterIds.some((id) => !record.characterNames[id]) ||
+        (record.holderId && !record.holderName)
+      )
+        throw new Problem(
+          422,
+          'archive_invalid',
+          'Knowledge links require unique identities and historical names'
+        );
+      for (const id of [
+        ...record.characterIds,
+        ...Object.keys(record.characterNames),
+        ...(record.holderId ? [record.holderId] : []),
+      ])
+        characterLink(id);
+      for (const id of [
+        record.createdTurnId,
+        record.updatedTurnId,
+        ...record.attributions.map((entry) => entry.turnId),
+      ])
+        if (id && !tids.has(id))
+          throw new Problem(422, 'archive_invalid', 'Unresolved knowledge attribution turn');
+      const first = record.attributions[0];
+      if (
+        !first ||
+        first.origin !== record.origin ||
+        first.turnId !== record.createdTurnId ||
+        first.at !== record.createdAt ||
+        canonicalRuleJson(first.evidence) !== canonicalRuleJson(record.evidence)
+      )
+        throw new Problem(422, 'archive_invalid', 'Knowledge creation attribution is inconsistent');
+      const provenance = [
+        { origin: record.origin, evidence: record.evidence, turnId: record.createdTurnId },
+        ...record.attributions,
+      ];
+      for (const entry of provenance) {
+        if ((entry.origin === 'source') !== entry.evidence.length > 0)
+          throw new Problem(
+            422,
+            'archive_invalid',
+            'Knowledge origin and evidence are inconsistent'
+          );
+        for (const evidence of entry.evidence) {
+          if (evidence.type === 'campaign_source') {
+            sourceLink(evidence.sourceId);
+            const source = old.sources.find(
+              (source) => source.id === evidence.sourceId && source.version === evidence.version
+            );
+            if (
+              evidence.end !== evidence.start + evidence.quote.length ||
+              (source && source.text.slice(evidence.start, evidence.end) !== evidence.quote)
+            )
+              throw new Problem(
+                422,
+                'archive_invalid',
+                'Knowledge source quote coordinates are invalid'
+              );
+          } else {
+            const event = archive.turns.find((turn) => turn.id === entry.turnId);
+            const captured = event?.ruleContext ?? event?.context?.ruleContext;
+            if (!event || !captured)
+              throw new Problem(
+                422,
+                'archive_invalid',
+                'Book knowledge requires its owning captured turn'
+              );
+            validateRuleCitations(
+              {
+                version: RULE_ARCHIVE_FORMAT_VERSION,
+                narrative: 'Knowledge evidence',
+                operations: [],
+                rollInterpretations: [],
+                ruleCitations: [evidence.citation],
+              },
+              event.ruleReads ?? [],
+              old.id,
+              event.id,
+              captured
+            );
+          }
+        }
+      }
+    }
   const activeIds = archive.turns
     .filter((t) => t.status === TurnStatus.Completed && !t.undone)
     .map((t) => t.id);
@@ -303,6 +534,8 @@ export function remapArchive(raw: unknown): Archive {
     requestIds.add(t.requestId);
     if (t.campaignId !== old.id)
       throw new Problem(422, 'archive_invalid', 'Cross-campaign turn reference');
+    if (t.context?.diceSessionId && t.context.diceSessionId !== t.diceSessionId)
+      throw new Problem(422, 'archive_invalid', 'Context session identity does not match its turn');
     if (
       t.context &&
       (t.context.historyIds.some((id) => !tids.has(id)) ||
@@ -352,6 +585,17 @@ export function remapArchive(raw: unknown): Archive {
     throw new Problem(422, 'archive_invalid', 'Current memory must match a valid saved checkpoint');
   const snapshotIds = new Set<string>();
   for (const snap of archive.snapshots) {
+    if (
+      (snap.beforeKnowledge === undefined) !== (snap.afterKnowledge === undefined) ||
+      snap.beforeKnowledge?.some(
+        (record) => !snap.afterKnowledge?.some((after) => after.id === record.id)
+      )
+    )
+      throw new Problem(
+        422,
+        'archive_invalid',
+        'Knowledge undo snapshot must preserve touched records'
+      );
     if (snapshotIds.has(snap.turnId))
       throw new Problem(422, 'archive_invalid', 'Duplicate snapshot turn ID');
     snapshotIds.add(snap.turnId);
@@ -520,11 +764,41 @@ export function remapArchive(raw: unknown): Archive {
     if (record.targetId) record.targetId = mapped(record.targetId);
     if (record.rerollOf) record.rerollOf.rollId = mapped(record.rerollOf.rollId);
   };
+  const remapKnowledge = (record: CampaignKnowledge) => {
+    record.id = mapped(record.id);
+    record.characterIds = record.characterIds.map(mapped);
+    record.characterNames = Object.fromEntries(
+      Object.entries(record.characterNames).map(([id, name]) => [mapped(id), name])
+    );
+    if (record.holderId) record.holderId = mapped(record.holderId);
+    if (record.createdTurnId) record.createdTurnId = mapped(record.createdTurnId);
+    if (record.updatedTurnId) record.updatedTurnId = mapped(record.updatedTurnId);
+    for (const attribution of record.attributions)
+      if (attribution.turnId) attribution.turnId = mapped(attribution.turnId);
+    for (const evidence of [
+      ...record.evidence,
+      ...record.attributions.flatMap((entry) => entry.evidence),
+    ]) {
+      if (evidence.type === 'campaign_source') evidence.sourceId = mapped(evidence.sourceId);
+      else evidence.citation.receiptId = mapped(evidence.citation.receiptId);
+    }
+  };
+  const remapFrozen = (captured: FrozenKnowledge) => {
+    captured.campaignId = mapped(captured.campaignId);
+    captured.records.forEach(remapKnowledge);
+    captured.characters.forEach((character) => {
+      character.id = mapped(character.id);
+    });
+    captured.sourceIds = captured.sourceIds.map(mapped);
+    for (const source of captured.sourceVersions ?? []) source.id = mapped(source.id);
+  };
+  out.campaign.knowledge?.forEach(remapKnowledge);
   for (const session of out.diceSessions!) {
     session.id = mapped(session.id);
     session.campaignId = mapped(session.campaignId);
     session.rootTurnId = mapped(session.rootTurnId);
     session.characterIds = session.characterIds.map(mapped);
+    if (session.frozenKnowledge) remapFrozen(session.frozenKnowledge);
     session.imported = true;
   }
   for (const record of out.diceRecords!) remapRecord(record);
@@ -532,7 +806,7 @@ export function remapArchive(raw: unknown): Archive {
   out.campaign.ruleSystemId = null;
   if (out.campaign.ruleReference?.kind === RuleSystemKind.Library)
     out.campaign.ruleResolution = { status: 'unresolved', reference: out.campaign.ruleReference };
-  if (parsed.version !== RULE_ARCHIVE_FORMAT_VERSION) {
+  if (parsed.version < RULE_ARCHIVE_FORMAT_VERSION) {
     delete out.campaign.ruleReference;
     delete out.campaign.ruleResolution;
   }
@@ -571,6 +845,9 @@ export function remapArchive(raw: unknown): Archive {
     t.campaignId = out.campaign.id;
     t.requestId = randomUUID();
     if (t.context) {
+      if (t.context.diceSessionId) t.context.diceSessionId = mapped(t.context.diceSessionId);
+      if (t.context.frozenKnowledge) remapFrozen(t.context.frozenKnowledge);
+      for (const span of t.context.sourceSpans ?? []) span.id = mapped(span.id);
       t.context.sourceVersions = t.context.sourceVersions.map((source) => ({
         ...source,
         id: mapped(source.id),
@@ -581,6 +858,8 @@ export function remapArchive(raw: unknown): Archive {
     }
   }
   for (const snapshot of out.snapshots) {
+    snapshot.beforeKnowledge?.forEach(remapKnowledge);
+    snapshot.afterKnowledge?.forEach(remapKnowledge);
     snapshot.turnId = mapped(snapshot.turnId);
     for (const c of [...snapshot.beforeCharacters, ...snapshot.afterCharacters])
       c.id = mapped(c.id);
@@ -705,6 +984,16 @@ export class LibraryService {
           imported: row.imported,
           newFaces: row.new_faces,
           createdAt: new Date(row.created_at).toISOString(),
+          ...(ARCHIVE_FORMAT_VERSION >= KNOWLEDGE_ARCHIVE_FORMAT_VERSION &&
+          row.prompt_contract_version != null
+            ? {
+                promptContractVersion: row.prompt_contract_version,
+                digestVersion: row.digest_version,
+                systemPrompt: row.system_prompt,
+                frozenKnowledge: row.frozen_knowledge,
+                toolDefinitions: row.tool_definitions,
+              }
+            : {}),
         })),
         diceRecords: records.rows.map((row) => ({
           ...row.input,
@@ -764,7 +1053,9 @@ export class LibraryService {
         ]);
       for (const session of archive.diceSessions ?? [])
         await client.query(
-          'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9)',
+          session.promptContractVersion === KNOWLEDGE_ARCHIVE_FORMAT_VERSION
+            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,prompt_contract_version,digest_version,system_prompt,frozen_knowledge,tool_definitions) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13,$14)'
+            : 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9)',
           [
             session.id,
             session.campaignId,
@@ -775,6 +1066,15 @@ export class LibraryService {
             JSON.stringify(session.characterIds),
             session.newFaces,
             session.createdAt,
+            ...(session.promptContractVersion === KNOWLEDGE_ARCHIVE_FORMAT_VERSION
+              ? [
+                  session.promptContractVersion,
+                  session.digestVersion,
+                  session.systemPrompt,
+                  JSON.stringify(session.frozenKnowledge),
+                  JSON.stringify(session.toolDefinitions),
+                ]
+              : []),
           ]
         );
       for (const record of archive.diceRecords ?? []) {
@@ -836,6 +1136,9 @@ export class LibraryService {
       if (!r.rows[0]) throw new Problem(404, 'not_found', 'Template not found');
       const template = r.rows[0].document;
       const c = { ...newCampaign({ name: name ?? template.name }), ...template.setup } as Campaign;
+      // Even an older externally stored template cannot transplant another campaign's timeline.
+      if (ARCHIVE_FORMAT_VERSION >= KNOWLEDGE_ARCHIVE_FORMAT_VERSION) c.knowledge = [];
+      else delete c.knowledge;
       c.id = randomUUID();
       if (name) c.name = name;
       const map = new Map<string, string>();

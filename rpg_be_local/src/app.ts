@@ -1,3 +1,9 @@
+import {
+  KNOWLEDGE_KIND_OPTIONS,
+  KNOWLEDGE_ORIGIN_OPTIONS,
+  KNOWLEDGE_CERTAINTY_OPTIONS,
+  KNOWLEDGE_STATUS_OPTIONS,
+} from './domain/options.js';
 import { CampaignService } from './services/campaigns.js';
 import { SourceLibrary } from './services/sourceLibrary.js';
 import express, { type Request, type RequestHandler, type ErrorRequestHandler } from 'express';
@@ -162,6 +168,10 @@ export function createApp(options: AppOptions) {
           turnStatusOptions: TURN_STATUS_OPTIONS,
           characterTypeOptions: CHARACTER_TYPE_OPTIONS,
           sourceKindOptions: SOURCE_KIND_OPTIONS,
+          knowledgeKindOptions: KNOWLEDGE_KIND_OPTIONS,
+          knowledgeOriginOptions: KNOWLEDGE_ORIGIN_OPTIONS,
+          knowledgeCertaintyOptions: KNOWLEDGE_CERTAINTY_OPTIONS,
+          knowledgeStatusOptions: KNOWLEDGE_STATUS_OPTIONS,
           sourceStatusOptions: SOURCE_STATUS_OPTIONS,
           ocrLanguageOptions: OCR_LANGUAGE_OPTIONS,
           transcriptionLanguageOptions: TRANSCRIPTION_LANGUAGE_OPTIONS,
@@ -675,6 +685,12 @@ export function createApp(options: AppOptions) {
       res
         .status(202)
         .json({ data: await turns!.submit(param(req, 'id'), turnInputSchema.parse(req.body)) });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/turns/:turnId/context',
+    wrap(async (req, res) => {
+      res.json({ data: await store!.turnContext(param(req, 'id'), param(req, 'turnId')) });
     })
   );
   app.get(

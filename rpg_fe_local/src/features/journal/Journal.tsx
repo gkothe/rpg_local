@@ -4,6 +4,7 @@ import type { CampaignDetail, Settings } from '../../services/types';
 import { Field, ErrorNotice, JsonEditor } from '../../components/Controls';
 import { parseObject } from '../../services/validation';
 import { request, json, errorMessage } from '../../services/client';
+import { useResource } from '../../hooks/useResource';
 export default function Journal({
   campaign,
   onSaved,
@@ -17,6 +18,8 @@ export default function Journal({
     baseNotesRevision = useRef(campaign.notesRevision),
     savingGuard = useRef(false);
   const [feedback, setFeedback] = useState('');
+  const [inspectOpen, setInspectOpen] = useState(false);
+  const inspectedTurn = [...campaign.turns].reverse().find((turn) => turn.context);
   const [notes, setNotes] = useState(campaign.notes),
     [campaignName, setCampaignName] = useState(campaign.name),
     [description, setDescription] = useState(campaign.description),
@@ -228,15 +231,17 @@ export default function Journal({
           </button>
         </div>
       </details>
-      <details className="panel">
+      <details className="panel" onToggle={(event) => setInspectOpen(event.currentTarget.open)}>
         <summary>Inspect last turn context</summary>
-        <pre className="code">
-          {JSON.stringify(
-            [...campaign.turns].reverse().find((t) => t.context)?.context || {},
-            null,
-            2
-          )}
-        </pre>
+        {inspectOpen && inspectedTurn ? (
+          <TurnContext
+            key={`${campaign.id}:${inspectedTurn.id}`}
+            campaignId={campaign.id}
+            turnId={inspectedTurn.id}
+          />
+        ) : !inspectedTurn ? (
+          <pre className="code">{'{}'}</pre>
+        ) : null}
       </details>
       <section className="panel stack">
         <h3>GM auxiliary state</h3>
@@ -269,5 +274,21 @@ export default function Journal({
         </button>
       </section>
     </section>
+  );
+}
+
+function TurnContext({ campaignId, turnId }: { campaignId: string; turnId: string }) {
+  const context = useResource<Record<string, unknown> | null>(
+    `/campaigns/${campaignId}/turns/${turnId}/context`
+  );
+  return (
+    <div>
+      {context.loading && <p role="status">Loading saved context…</p>}
+      <ErrorNotice message={context.error} />
+      {context.error && <button onClick={() => void context.reload()}>Retry context load</button>}
+      {!context.loading && !context.error && (
+        <pre className="code">{JSON.stringify(context.data ?? {}, null, 2)}</pre>
+      )}
+    </div>
   );
 }

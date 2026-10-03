@@ -89,3 +89,10 @@ export const TRANSCRIPTION_LANGUAGE_OPTIONS = [
   { id: TRANSCRIPTION_LANGUAGE_CODES[1], label: 'English', default: false },
   { id: TRANSCRIPTION_LANGUAGE_CODES[2], label: 'Portuguese', default: false },
 ] as const;
+
+export {
+  KNOWLEDGE_KIND_OPTIONS,
+  KNOWLEDGE_ORIGIN_OPTIONS,
+  KNOWLEDGE_CERTAINTY_OPTIONS,
+  KNOWLEDGE_STATUS_OPTIONS,
+} from './knowledge.js';

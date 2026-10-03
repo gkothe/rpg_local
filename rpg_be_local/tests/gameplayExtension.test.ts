@@ -5,6 +5,29 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { GameplayTools } from '../src/providers/gameplayTools.js';
 import { startGameplayMcp } from '../src/providers/gameplayMcp.js';
+import { nativeGameplaySchema } from '../src/providers/gameplayContract.js';
+import { gameplayResponseJsonSchema } from '../src/domain/gameplayResponse.js';
+
+test('explicit native schema selection is independent of book mode and fails closed', () => {
+  const dispatch = async () => ({});
+  const selected = nativeGameplaySchema({ dispatch, schema: gameplayResponseJsonSchema }, false);
+  const response = {
+    version: 4,
+    narrative: 'Valid',
+    operations: [],
+    rollInterpretations: [],
+    ruleCitations: [],
+    knowledgeChanges: [],
+  };
+  assert.deepEqual(selected.parse(response), response);
+  assert.throws(() => selected.parse({ ...response, knowledgeChanges: undefined }));
+  assert.throws(() => selected.parse({ ...response, unexpected: true }));
+  assert.throws(
+    () =>
+      nativeGameplaySchema({ dispatch, schema: { properties: { version: { const: 99 } } } }, false),
+    /Unsupported/
+  );
+});
 
 test('one registered synthetic tool crosses private MCP without provider name or parameter branches', async () => {
   let calls = 0;

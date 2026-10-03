@@ -20,6 +20,7 @@ export function newCampaign(input: {
     notes: '',
     notesRevision: 0,
     characters: [],
+    knowledge: [],
     sources: [],
     settings: input.settings ?? { ...emptySettings },
     pinnedFacts: [],

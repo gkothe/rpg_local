@@ -3,6 +3,14 @@ import { DICE_TOOL_NAME, diceInputSchema, type DiceResult } from '../domain/dice
 import { RULE_TOOLS, serializedBytes, type RuleTool } from '../domain/rules.js';
 import { ruleToolSchemas } from '../services/ruleLookup.js';
 import { Problem } from '../errors.js';
+import {
+  createKnowledgeRecall,
+  knowledgeSearchSchema,
+  knowledgeGetSchema,
+  KNOWLEDGE_SEARCH_TOOL_NAME,
+  KNOWLEDGE_GET_TOOL_NAME,
+  type FrozenKnowledge,
+} from '../domain/knowledgeRecall.js';
 export type GameplayToolResult = DiceResult | Record<string, unknown>;
 export type GameplayToolDispatch = ((
   name: string,
@@ -25,6 +33,8 @@ export type GameplayNativeUsage = {
 };
 export type BookGameplayAdapter = {
   dispatch: GameplayToolDispatch;
+  schema?: unknown;
+  systemPrompt?: string;
   definitions?: GameplayToolDefinition[];
   observe?: (usage: GameplayNativeUsage) => void;
 };
@@ -33,7 +43,7 @@ export type GameplayToolRegistration = {
   description: string;
   schema: z.ZodType;
   purpose: 'default' | 'book';
-  capability: 'dice' | 'rules';
+  capability: 'dice' | 'rules' | 'knowledge';
   handler: (input: unknown, requestId: string | number) => Promise<GameplayToolResult>;
   invalid?: (input: unknown, requestId: string | number) => Promise<GameplayToolResult>;
 };
@@ -48,8 +58,10 @@ function definition(registration: GameplayToolRegistration): GameplayToolDefinit
 }
 function ownedRegistrations(
   roll: GameplayToolRegistration['handler'],
-  read: GameplayTools['options']['read']
+  read: GameplayTools['options']['read'],
+  knowledge?: FrozenKnowledge
 ): GameplayToolRegistration[] {
+  const recall = knowledge ? createKnowledgeRecall(knowledge) : undefined;
   return [
     {
       name: DICE_TOOL_NAME,
@@ -73,6 +85,28 @@ function ownedRegistrations(
       handler: (input, id) => read!(name, input, JSON.stringify(id)),
       invalid: (input, id) => read!(name, input, JSON.stringify(id)),
     })),
+    ...(recall
+      ? [
+          {
+            name: KNOWLEDGE_SEARCH_TOOL_NAME,
+            description:
+              'Search the frozen campaign knowledge registry; results retain origin, belief status and lifecycle.',
+            schema: knowledgeSearchSchema,
+            purpose: 'default' as const,
+            capability: 'knowledge' as const,
+            handler: async (input: unknown) => recall.search(input),
+          },
+          {
+            name: KNOWLEDGE_GET_TOOL_NAME,
+            description:
+              'Read one complete record from the frozen campaign knowledge registry. No writes or other campaigns.',
+            schema: knowledgeGetSchema,
+            purpose: 'default' as const,
+            capability: 'knowledge' as const,
+            handler: async (input: unknown) => recall.get(input),
+          },
+        ]
+      : []),
   ];
 }
 export const VERIFIED_BOOK_LIMITS = {
@@ -114,12 +148,13 @@ export class GameplayTools {
       signal?: AbortSignal;
       limits?: BookGameplayLimits;
       registrations?: GameplayToolRegistration[];
+      knowledge?: FrozenKnowledge;
     }
   ) {
     if (options.book && !options.read)
       throw new Error('Book gameplay requires persisted rule reads');
     this.registrations = (
-      options.registrations ?? ownedRegistrations(options.roll, options.read)
+      options.registrations ?? ownedRegistrations(options.roll, options.read, options.knowledge)
     ).filter((tool) => options.book || tool.purpose === 'default');
     if (new Set(this.registrations.map((tool) => tool.name)).size !== this.registrations.length)
       throw new Error('Duplicate gameplay tool registration');
@@ -167,12 +202,13 @@ export class GameplayTools {
     if (
       rule
         ? this.ruleCalls >= (this.options.limits?.ruleCalls ?? Infinity)
-        : this.diceCalls >= (this.options.limits?.diceCalls ?? Infinity)
+        : registration.capability === 'dice' &&
+          this.diceCalls >= (this.options.limits?.diceCalls ?? Infinity)
     )
       throw new Problem(422, 'gameplay_calls_exhausted', 'Gameplay tool call limit exhausted');
     this.calls++;
     if (rule) this.ruleCalls++;
-    else this.diceCalls++;
+    else if (registration.capability === 'dice') this.diceCalls++;
     // The canonical registry owns runtime validation; transport adapters only translate.
     // Existing handlers retain their persisted invalid-request/error accounting.
     const parsed = registration.schema.safeParse(input);
@@ -189,7 +225,7 @@ export class GameplayTools {
           })();
     const bytes = serializedBytes({ tool: name, arguments: input, result });
     if (rule) this.ruleBytes += bytes;
-    else this.diceBytes += bytes;
+    else if (registration.capability === 'dice') this.diceBytes += bytes;
     if (this.options.signal?.aborted)
       throw new Problem(409, 'cancelled', 'Gameplay attempt cancelled');
     this.receipts.set(key, { identity, result });

@@ -3,7 +3,9 @@ import type { Campaign, Turn, ContextManifest } from './types.js';
 import { responseJsonSchema, memoryJsonSchema } from './schemas.js';
 import { CharacterType, SourceStatus, TurnStatus } from './options.js';
 import { DICE_NARRATOR } from './dice.js';
-import { BOOK_GAMEPLAY_NARRATOR } from './gameplayNarrator.js';
+import { BOOK_GAMEPLAY_NARRATOR, gameplayInstructionEnvelope } from './gameplayNarrator.js';
+import { selectRelevantKnowledge } from './knowledgeRecall.js';
+import { KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from './versions.js';
 import { gameplayResponseContract } from './ruleResponse.js';
 import { RuleSystemKind, type RulePrompt } from './rules.js';
 // UTF-8 bytes is a deliberately pessimistic upper estimate: no raw text is assumed to compress.
@@ -45,25 +47,52 @@ export function buildContext(
   c: Campaign,
   turns: Turn[],
   action: string,
-  rules: { id: string; version: number; text: string }[],
+  rules: {
+    id: string;
+    version: number;
+    text: string;
+    start?: number;
+    end?: number;
+    name?: string;
+  }[],
   capacity: number,
   trustedDice = false,
-  rulePrompt?: RulePrompt
+  rulePrompt?: RulePrompt,
+  responseVersion?: number
 ): ContextManifest {
+  const envelope = responseVersion === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
+  const systemPrompt = envelope
+    ? gameplayInstructionEnvelope(
+        rulePrompt?.instructions ?? '',
+        c.instructions,
+        rulePrompt?.context.kind === RuleSystemKind.Library
+      )
+    : undefined;
   let ceiling = Math.min(c.budgets.gameplay, capacity);
   const book = rulePrompt?.context.kind === RuleSystemKind.Library;
   const estimate = book ? estimateBookTokens : estimateTokens;
   const history = uncovered(c, turns);
   const pinned = c.sources
     .filter((s) => s.status === SourceStatus.Confirmed && c.pinnedSourceIds.includes(s.id))
-    .map((s) => ({ id: s.id, version: s.version, text: s.text }));
+    .map((s) => ({
+      id: s.id,
+      version: s.version,
+      text: s.text,
+      ...(envelope ? { name: s.name, start: 0, end: s.text.length } : {}),
+    }));
   for (const pin of c.pinnedSourceSections ?? []) {
     const source = c.sources.find(
       (s) =>
         s.id === pin.sourceId && s.version === pin.version && s.status === SourceStatus.Confirmed
     );
     const section = source && sourceSections(source)[pin.index];
-    if (section) pinned.push({ id: source!.id, version: source!.version, text: section.text });
+    if (section)
+      pinned.push({
+        id: source!.id,
+        version: source!.version,
+        text: section.text,
+        ...(envelope ? { name: source!.name, start: section.start, end: section.end } : {}),
+      });
   }
   const sceneTerms = JSON.stringify({
     action,
@@ -78,21 +107,27 @@ export function buildContext(
       sceneTerms.includes(char.name.toLowerCase())
   );
   const base = {
-    instructions: trustedDice
-      ? rulePrompt?.context.kind === RuleSystemKind.Library
-        ? BOOK_GAMEPLAY_NARRATOR
-        : DICE_NARRATOR
-      : instructions,
+    ...(!envelope
+      ? {
+          instructions: trustedDice
+            ? rulePrompt?.context.kind === RuleSystemKind.Library
+              ? BOOK_GAMEPLAY_NARRATOR
+              : DICE_NARRATOR
+            : instructions,
+        }
+      : {}),
     ...(rulePrompt
       ? {
           ruleContext: rulePrompt.context,
-          systemInstructions: rulePrompt.instructions,
+          ...(!envelope ? { systemInstructions: rulePrompt.instructions } : {}),
           ...(rulePrompt.context.kind === RuleSystemKind.Library
             ? { rulesOverview: rulePrompt.overview }
             : {}),
         }
       : {}),
-    campaignInstructions: c.instructions,
+    ...(!envelope
+      ? { campaignInstructions: c.instructions }
+      : { knowledge: selectRelevantKnowledge(c, action, sceneTerms) }),
     description: c.description,
     pinnedFacts: c.pinnedFacts,
     pinnedRules: pinned,
@@ -106,7 +141,7 @@ export function buildContext(
     })),
     state: c.state,
     schema: trustedDice
-      ? gameplayResponseContract(rulePrompt?.context).jsonSchema
+      ? gameplayResponseContract(rulePrompt?.context, responseVersion).jsonSchema
       : responseJsonSchema,
     action,
   };
@@ -133,7 +168,26 @@ export function buildContext(
     if (estimate(JSON.stringify(candidate)) <= ceiling) payload.rules.push(rule);
   }
   const prompt = JSON.stringify(payload);
+  const sourceSpans = envelope
+    ? [...pinned, ...payload.rules].flatMap((span) => {
+        const source = c.sources.find((s) => s.id === span.id && s.version === span.version);
+        const start = span.start ?? (source?.text === span.text ? 0 : undefined);
+        if (start === undefined || !source) return [];
+        return [
+          {
+            id: span.id,
+            version: span.version,
+            name: span.name ?? source.name,
+            text: span.text,
+            start,
+            end: span.end ?? start + span.text.length,
+          },
+        ];
+      })
+    : undefined;
   return {
+    ...(envelope ? { systemPrompt, promptContractVersion: 4 as const } : {}),
+    ...(sourceSpans ? { sourceSpans } : {}),
     ...(rulePrompt ? { ruleContext: rulePrompt.context } : {}),
     revision: c.revision,
     prompt,
@@ -160,6 +214,20 @@ export function compactionBatch(
       schema: memoryJsonSchema,
       pinnedFacts: c.pinnedFacts,
       priorMemory: c.memory?.valid ? c.memory.text : '',
+      ...(c.knowledge
+        ? {
+            knowledge: c.knowledge.filter((record) =>
+              items.some(
+                (turn) =>
+                  turn.id === record.createdTurnId ||
+                  turn.id === record.updatedTurnId ||
+                  record.attributions.some((entry) => entry.turnId === turn.id)
+              )
+            ),
+            knowledgeInstruction:
+              'Preserve origins and certainty: allegations, rumors and beliefs must remain attributed and uncertain; memory never replaces canonical registry records.',
+          }
+        : {}),
       turns: format(items),
     });
   for (const t of history) {

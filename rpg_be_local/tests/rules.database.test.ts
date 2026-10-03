@@ -1,3 +1,4 @@
+import { ARCHIVE_FORMAT_VERSION } from '../src/domain/versions.js';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
@@ -718,7 +719,7 @@ test(
     await store.insert(campaign);
     const saves = new LibraryService(store);
     const archive = await saves.export(campaign.id);
-    assert.equal(archive.version, 3);
+    assert.equal(archive.version, ARCHIVE_FORMAT_VERSION);
     assert.equal(archive.campaign.ruleSystemId, null);
     assert.equal(archive.campaign.ruleReference?.systemKey, restored.systemKey);
     assert.equal(JSON.stringify(archive).includes('Original synthetic authority.'), false);

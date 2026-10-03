@@ -1,3 +1,7 @@
+import {
+  KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+  LEGACY_GAMEPLAY_DIGEST_VERSION,
+} from './domain/versions.js';
 import { sourceSections } from './domain/sourceSections.js';
 import pg, { type PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
@@ -150,7 +154,7 @@ export class Store {
     // Every Store turn collection belongs to one campaign. Derived retry state is never persisted.
     const campaignId = failures[0]!.campaignId;
     const sessions = await db.query(
-      'SELECT id,imported,context_digest FROM dice_sessions WHERE id=ANY($1::uuid[]) AND campaign_id=$2',
+      "SELECT *,to_jsonb(dice_sessions)->>'digest_version' AS saved_digest_version FROM dice_sessions WHERE id=ANY($1::uuid[]) AND campaign_id=$2",
       [failures.map((turn) => turn.diceSessionId), campaignId]
     );
     const latest = await db.query(
@@ -171,7 +175,8 @@ export class Store {
       const digest = gameplayDigest(
         campaign,
         history.rows.map((row) => row.document),
-        turn.ruleContext
+        turn.ruleContext,
+        Number(session?.saved_digest_version ?? LEGACY_GAMEPLAY_DIGEST_VERSION)
       );
       const head = heads.rows[0];
       const outdatedRules =
@@ -195,9 +200,44 @@ export class Store {
     }
     return turns;
   }
+  async turnContext(campaignId: string, turnId: string) {
+    const turn = await this.turn(campaignId, turnId);
+    if (
+      !turn.context ||
+      turn.context.promptContractVersion !== KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION ||
+      !turn.diceSessionId
+    )
+      return turn.context;
+    const saved = await this.pool.query(
+      'SELECT * FROM dice_sessions WHERE id=$1 AND campaign_id=$2',
+      [turn.diceSessionId, campaignId]
+    );
+    const root = saved.rows[0];
+    if (!root || root.prompt_contract_version !== KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
+      throw new Problem(409, 'dice_context', 'Frozen turn context is missing');
+    return {
+      ...turn.context,
+      diceSessionId: root.id,
+      prompt: root.frozen_prompt,
+      revision: root.frozen_revision,
+      promptContractVersion: root.prompt_contract_version,
+      digestVersion: root.digest_version,
+      systemPrompt: root.system_prompt,
+      frozenKnowledge: root.frozen_knowledge,
+      toolDefinitions: root.tool_definitions,
+    };
+  }
   async saveTurn(t: Turn, client: PoolClient): Promise<void> {
     const document = { ...t };
     delete document.diceRetry;
+    if (
+      document.context?.diceSessionId &&
+      document.context.promptContractVersion === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+    ) {
+      document.context = { ...document.context };
+      delete document.context.systemPrompt;
+      delete document.context.frozenKnowledge;
+    }
     await client.query('UPDATE turns SET document=$2,status=$3 WHERE id=$1', [
       t.id,
       document,
@@ -261,7 +301,9 @@ export class Store {
     c: Campaign,
     action: string,
     client?: PoolClient
-  ): Promise<{ id: string; version: number; text: string }[]> {
+  ): Promise<
+    { id: string; version: number; text: string; name: string; start: number; end: number }[]
+  > {
     const stop = new Set([
       'the',
       'and',
@@ -289,7 +331,7 @@ export class Store {
     if (!words.length) return [];
     const terms = words.map((word) => `'${word}'`).join(' | ');
     const r = await (client ?? this.pool).query(
-      "SELECT source_id,version,content FROM source_chunks WHERE campaign_id=$1 AND search @@ to_tsquery('simple',$2) ORDER BY ts_rank(search,to_tsquery('simple',$2)) DESC,source_id,ordinal LIMIT 8",
+      "SELECT source_id,version,content,ordinal FROM source_chunks WHERE campaign_id=$1 AND search @@ to_tsquery('simple',$2) ORDER BY ts_rank(search,to_tsquery('simple',$2)) DESC,source_id,ordinal LIMIT 8",
       [c.id, terms]
     );
     return r.rows
@@ -299,7 +341,20 @@ export class Store {
             s.id === x.source_id && s.version === x.version && s.status === SourceStatus.Confirmed
         )
       )
-      .map((x) => ({ id: x.source_id, version: x.version, text: x.content }));
+      .map((x) => {
+        const source = c.sources.find((s) => s.id === x.source_id)!;
+        const section = sourceSections(source)[x.ordinal];
+        if (!section || section.text !== x.content)
+          throw new Problem(503, 'source_index_changed', 'Source retrieval index is inconsistent');
+        return {
+          id: x.source_id,
+          version: x.version,
+          text: x.content,
+          name: source.name,
+          start: section.start,
+          end: section.end,
+        };
+      });
   }
   async snapshot(id: string, client: PoolClient): Promise<Snapshot> {
     const r = await client.query('SELECT document FROM snapshots WHERE turn_id=$1', [id]);

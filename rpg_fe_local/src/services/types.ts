@@ -173,7 +173,34 @@ export interface Turn {
   createdAt: string;
   completedAt: string | null;
 }
+export interface KnowledgeAttribution {
+  origin: string;
+  evidence: Record<string, unknown>[];
+  turnId: string | null;
+  at: string;
+}
+export interface CampaignKnowledge {
+  id: string;
+  kind: string;
+  title: string;
+  text: string;
+  origin: string;
+  certainty: string;
+  status: string;
+  characterIds: string[];
+  characterNames: Record<string, string>;
+  holderId?: string | null;
+  holderName?: string;
+  evidence: Record<string, unknown>[];
+  createdTurnId: string | null;
+  updatedTurnId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+  attributions: KnowledgeAttribution[];
+}
 export interface Campaign {
+  knowledge?: CampaignKnowledge[];
   ruleSystemId?: string | null;
   ruleReference?: RuleReference;
   ruleResolution?: { status: string; reference: RuleReference };
@@ -236,6 +263,10 @@ export interface CharacterTemplate {
   createdAt: string;
 }
 export interface Settings {
+  knowledgeKindOptions?: { id: string; label: string }[];
+  knowledgeOriginOptions?: { id: string; label: string }[];
+  knowledgeCertaintyOptions?: { id: string; label: string }[];
+  knowledgeStatusOptions?: { id: string; label: string }[];
   turnStatusOptions: {
     id: string;
     label: string;

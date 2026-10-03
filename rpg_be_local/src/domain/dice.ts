@@ -1,3 +1,4 @@
+import { frozenKnowledgeSchema } from './knowledgeRecall.js';
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
 import { DEFAULT_GAMEPLAY_NARRATOR } from './gameplayNarrator.js';
@@ -106,7 +107,22 @@ export const diceSessionSchema = z
     campaignId: z.uuid(),
     rootTurnId: z.uuid(),
     contextDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    frozenPrompt: z.string().max(16_000),
+    frozenPrompt: z.string(),
+    promptContractVersion: z.literal(4).optional(),
+    digestVersion: z.literal(2).optional(),
+    systemPrompt: z.string().optional(),
+    frozenKnowledge: frozenKnowledgeSchema.optional(),
+    toolDefinitions: z
+      .array(
+        z
+          .object({
+            name: z.string(),
+            description: z.string(),
+            inputSchema: z.record(z.string(), z.unknown()),
+          })
+          .strict()
+      )
+      .optional(),
     frozenRevision: z.number().int().nonnegative(),
     characterIds: z.array(z.uuid()).max(1000),
     newFaces: z.number().int().min(0).max(DICE_LIMITS.facesPerSession),

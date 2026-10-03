@@ -1,3 +1,5 @@
+import { type FrozenKnowledge } from '../domain/knowledgeRecall.js';
+import type { GameplayToolDefinition } from '../providers/gameplayTools.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { Store, ownerId } from '../store.js';
@@ -17,13 +19,24 @@ import { RuleStore } from './ruleStore.js';
 export { diceDigest, gameplayDigest } from '../domain/diceContext.js';
 export class DiceService {
   constructor(readonly store: Store) {}
-  async createSession(turn: Turn, contextDigest: string, characterIds: string[]): Promise<string> {
+  async createSession(
+    turn: Turn,
+    contextDigest: string,
+    characterIds: string[],
+    metadata?: {
+      systemPrompt: string;
+      knowledge: FrozenKnowledge;
+      toolDefinitions: GameplayToolDefinition[];
+    }
+  ): Promise<string> {
     return this.store.transaction(async (client) => {
       await this.assertOwned(turn, client);
       if (turn.ruleContext) await new RuleStore(this.store).guard(turn.ruleContext, client);
       const id = randomUUID();
       await client.query(
-        'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids) VALUES($1,$2,$3,$4,$5,$6,$7)',
+        metadata
+          ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,prompt_contract_version,digest_version,system_prompt,frozen_knowledge,tool_definitions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)'
+          : 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids) VALUES($1,$2,$3,$4,$5,$6,$7)',
         [
           id,
           turn.campaignId,
@@ -32,6 +45,15 @@ export class DiceService {
           turn.context!.prompt,
           turn.context!.revision,
           JSON.stringify(characterIds),
+          ...(metadata
+            ? [
+                4,
+                2,
+                metadata.systemPrompt,
+                metadata.knowledge,
+                JSON.stringify(metadata.toolDefinitions),
+              ]
+            : []),
         ]
       );
       await client.query(
@@ -40,6 +62,8 @@ export class DiceService {
       );
       const active = await this.store.turn(turn.campaignId, turn.id, client);
       active.diceSessionId = id;
+      if (metadata && active.context) active.context.diceSessionId = id;
+      if (metadata && turn.context) turn.context.diceSessionId = id;
       turn.diceSessionId = id;
       await this.store.saveTurn(active, client);
       return id;

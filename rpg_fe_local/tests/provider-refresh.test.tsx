@@ -50,6 +50,36 @@ it('provider picker excludes unverified dice models and selects a verified model
 
 afterEach(() => vi.unstubAllGlobals());
 
+it('shows automatic knowledge changes as text in the existing chat and preserves the draft', async () => {
+  const campaign = fixtureCampaign();
+  const change = '<img src=x onerror=alert(1)>: knowledge introduced (gm, rumor, active)';
+  campaign.turns = [{ ...fixtureTurn(), changes: [change] }];
+  const fetcher = vi.fn().mockImplementation(async (path: string) => {
+    const data = path.startsWith('/api/providers')
+      ? providers
+      : path === '/api/settings'
+        ? options
+        : campaign;
+    return new Response(JSON.stringify({ data }), { status: 200 });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const { container } = render(
+    <MemoryRouter initialEntries={[`/campaigns/${campaign.id}`]}>
+      <Routes>
+        <Route path="/campaigns/:id" element={<PlayPage />} />
+      </Routes>
+    </MemoryRouter>
+  );
+  const action = await screen.findByLabelText('Your action');
+  fireEvent.change(action, { target: { value: 'Ask about the rumor' } });
+  expect(await screen.findByText(change)).toBeInTheDocument();
+  expect(container.querySelector('img')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Game master' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+  expect(screen.getByLabelText('Your action')).toHaveValue('Ask about the rumor');
+  expect(screen.getByText(change)).toBeInTheDocument();
+});
+
 it('allows selecting an untested provider and shows its compatibility warning', () => {
   const onChange = vi.fn();
   const provider = {

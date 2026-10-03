@@ -5,6 +5,85 @@ import { newCampaign } from '../src/domain/campaign.js';
 import type { Turn } from '../src/domain/types.js';
 import { TurnStatus } from '../src/domain/options.js';
 import { RuleSystemKind } from '../src/domain/rules.js';
+import { randomUUID } from 'node:crypto';
+
+test('v4 evidence spans identify only supplied source text with absolute Unicode offsets', () => {
+  const c = newCampaign({ name: 'Evidence spans' });
+  const id = randomUUID();
+  const text = 'before 🌙 and then repeated and repeated';
+  c.sources = [
+    {
+      id,
+      name: 'Original source',
+      kind: 'text',
+      text,
+      status: 'confirmed',
+      version: 1,
+      pages: [],
+      warnings: [],
+    },
+  ];
+  const start = text.lastIndexOf('repeated');
+  const rules = [
+    {
+      id,
+      version: 1,
+      name: 'Original source',
+      text: 'repeated',
+      start,
+      end: start + 'repeated'.length,
+    },
+  ];
+  const context = buildContext(c, [], 'look', rules, 16000, true, undefined, 4);
+  assert.deepEqual(context.sourceSpans, rules);
+  assert.deepEqual(JSON.parse(context.prompt).rules, rules);
+  assert.equal(
+    text.slice(context.sourceSpans![0]!.start, context.sourceSpans![0]!.end),
+    'repeated'
+  );
+  const unknownOffsets = buildContext(
+    c,
+    [],
+    'look',
+    [{ id, version: 1, text: 'repeated' }],
+    16000,
+    true,
+    undefined,
+    4
+  );
+  assert.deepEqual(unknownOffsets.sourceSpans, []);
+});
+
+test('v4 context separates exact instructions from reference data and selects explicit schema', () => {
+  const c = newCampaign({ name: 'Envelope' });
+  c.instructions = '  CAMPAIGN_EXACT\n\t';
+  const rules = {
+    context: {
+      systemId: '00000000-0000-4000-8000-000000000005',
+      systemKey: 'vampire',
+      systemName: 'Vampire',
+      kind: RuleSystemKind.ModelKnowledge,
+      revision: 2,
+      contentHash: 'a'.repeat(64),
+    },
+    instructions: ' \nSELECTED_EXACT\t ',
+    overview: '',
+  };
+  const context = buildContext(c, [], 'look', [], 100, true, rules, 4);
+  assert.ok(context.systemPrompt?.includes(rules.instructions));
+  assert.ok(context.systemPrompt?.includes(c.instructions));
+  assert.doesNotMatch(
+    context.prompt,
+    /SELECTED_EXACT|CAMPAIGN_EXACT|Application integration contract/
+  );
+  const data = JSON.parse(context.prompt).mandatory;
+  assert.equal(data.schema.properties.version.const, 4);
+  assert.equal(data.instructions, undefined);
+  assert.equal(data.systemInstructions, undefined);
+  assert.equal(data.campaignInstructions, undefined);
+  assert.deepEqual(data.knowledge, []);
+  assert.equal(context.promptContractVersion, 4);
+});
 
 test('book context fits ordinary instructions and a character without the old byte cap', () => {
   const c = newCampaign({ name: 'Book context' });

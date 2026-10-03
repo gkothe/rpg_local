@@ -20,6 +20,32 @@ Windows is the acceptance platform. Physical Android Chrome validation is on hol
 
 ## Product and architecture context
 
+### Campaign knowledge and GM instructions
+
+The selected rule system's complete `instructions` text is the main GM guidance.
+Campaign-specific GM instructions remain optional and supplement it. The application
+adds a single technical response/tool contract rather than another storytelling prompt.
+Private notes remain excluded.
+
+Successful turns can automatically save important NPC information, places, relationships,
+debts, objectives and events. Records distinguish established facts, rumors and beliefs,
+and retain whether the information came from supplied material, the GM or the player.
+This happens in the same response and transaction as the rest of the turn; it does not
+require another extraction call or an approval screen. Changes appear in the existing
+chat change list. There is no separate knowledge editor.
+
+The GM receives relevant records and can search or fetch the frozen campaign registry
+through owned read tools. It does not receive the whole registry by default on every
+turn. Undo restores the affected information along with character/state changes, and
+saved retries preserve their original inputs. Campaign backups preserve knowledge and
+its historical references; reusable templates omit played timeline facts.
+
+After updating, stop the app, run `setup-database.cmd` to apply pending migrations, then
+start the compatible backend/frontend together with `start.cmd`. Do not run an older
+backend against newly written version-4 campaign archives. Existing saves and legacy
+archives remain supported. Claude live verification of this feature is deferred until
+the user's weekly quota is available; adapter tests do not substitute for that check.
+
 The aim is a local replacement for the older RPG backend/frontend, using independently authenticated **Claude Code, Codex or Antigravity (`agy`) CLIs** through the user's subscription. The app does not collect provider credentials. Players can change CLI, model and effort between turns while the app retains their campaign context.
 
 - Flexible character sheets and AI game-rule interpretation, with validated automatic state changes, a visible change list and full undo.

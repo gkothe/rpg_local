@@ -21,7 +21,7 @@ export async function logPrompt(
       action,
       ...settings,
       prompt,
-      ...(systemInstructions ? { systemInstructions } : {}),
+      ...(systemInstructions !== undefined ? { systemInstructions } : {}),
     },
     null,
     2

@@ -136,3 +136,69 @@ Campaign budgets are soft retrieval/compaction targets, not AI admission limits.
 A pending/running turn can perform up to two automatic correction attempts for malformed JSON, invalid final-schema fields, citations, roll interpretations or mutations, and reported provider generation failures. The original action/provider/model/context and turn identity remain fixed. Saved dice are replayed without redrawing, state changes commit only after complete validation, and exhaustion becomes a normal failed turn with manual saved-dice retry available. Cancellation, changed rules/campaign context and forbidden capabilities never auto-retry. Prompt/correction diagnostics are local Git-ignored logs. The UI shows an animated busy indicator and keeps the next-action draft editable.
 
 Invalid Antigravity `call_mcp_tool` gateway server/tool envelopes use recoverable `gameplay_tool_unavailable`: dispatch is denied, the provider attempt closes, and correction feedback identifies the owned registry. Saved dice/context remain unchanged. Actual native capability violations retain non-retryable isolation errors. Argument-free DONE metadata is accepted only for an already validated/dispatched owned tool step.
+
+### Campaign knowledge and instruction contract (v4)
+
+Gameplay and campaign exports now use v4 after the coordinated migration and
+compatibility gate. Earlier archive-v2/v3 descriptions above remain historical
+compatibility notes. New book and no-library responses share the strict shape
+`{version:4,narrative,operations,rollInterpretations,ruleCitations,knowledgeChanges}`;
+no-library citations are empty. Stored legacy retries retain their original version.
+The selected rule-system instructions and optional campaign instructions are preserved
+in full; one technical instruction block describes integration and owned tools.
+
+`Campaign.knowledge` contains records separate from free-form `state`:
+`{id,kind,title,text,origin,certainty,status,characterIds,characterNames,holderId?,holderName?,
+createdTurnId,updatedTurnId,createdAt,updatedAt,revision,evidence,attributions}`.
+Kinds are `npc|place|relationship|debt|objective|event|other`, origins
+`source|gm|player|unknown`, certainty `established|rumor|belief`, and statuses
+`active|resolved|retracted`. These values and labels are backend-owned options.
+IDs, historical display names, revisions and UTC audit fields are assigned by the
+server. Character deletion leaves historical identity, never a live editable character.
+
+Knowledge changes are creates with fact/provenance fields or updates with an existing
+`id`, exact `expectedRevision` and nonempty `changes`. Physical deletion and changes
+to creation identity/origin/audit fields are rejected. Links accept existing character
+UUIDs or `{operationIndex:number}` targeting a create in the complete operations array;
+aliases resolve before persistence. Each created NPC has one introduction record.
+Narration, character/state operations and knowledge commit atomically; the existing
+chat change list reports changes. There is no separate editor or approval step.
+
+Evidence is either `{type:'campaign_source',sourceId,version,sourceName,quote,start,end}`
+or `{type:'book',citation:RuleCitation}`. Only source origin carries evidence, and
+source origin requires it. Campaign quotes use absolute UTF-16 source offsets,
+`end=start+quote.length`, and must fit one supplied frozen span with matching
+identity/version/name and exact text. Book evidence uses existing exact original-book
+receipt validation. Retained quote/name/version survive source deletion/replacement;
+lookup labels missing or replaced source versions unavailable. Evidence validates provenance/coordinates,
+not semantic truth.
+
+Owned read-only tools `campaign_knowledge_search` and `campaign_knowledge_get` are
+available independently of library mode. Search accepts `{query,kind?,status?,cursor?}`
+and returns record summaries plus an opaque continuation; get accepts `{id}` and
+returns the complete record with evidence and historical-link labels. Reads are scoped
+to the immutable captured campaign registry, never current mutable state. Search
+defaults to active records; resolved/retracted records require a status filter or exact
+ID lookup. Knowledge reads do not draw dice or create authority receipts for books.
+
+New root dice sessions persist `promptContractVersion:4`, `digestVersion:2`, exact
+`systemPrompt`, `frozenKnowledge:{campaignId,records,characters:[{id,name}],sourceIds,sourceVersions?:[{id,version}]}`,
+and `toolDefinitions:[{name,description,inputSchema}]` once; `frozenPrompt` holds the
+exact user input. New frozen captures include current source versions; older v4 captures
+without that optional metadata retain their source-ID-only availability semantics.
+Retries use these immutable fields. Legacy absent metadata retains
+the original contract/digest; no historical metadata is fabricated. A legacy retry
+with nonempty new knowledge fails its context-change check. Derived memory never
+overrides knowledge certainty/status/evidence. Legacy undo snapshots omit knowledge
+fields; new snapshots hold only touched `beforeKnowledge`/`afterKnowledge` records.
+Omission means no tracked changes, never clearing the registry.
+
+Archive v4 validates/remaps knowledge, attribution turns, character/source links,
+book receipt links, undo snapshots and frozen session metadata consistently. Deleted
+character/source links remain historical with retained names/quotes; structural UUIDs
+receive new identities while narrative, private text and historical prompt strings
+remain exact audit text. Imported sessions are non-executable. Archives v1–v3 remain
+accepted through strict legacy schemas; old campaigns receive empty knowledge on
+activation without guessed origins. V4 fields are rejected in older archive versions.
+Templates retain setup and portable book references, excluding knowledge timeline,
+turns, receipts, snapshots and frozen sessions.

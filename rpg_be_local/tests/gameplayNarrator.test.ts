@@ -1,25 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  DEFAULT_GAMEPLAY_NARRATOR,
-  BOOK_GAMEPLAY_NARRATOR,
-} from '../src/domain/gameplayNarrator.js';
-import { DICE_NARRATOR } from '../src/domain/dice.js';
-import { RULE_TOOLS } from '../src/domain/rules.js';
-test('default narrator permits model knowledge while preserving genuine dice/native isolation', () => {
-  assert.equal(DICE_NARRATOR, DEFAULT_GAMEPLAY_NARRATOR);
-  assert.match(DEFAULT_GAMEPLAY_NARRATOR, /campaign memory and model knowledge/);
-  assert.match(DEFAULT_GAMEPLAY_NARRATOR, /Only the owned roll_dice tool/);
-  assert.match(DEFAULT_GAMEPLAY_NARRATOR, /Native shell, files, network/);
-  assert.doesNotMatch(
-    DEFAULT_GAMEPLAY_NARRATOR,
-    /No other tools, files, instructions, sessions or outside context/
-  );
+import { gameplayInstructionEnvelope } from '../src/domain/gameplayNarrator.js';
+
+test('instruction envelope preserves complete selected and campaign columns once', () => {
+  const selected = '  SYSTEM_CANARY\n\n\t' + 'unchanged selected text '.repeat(10000);
+  const campaign = '\n CAMPAIGN_CANARY\t\n';
+  for (const book of [false, true]) {
+    const result = gameplayInstructionEnvelope(selected, campaign, book);
+    assert.equal(result.split(selected).length, 2);
+    assert.equal(result.split(campaign).length, 2);
+    assert.equal(result.split('Application integration contract:').length, 2);
+    assert.doesNotMatch(
+      result,
+      /flexible tabletop|complete narration|tone\/language|difficulty|pacing/
+    );
+  }
 });
-test('book narrator scopes the five owned tools, original authority and provisional/contradictory rulings', () => {
-  for (const name of RULE_TOOLS) assert.ok(BOOK_GAMEPLAY_NARRATOR.includes(name));
-  assert.match(BOOK_GAMEPLAY_NARRATOR, /Published original book text is authoritative/);
-  assert.match(BOOK_GAMEPLAY_NARRATOR, /navigation only/);
-  assert.match(BOOK_GAMEPLAY_NARRATOR, /contradictory books/);
-  assert.match(BOOK_GAMEPLAY_NARRATOR, /Event memory/);
+
+test('empty optional columns still produce the technical contract without invented behavior', () => {
+  const result = gameplayInstructionEnvelope('', '', false);
+  assert.match(result, /Selected system instructions:\n\n\nCampaign instructions:\n\n/);
+  assert.match(result, /campaign_knowledge_search/);
+  assert.match(result, /roll_dice/);
 });

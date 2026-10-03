@@ -1,3 +1,5 @@
+import type { CampaignKnowledge, SourceSpan } from './knowledge.js';
+import type { FrozenKnowledge } from './knowledgeRecall.js';
 import type {
   CHARACTER_MUTABLE_FIELDS,
   CharacterType as CharacterTypeEnum,
@@ -52,6 +54,7 @@ export type Memory = {
   createdAt: string;
 };
 export type Campaign = {
+  knowledge?: CampaignKnowledge[];
   ruleSystemId?: string | null;
   ruleReference?: RuleReference;
   ruleResolution?: { status: 'unresolved'; reference: RuleReference };
@@ -98,6 +101,11 @@ export type Turn = {
   completedAt: string | null;
 };
 export type ContextManifest = {
+  diceSessionId?: string;
+  systemPrompt?: string;
+  promptContractVersion?: 4;
+  frozenKnowledge?: FrozenKnowledge;
+  sourceSpans?: SourceSpan[];
   ruleContext?: RuleContext;
   revision: number;
   prompt: string;
@@ -132,6 +140,8 @@ export type GMResponse = {
   operations: Operation[];
 };
 export type Snapshot = {
+  beforeKnowledge?: CampaignKnowledge[];
+  afterKnowledge?: CampaignKnowledge[];
   turnId: string;
   beforeCharacters: Character[];
   afterCharacters: Character[];

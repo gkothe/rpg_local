@@ -17,8 +17,7 @@ import { logPrompt } from './promptLog.js';
 import { startGameplayMcp } from './gameplayMcp.js';
 import { gameplayToolDefinitions, type BookGameplayAdapter } from './gameplayTools.js';
 import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
-import { ruleResponseSchema } from '../domain/ruleResponse.js';
-import { diceResponseSchema } from '../domain/diceResponse.js';
+import { nativeGameplaySchema } from './gameplayContract.js';
 
 // Tested evidence baseline only; version differences produce a warning, never a gate.
 export const CLAUDE_DICE_VERSION = '2.1.232';
@@ -72,7 +71,7 @@ export async function generateClaudeDice(
       book ? 'generateClaudeBookGameplay' : 'generateClaudeGameplay',
       settings,
       prompt,
-      book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR
+      book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR)
     );
     await runProcess(
       executable.binary,
@@ -102,7 +101,7 @@ export async function generateClaudeDice(
         settings.model,
         ...(settings.effort ? ['--effort', settings.effort] : []),
         '--system-prompt',
-        book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR,
+        book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR),
       ],
       '',
       {
@@ -214,7 +213,7 @@ export async function generateClaudeDice(
     );
     if (!completed)
       throw new Problem(502, 'claude_dice_result', 'Claude closed before completing the dice turn');
-    return (book ? ruleResponseSchema : diceResponseSchema).parse(final);
+    return nativeGameplaySchema(book, !!book).parse(final);
   } finally {
     await endpoint.close();
   }

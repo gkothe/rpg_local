@@ -1,3 +1,5 @@
+import { ARCHIVE_FORMAT_VERSION } from '../src/domain/versions.js';
+import type { GameplayToolDispatch } from '../src/providers/gameplayTools.js';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -41,6 +43,9 @@ before(async () => {
   );
   await store.pool.query(
     await readFile(path.join(appRoot, 'migrationssql/0005_rule_systems.sql'), 'utf8')
+  );
+  await store.pool.query(
+    await readFile(path.join(appRoot, 'migrationssql/0008_campaign_knowledge.sql'), 'utf8')
   );
 });
 after(async () => {
@@ -128,6 +133,21 @@ test(
         if (settings.model === 'too-small')
           throw new Problem(422, 'context_overflow', 'Fixture provider has insufficient capacity');
         return 16000;
+      }
+      override async generateOwnedGameplay(
+        settings: ProviderSettings,
+        prompt: string,
+        _schema: unknown,
+        _systemPrompt: string,
+        tools: GameplayToolDispatch
+      ) {
+        const result = await this.generateGameplay(
+          settings,
+          prompt,
+          async (input, id) =>
+            tools('roll_dice', input, id) as Promise<import('../src/domain/dice.js').DiceResult>
+        );
+        return { ...result, version: 4, ruleCitations: [], knowledgeChanges: [] };
       }
       override async generateGameplay(
         _settings: ProviderSettings,
@@ -323,7 +343,7 @@ test(
       );
       const library = new LibraryService(store);
       const archive = await library.export(campaign.id);
-      assert.equal(archive.version, 3);
+      assert.equal(archive.version, ARCHIVE_FORMAT_VERSION);
       assert.equal(archive.diceRecords?.length, 3);
       const malformed = structuredClone(archive);
       malformed.diceRecords![0]!.groups[0]!.faces[0] = 7;

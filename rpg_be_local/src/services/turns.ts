@@ -1,3 +1,16 @@
+import {
+  KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+  KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
+  LEGACY_GAMEPLAY_DIGEST_VERSION,
+} from '../domain/versions.js';
+import { isDeepStrictEqual } from 'node:util';
+import {
+  gameplayResponseSchema,
+  gameplayResponseJsonSchema,
+  type GameplayResponse,
+} from '../domain/gameplayResponse.js';
+import { freezeKnowledge } from '../domain/knowledgeRecall.js';
+import { ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from '../domain/versions.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { Store, ownerId } from '../store.js';
@@ -46,7 +59,8 @@ export class TurnService {
   private aborts = new Map<string, AbortController>();
   constructor(
     readonly store: Store,
-    readonly generator: Generator
+    readonly generator: Generator,
+    readonly responseVersion = ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
   ) {}
   private gameplayCapacity(settings: ProviderSettings, ceiling: number): Promise<number> {
     return (
@@ -141,8 +155,11 @@ export class TurnService {
           t.action,
           rules,
           capacity,
-          !!this.generator.generateGameplay || system.kind === RuleSystemKind.Library,
-          this.rulePrompt(system)
+          !!this.generator.generateOwnedGameplay ||
+            !!this.generator.generateGameplay ||
+            system.kind === RuleSystemKind.Library,
+          this.rulePrompt(system),
+          this.generator.generateOwnedGameplay ? this.responseVersion : undefined
         );
       } catch (e) {
         if (!(e instanceof Problem && e.code === 'context_overflow')) throw e;
@@ -265,7 +282,8 @@ export class TurnService {
           gameplayDigest(
             campaign,
             await this.store.activeTurns(campaignId, client),
-            previous.ruleContext
+            previous.ruleContext,
+            saved.digest_version ?? LEGACY_GAMEPLAY_DIGEST_VERSION
           )
       )
         throw conflict(
@@ -284,7 +302,19 @@ export class TurnService {
         undone: false,
         settings: structuredClone(input.settings ?? campaign.settings),
         retryOfTurnId: previous.id,
-        context: { ...previous.context, prompt: saved.frozen_prompt, revision: campaign.revision },
+        context: {
+          ...previous.context,
+          prompt: saved.frozen_prompt,
+          revision: campaign.revision,
+          ...(saved.prompt_contract_version === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+            ? {
+                diceSessionId: saved.id,
+                promptContractVersion: 4 as const,
+                systemPrompt: saved.system_prompt,
+                frozenKnowledge: saved.frozen_knowledge,
+              }
+            : {}),
+        },
         createdAt: new Date().toISOString(),
         completedAt: null,
         ruleReads: [],
@@ -388,9 +418,14 @@ export class TurnService {
             t.action,
             rules,
             capacity,
-            !!this.generator.generateGameplay || t.ruleContext?.kind === RuleSystemKind.Library,
+            !!this.generator.generateOwnedGameplay ||
+              !!this.generator.generateGameplay ||
+              t.ruleContext?.kind === RuleSystemKind.Library,
             t.ruleContext
               ? this.rulePrompt(await new RuleStore(this.store).guard(t.ruleContext, client))
+              : undefined,
+            this.generator.generateOwnedGameplay
+              ? ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
               : undefined
           );
           t.context = turn.context;
@@ -399,9 +434,68 @@ export class TurnService {
       await withResponseRetries(
         async (attempt, feedback) => {
           const dice = new DiceService(this.store);
-          let diceResponse: DiceResponse | RuleResponse | undefined;
-          let response: GMResponse;
-          if (this.generator.generateGameplay || t.ruleContext?.kind === RuleSystemKind.Library) {
+          let diceResponse: DiceResponse | RuleResponse | GameplayResponse | undefined;
+          let response: GMResponse | GameplayResponse;
+          const v4 =
+            t.context?.promptContractVersion === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
+          let registry: GameplayTools | undefined;
+          let frozenDefinitions:
+            import('../providers/gameplayTools.js').GameplayToolDefinition[] | undefined;
+          if (v4 && t.diceSessionId) {
+            const saved = await this.store.pool.query(
+              'SELECT * FROM dice_sessions WHERE id=$1 AND campaign_id=$2',
+              [t.diceSessionId, t.campaignId]
+            );
+            const root = saved.rows[0];
+            if (
+              !root ||
+              root.prompt_contract_version !== KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION ||
+              root.digest_version !== KNOWLEDGE_GAMEPLAY_DIGEST_VERSION
+            )
+              throw new Problem(409, 'dice_context', 'Frozen v4 session metadata is missing');
+            t.context!.systemPrompt = root.system_prompt;
+            t.context!.frozenKnowledge = root.frozen_knowledge;
+            frozenDefinitions = root.tool_definitions;
+          }
+          if (v4) {
+            if (!this.generator.generateOwnedGameplay)
+              throw new Problem(
+                503,
+                'gameplay_unavailable',
+                'Owned knowledge gameplay is not available for this provider'
+              );
+            c = await this.store.campaign(t.campaignId);
+            const frozen = t.context!.frozenKnowledge ?? freezeKnowledge(c);
+            const rules = new RuleStore(this.store);
+            const lookup = new RuleLookup();
+            registry = new GameplayTools({
+              book: t.ruleContext?.kind === RuleSystemKind.Library,
+              knowledge: frozen,
+              signal: ctl.signal,
+              roll: (input) => dice.roll(t.diceSessionId!, t, input),
+              read: async (tool, input, requestId) =>
+                (
+                  await rules.read(
+                    t,
+                    tool,
+                    input,
+                    `repair:${attempt}:${requestId}`,
+                    lookup,
+                    ctl.signal
+                  )
+                ).payload,
+              assertActive: async () => {
+                await this.store.transaction(async (client) => {
+                  await this.lockedOwned(t, client);
+                });
+              },
+            });
+          }
+          if (
+            v4 ||
+            this.generator.generateGameplay ||
+            t.ruleContext?.kind === RuleSystemKind.Library
+          ) {
             if (!t.diceSessionId) {
               c = await this.store.campaign(t.campaignId);
               history = await this.store.activeTurns(c.id);
@@ -410,9 +504,31 @@ export class TurnService {
               }[];
               t.diceSessionId = await dice.createSession(
                 t,
-                gameplayDigest(c, history, t.ruleContext),
-                characters.map((character) => character.id)
+                gameplayDigest(
+                  c,
+                  history,
+                  t.ruleContext,
+                  v4 ? KNOWLEDGE_GAMEPLAY_DIGEST_VERSION : LEGACY_GAMEPLAY_DIGEST_VERSION
+                ),
+                characters.map((character) => character.id),
+                v4
+                  ? {
+                      systemPrompt: t.context!.systemPrompt!,
+                      knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c),
+                      toolDefinitions: registry!.definitions,
+                    }
+                  : undefined
               );
+            }
+            if (v4 && frozenDefinitions) {
+              const actual = registry!.definitions;
+              if (!isDeepStrictEqual(actual, frozenDefinitions))
+                throw new Problem(
+                  409,
+                  'dice_context',
+                  'Frozen gameplay tool definitions changed; start a new action'
+                );
+              registry!.call.definitions = frozenDefinitions;
             }
             const existing = await dice.records(t.diceSessionId);
             const specifications = existing.map(
@@ -439,7 +555,18 @@ export class TurnService {
                 ? '\nReplay the original requests in order with exactly these specifications before appending any dice: ' +
                   JSON.stringify(specifications)
                 : '');
-            if (t.ruleContext?.kind === RuleSystemKind.Library) {
+            if (v4)
+              diceResponse = gameplayResponseSchema.parse(
+                await this.generator.generateOwnedGameplay!(
+                  t.settings,
+                  prompt,
+                  gameplayResponseJsonSchema,
+                  t.context!.systemPrompt!,
+                  registry!.call,
+                  ctl.signal
+                )
+              );
+            else if (t.ruleContext?.kind === RuleSystemKind.Library) {
               const rules = new RuleStore(this.store);
               const lookup = new RuleLookup();
               const registry = new GameplayTools({
@@ -482,11 +609,13 @@ export class TurnService {
                   ctl.signal
                 )
               );
-            response = {
-              version: GM_RESPONSE_SCHEMA_VERSION,
-              narrative: diceResponse.narrative,
-              operations: diceResponse.operations,
-            };
+            response = v4
+              ? (diceResponse as GameplayResponse)
+              : {
+                  version: GM_RESPONSE_SCHEMA_VERSION,
+                  narrative: diceResponse.narrative,
+                  operations: diceResponse.operations,
+                };
           } else {
             response = responseSchema.parse(
               await this.generator.generate(
@@ -517,7 +646,10 @@ export class TurnService {
               );
               turn.rollInterpretations = diceResponse.rollInterpretations;
               turn.rolls = records;
-              if ('ruleCitations' in diceResponse && t.ruleContext) {
+              if (
+                'ruleCitations' in diceResponse &&
+                t.ruleContext?.kind === RuleSystemKind.Library
+              ) {
                 const rows = await client.query(
                   'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
                   [t.id]
@@ -538,7 +670,40 @@ export class TurnService {
                 turn.ruleCitations = diceResponse.ruleCitations;
               }
             }
-            const applied = applyResponse(campaign, response, t.id);
+            if (
+              v4 &&
+              t.ruleContext?.kind !== RuleSystemKind.Library &&
+              (diceResponse as GameplayResponse).ruleCitations.length
+            )
+              throw new Problem(
+                502,
+                'rules_citations_invalid',
+                'No original-book citations are available without a library'
+              );
+            const knowledgeReads = v4
+              ? await client.query(
+                  'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
+                  [t.id]
+                )
+              : undefined;
+            const applied = applyResponse(campaign, response, t.id, {
+              campaignId: campaign.id,
+              turnId: t.id,
+              sourceSpans: t.context?.sourceSpans,
+              ruleContext: t.ruleContext,
+              ruleReads: knowledgeReads?.rows.map((row) => ({
+                id: row.id,
+                campaignId: row.campaign_id,
+                turnId: row.turn_id,
+                context: row.captured_context,
+                tool: row.tool_name,
+                transportRequestId: row.transport_request_id,
+                argumentDigest: row.argument_digest,
+                resultHash: row.result_hash,
+                payload: row.payload,
+                createdAt: new Date(row.created_at).toISOString(),
+              })),
+            });
             applied.campaign.revision++;
             turn.narrative = response.narrative;
             turn.changes = applied.changes;

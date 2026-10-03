@@ -1,3 +1,4 @@
+import { KNOWLEDGE_GAMEPLAY_DIGEST_VERSION, LEGACY_GAMEPLAY_DIGEST_VERSION } from './versions.js';
 import { createHash } from 'node:crypto';
 import type { Campaign, Turn } from './types.js';
 import type { RuleContext } from './rules.js';
@@ -7,9 +8,13 @@ export function diceDigest(value: unknown): string {
 export function gameplayDigest(
   campaign: Campaign,
   history: Turn[],
-  ruleContext?: RuleContext
+  ruleContext?: RuleContext,
+  digestVersion = LEGACY_GAMEPLAY_DIGEST_VERSION
 ): string {
   return diceDigest({
+    ...(digestVersion === KNOWLEDGE_GAMEPLAY_DIGEST_VERSION
+      ? { knowledge: campaign.knowledge ?? [] }
+      : {}),
     ...(ruleContext
       ? {
           rules: {

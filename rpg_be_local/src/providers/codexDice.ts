@@ -6,8 +6,8 @@ import type { Executable } from './discovery.js';
 import { Problem } from '../errors.js';
 import { DICE_TOOL_NAME } from '../domain/dice.js';
 import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
-import { ruleResponseSchema } from '../domain/ruleResponse.js';
-import { diceResponseSchema } from '../domain/diceResponse.js';
+import { nativeGameplaySchema } from './gameplayContract.js';
+
 import {
   gameplayToolDefinitions,
   type BookGameplayAdapter,
@@ -63,7 +63,7 @@ export async function generateCodexDice(
   signal?: AbortSignal,
   book?: BookGameplayAdapter
 ): Promise<unknown> {
-  const narrator = book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR;
+  const narrator = book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR);
   const inspected = await inspectCodex(executable, env);
   const metadata = inspected.metadata as { models: { slug: string; context_window?: number }[] };
   const model = inspected.models.find((option) => option.id === settings.model);
@@ -88,7 +88,7 @@ export async function generateCodexDice(
       JSON.stringify({
         models: metadata.models.map((model) => ({
           ...model,
-          base_instructions: narrator,
+          base_instructions: book?.systemPrompt !== undefined ? '' : narrator,
           supports_parallel_tool_calls: false,
         })),
       })
@@ -145,11 +145,13 @@ export async function runCodexDicePhases(
     let phase = 0;
     const phasePrompt =
       prompt +
-      '\nApplication-owned gameplay transcript (already executed; do not repeat these calls): ' +
-      JSON.stringify(transcript) +
-      (book
-        ? '\nUse the owned gameplay tools sequentially as needed. Return the final version 3 response acknowledging every roll ID and rule citation.'
-        : '\nUse the owned roll tool sequentially as needed. Return the final schema response acknowledging every roll ID. No other tools or external context.');
+      (book?.systemPrompt !== undefined
+        ? ''
+        : '\nApplication-owned gameplay transcript (already executed; do not repeat these calls): ' +
+          JSON.stringify(transcript) +
+          (book
+            ? '\nUse the owned gameplay tools sequentially as needed. Return the final supplied schema response acknowledging every roll ID and any rule citations.'
+            : '\nUse the owned roll tool sequentially as needed. Return the final schema response acknowledging every roll ID. No other tools or external context.'));
     let threadId = '';
     let turnId = '';
     let completed = false;
@@ -159,7 +161,7 @@ export async function runCodexDicePhases(
       book ? 'generateCodexBookGameplay' : 'generateCodexGameplay',
       settings,
       phasePrompt,
-      book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR
+      `${book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR)} Return a transport object with payload_json encoding the application JSON.`
     );
     await runProcess(executable.binary, args, '', {
       cwd,
@@ -343,6 +345,6 @@ export async function runCodexDicePhases(
     });
     if (!completed)
       throw new Problem(502, 'codex_protocol', 'Codex closed before completing its dice phase');
-    return (book ? ruleResponseSchema : diceResponseSchema).parse(final);
+    return nativeGameplaySchema(book, !!book).parse(final);
   }
 }

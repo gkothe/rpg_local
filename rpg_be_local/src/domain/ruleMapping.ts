@@ -58,10 +58,10 @@ export function generateRuleMapping(content: RuleContent): {
   if (serializedBytes(mapping) > RULE_LIMITS.mappingBytes)
     throw new Error('Generated mapping exceeds byte limit');
   const overview =
-    'Books are authoritative for covered rules. Summaries/fields are navigation only. ' +
+    'Available book content. ' +
     'Populated columns: ' +
     columns.map((entry) => entry.column).join(', ') +
-    '. Use rules_map/search/list to discover paths and rules_get to read direct original text; cite text receipts. Explain conflicting books and label uncovered rulings provisional.';
+    '. Nodes provide direct text, optional summaries/fields and page metadata; rules_map/search/list locate paths and rules_get returns node content.';
   if (Buffer.byteLength(overview, 'utf8') > RULE_LIMITS.overviewBytes)
     throw new Error('Generated overview exceeds byte limit');
   return { mapping, overview };

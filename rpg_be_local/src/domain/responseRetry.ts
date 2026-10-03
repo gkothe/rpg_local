@@ -10,6 +10,7 @@ const RETRYABLE_RESPONSE_CODES = new Set([
   'rules_citations_invalid',
   'dice_references',
   'invalid_operation',
+  'knowledge_invalid',
   'gameplay_tool_unavailable',
 ]);
 

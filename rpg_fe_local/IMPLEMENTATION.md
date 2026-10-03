@@ -116,3 +116,14 @@ Removed book effort readiness gate and always offer Default in the picker. High 
 ## GM processing indicator (2026-10-02)
 
 Pending/submitting GM requests show a circular loading animation in the processing status and Send button, labelled "GM is responding...". Cancel remains available and the next-action draft remains editable. Verified 49 frontend unit tests and seven Windows Chrome play tests, including visible animated spinner and cancellation access.
+
+## Campaign knowledge integration (2026-10-03)
+
+Transport types accept the backend-owned knowledge records, historical identity names,
+attributions and option catalogs. Legacy campaigns may omit the registry. No dedicated
+knowledge view or frontend-owned enum values were added; automatic changes use the
+existing turn change list.
+
+Verification: 13 frontend test files / 50 tests passed, including a real Play component
+regression for literal rendering of knowledge changes and composer retention when
+switching tabs. These checks do not certify live CLI behavior.
