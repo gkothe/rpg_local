@@ -1,6 +1,6 @@
 # Local RPG Backend (`rpg_be_local`) — Comprehensive Technical Architecture & Information Governance Guide
 
-This document is an exhaustive, educational reference detailing the end-to-end architecture, information transition flows, storage topography, LLM payload assembly, and data treatment protocols of `rpg_be_local`. It serves as the authoritative blueprint for developers and for creating interactive educational walkthroughs of the application.
+This document describes the checked-in implementation of `rpg_be_local`, reviewed against source code and migrations on 2026-10-03. Source code remains authoritative; examples are illustrative unless marked exact. Static inspection does not establish live provider, device or database compatibility. Section 6 proposes a future visualizer.
 
 ---
 
@@ -31,14 +31,16 @@ This document is an exhaustive, educational reference detailing the end-to-end a
    - [5.1 Zero-Trust Output Validation & Epistemic Knowledge Governance](#51-zero-trust-output-validation--epistemic-knowledge-governance)
    - [5.2 Atomic State Transitions with Expected Prior Values](#52-atomic-state-transitions-with-expected-prior-values)
    - [5.3 Cryptographic Trusted Dice Mechanics & Replay Verification](#53-cryptographic-trusted-dice-mechanics--replay-verification)
-   - [5.4 Verifiable Rule Citations via Ephemeral DB Receipts](#54-verifiable-rule-citations-via-ephemeral-db-receipts)
+   - [5.4 Verifiable Rule Citations via Persisted DB Receipts](#54-verifiable-rule-citations-via-persisted-db-receipts)
    - [5.5 Snapshot-Driven Zero-AI Undo Engine](#55-snapshot-driven-zero-ai-undo-engine)
-   - [5.6 Context Compaction without Information Loss](#56-context-compaction-without-information-loss)
+   - [5.6 Context Compaction & Transcript Retention](#56-context-compaction--transcript-retention)
 6. [Interactive Educational Blueprint (Future Visualizer Roadmap)](#6-interactive-educational-blueprint-future-visualizer-roadmap)
 
 ---
 
 ## 1. Executive Overview & Architectural Philosophy
+
+Implementation evidence: [package.json](../rpg_be_local/package.json), [app.ts](../rpg_be_local/src/app.ts), [service.ts](../rpg_be_local/src/providers/service.ts).
 
 The `rpg_be_local` application is a local-first, privacy-respecting Tabletop RPG Game Master (GM) backend built on **Node.js (ESM)**, **Express 5**, and **PostgreSQL**.
 
@@ -48,16 +50,18 @@ The `rpg_be_local` application is a local-first, privacy-respecting Tabletop RPG
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        CORE DESIGN PRINCIPLES                          │
 ├────────────────────────────────────────────────────────────────────────┤
-│ 1. Zero Cloud Reliance: Runs locally via authenticated CLI tools       │
-│    (Claude, Codex, Antigravity) without storing or asking for API keys │
+│ 1. Local orchestration via subscription-authenticated CLI tools       │
+│    (Claude, Codex, Antigravity); inference may use provider clouds │
 │ 2. Untrusted Model Outputs: The LLM never writes directly to DB        │
-│ 3. Atomic, Explicit State: All mutations use expected prior values     │
+│ 3. Atomic, Explicit State: Model updates check expected values/revisions     │
 │ 4. Cryptographic Mechanics: Randomness comes from OS crypto, not LLM   │
-│ 5. Verifiable Evidence: Rules & citations require exact byte receipts  │
+│ 5. Verifiable Evidence: Citations require exact UTF-16 quote spans  │
 │ 6. Zero Silent Fallbacks: Failure is visible; no simulated mock turns  │
-│ 7. Strict Sequential I/O: Predictable concurrency without race states  │
+│ 7. Strict Sequential I/O: Serialized tools, locks & revision checks  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
+
+Local-first refers to orchestration and PostgreSQL persistence. The backend does not contain an API-key cloud LLM client, but the installed authenticated CLIs can use remote inference. Google Docs extraction also performs an explicit network request. Model instructions are not a semantic proof of correct gameplay; validation proves only the implemented structural, reference and expected-value conditions.
 
 ```mermaid
 flowchart TB
@@ -114,22 +118,24 @@ flowchart TB
 
 ### 2.1 High-Level Request Pipeline & Access Boundary
 
-Every incoming HTTP request undergoes strict security screening before reaching application routers:
+Implementation evidence: [app.ts](../rpg_be_local/src/app.ts), [security.ts](../rpg_be_local/src/security.ts), [server.ts](../rpg_be_local/src/server.ts).
+
+`app.ts` installs Host/Origin validation before JSON parsing, API routes and static frontend serving. LAN pairing middleware applies to `/api` only:
 
 1. **Host & Origin Validation** (`security.ts: accessBoundary`):
    - Validates that `Host` belongs to `allowedHosts` (defaults: `127.0.0.1:4100`, `localhost:4100`, `127.0.0.1:5174`, `localhost:5174`, plus optional `RPG_LAN_HOST`).
    - Browser `Origin` headers must match `allowedOrigins`.
    - All state mutations (`POST`, `PATCH`, `DELETE`) require the header `X-RPG-Client: local-rpg`.
-   - Remote LAN writes strictly require a same-origin browser `Origin` header (missing origin on non-loopback write throws 403 `origin_required`).
-   - Mutation payloads for `POST` and `PATCH` are restricted to `application/json` or `multipart/form-data` (`DELETE` does not require a payload body; other methods with invalid content types throw 415 `content_type`).
+   - Non-loopback writes require an `Origin` from the configured allowlist (missing origin throws 403 `origin_required`). The middleware does not additionally compare that origin to the request Host.
+   - Methods other than `GET`, `HEAD`, `OPTIONS` and `DELETE` require `application/json` or `multipart/form-data`. DELETE skips the content-type check, but campaign/source/character deletions still parse a JSON `{ revision }` body; template deletions parse `{}`.
 2. **LAN Pairing Security** (`security.ts: LanAccess`):
    - Loopback requests (`127.0.0.1`, `::1`) bypass pairing.
-   - Remote LAN clients (e.g. mobile phones) must present a 12-hour `rpg-device` HttpOnly cookie.
+   - When LAN mode is enabled, protected remote API requests require a 12-hour `rpg-device` HttpOnly cookie. `/health`, `/settings`, `/lan/status` and `/lan/pair` are exempt. When LAN mode is disabled pairing middleware bypasses requests; `server.ts` normally listens only on loopback.
    - Pairing requires a 2-minute single-use 4-byte hex code generated from the desktop browser (`POST /api/lan/code`).
-   - Rate limiting: max 5 failed pairing attempts per minute per remote IP.
+   - Rate limiting counts all pairing attempts, including successes, per remote IP. After five counted attempts the next request in the active window is rejected. Each counted attempt sets expiry to 60 seconds from that attempt. Cookies use `SameSite=Strict`, path `/api`, and `Secure` only when `req.secure` is true.
 3. **Strict Zod Parsing & Problem Details Error Format** (`domain/schemas.ts`, `errors.ts`, `app.ts`):
    - Request IDs must be valid UUIDs; revision numbers must be non-negative integers; strings are bounded by character and byte limits.
-   - All errors are serialized according to **RFC 7807 / RFC 9457 Problem Details for HTTP APIs** (`Content-Type: application/problem+json`):
+   - API errors reaching the handler use a **Problem Details-shaped response** (`Content-Type: application/problem+json`):
      ```json
      {
        "type": "urn:local-rpg:error:invalid_operation",
@@ -140,87 +146,91 @@ Every incoming HTTP request undergoes strict security screening before reaching 
      }
      ```
    - Standard HTTP mappings:
-     - `400`: Malformed requests, bad queries.
+     - Bad query schemas produce `422 validation`. Malformed JSON and other non-Problem/non-Zod/non-Multer exceptions currently become `503 local_service`; the handler does not preserve the parser's original 400/413 status.
      - `403`: Access boundary denials (`host_denied`, `origin_denied`, `origin_required`, `client_header`, `desktop_only`, `lan_disabled`, `pairing_code`, `pairing_required`).
      - `404`: Entity missing (`not_found`, `rules_system_missing`, `rules_node_missing`).
      - `409`: Concurrency, active leases, or changed state (`conflict`, `cancelled`, `rules_inactive`, `rules_context_changed`, `rules_reference_resolved`, `dice_specification`).
      - `413`: Payload limits exceeded (`upload_limit`, `source_limit`).
      - `415`: Unapproved content type or binary encoding (`content_type`, `source_format`).
      - `422`: Schema validation failures, invalid operations, exhausted dice slots (`validation`, `invalid_operation`, `knowledge_invalid`, `dice_limit`).
-     - `429`: LAN pairing brute-force rate limit exceeded (`pairing_limit`).
+     - `429`: Pairing attempt limit or preview staging quota exceeded (`pairing_limit`, `rules_preview_quota`).
      - `502`: CLI subprocess failure, syntax error, or sandbox violation (`provider_failure`, `provider_json`, `provider_isolation`, `dice_isolation`).
      - `503`: Setup failure, database offline, missing audio model (`database_setup`, `audio_setup`, `character_capacity`, `provider_setup`).
 
-#### Exhaustive REST API Route Matrix
+#### REST API Route Matrix
 
-| HTTP Method | Route Endpoint                                     | Purpose & Input Contract                                         | Status Codes               |
-| :---------- | :------------------------------------------------- | :--------------------------------------------------------------- | :------------------------- |
-| `GET`       | `/api/health`                                      | Health & PostgreSQL connectivity probe                           | `200`, `503`               |
-| `GET`       | `/api/settings`                                    | Server capabilities, active providers, dice/rules support        | `200`                      |
-| `GET`       | `/api/providers`                                   | List available LLM CLI providers and detection status            | `200`                      |
-| `GET`       | `/api/lan/status`                                  | Mobile LAN pairing status and connect URLs                       | `200`                      |
-| `POST`      | `/api/lan/code`                                    | Generates 4-byte uppercase hex pairing code (Desktop only)       | `200`, `403`               |
-| `POST`      | `/api/lan/pair`                                    | Mobile client exchanges code for 12-hour `rpg-device` cookie     | `200`, `403`, `429`        |
-| `POST`      | `/api/lan/revoke`                                  | Revoke all active paired mobile sessions (Desktop only)          | `200`, `403`               |
-| `GET`       | `/api/campaigns`                                   | List active campaigns (`limit`, `cursor` pagination)             | `200`                      |
-| `POST`      | `/api/campaigns`                                   | Create campaign with starter character & settings                | `201`, `422`, `503`        |
-| `GET`       | `/api/campaigns/:id`                               | Read campaign state, characters, sources, embedded knowledge     | `200`, `404`               |
-| `PATCH`     | `/api/campaigns/:id`                               | Update campaign metadata, pinned items, settings, instructions   | `200`, `404`, `409`, `422` |
-| `DELETE`    | `/api/campaigns/:id`                               | Cascade delete campaign, turns, snapshots, dice sessions         | `200`, `404`               |
-| `PATCH`     | `/api/campaigns/:id/notes`                         | Update human private notes (`{ notes, revision }`)               | `200`, `404`, `409`, `422` |
-| `GET`       | `/api/campaigns/:id/export`                        | Export standalone JSON archive (v4, excludes binaries)           | `200`, `404`, `409`        |
-| `POST`      | `/api/campaigns/import`                            | Import standalone archive (supports v1, v2, v3, v4)              | `201`, `422`               |
-| `GET`       | `/api/campaigns/:id/rule-system`                   | Read active rule library metadata or unresolved status           | `200`, `404`               |
-| `PATCH`     | `/api/campaigns/:id/rule-system`                   | Bind or switch campaign rule library partition                   | `200`, `409`, `422`        |
-| `GET`       | `/api/campaigns/:id/rule-system/resolution`        | Inspect candidate diff for unresolved rule reference in archive  | `200`, `404`, `409`        |
-| `POST`      | `/api/campaigns/:id/rule-system/resolution`        | Confirm rule reference resolution for imported campaign          | `200`, `404`, `409`, `422` |
-| `POST`      | `/api/campaigns/:id/sources`                       | Add raw text source document (`{ revision, name, text }`)        | `201`, `409`, `422`        |
-| `POST`      | `/api/campaigns/:id/sources/extract`               | Upload file/PDF or Google Doc URL (multipart form, max 20 MiB)   | `201`, `413`, `422`        |
-| `PATCH`     | `/api/campaigns/:id/sources/:sourceId`             | Edit extracted text or toggle confirmation status                | `200`, `404`, `409`, `422` |
-| `DELETE`    | `/api/campaigns/:id/sources/:sourceId`             | Delete source document & remove its `source_chunks`              | `200`, `404`, `409`        |
-| `GET`       | `/api/campaigns/:id/sources/:sourceId/sections`    | Fetch chunked source sections with character offsets and pages   | `200`, `404`               |
-| `GET`       | `/api/campaigns/:id/sources/:sourceId/original`    | Download or stream original uploaded binary document             | `200`, `404`               |
-| `POST`      | `/api/campaigns/:id/characters`                    | Add new character (player or NPC) to campaign                    | `201`, `409`, `422`        |
-| `PATCH`     | `/api/campaigns/:id/characters/:charId`            | Update character attributes, inventory, notes, description       | `200`, `404`, `409`, `422` |
-| `DELETE`    | `/api/campaigns/:id/characters/:charId`            | Remove character from campaign                                   | `200`, `404`, `409`        |
-| `POST`      | `/api/campaigns/:id/character-drafts`              | Generate character sheet draft from confirmed source             | `200`, `422`, `503`        |
-| `GET`       | `/api/campaigns/:id/turns`                         | Fetch recent turns for a campaign                                | `200`, `404`               |
-| `POST`      | `/api/campaigns/:id/turns`                         | Submit player action to initiate an asynchronous turn            | `202`, `409`, `422`        |
-| `GET`       | `/api/campaigns/:id/turns/:turnId`                 | Fetch turn status, narrative, dice rolls, rule citations         | `200`, `404`               |
-| `GET`       | `/api/campaigns/:id/turns/:turnId/context`         | Inspect full compiled context manifest and system prompt for turn| `200`, `404`               |
-| `GET`       | `/api/campaigns/:id/turns/:turnId/events`          | SSE stream pushing turn status updates until terminal            | `200`, `404`               |
-| `GET`       | `/api/campaigns/:id/turns/:turnId/rule-reads`      | Fetch rule reads receipt history for turn (`cursor` pagination)  | `200`, `404`               |
-| `POST`      | `/api/campaigns/:id/turns/:turnId/retry`           | Re-run failed/interrupted turn reusing rolled dice               | `202`, `409`, `422`        |
-| `POST`      | `/api/campaigns/:id/turns/:turnId/cancel`          | Cancel an in-flight pending/running turn                         | `200`, `404`, `409`        |
-| `POST`      | `/api/campaigns/:id/undo`                          | Undo latest completed turn via snapshot without AI               | `200`, `409`               |
-| `POST`      | `/api/campaigns/:id/memory`                        | Manually review/override history compaction summary              | `200`, `409`, `422`        |
-| `GET`       | `/api/rule-systems`                                | List installed rule systems & publication status                 | `200`                      |
-| `POST`      | `/api/rule-systems`                                | Create new empty rule system partition                           | `201`, `422`               |
-| `GET`       | `/api/rule-systems/:id`                            | Fetch rule system metadata and column overview                   | `200`, `404`               |
-| `PATCH`     | `/api/rule-systems/:id/instructions`               | Update custom instructions for a rule system                     | `200`, `404`, `422`        |
-| `POST`      | `/api/rule-systems/:id/imports`                    | Multipart streaming import of rule manifest & markdown           | `200`, `413`, `422`        |
-| `POST`      | `/api/rule-systems/:id/imports/:previewId/confirm` | Atomically publish previewed rule partition                      | `200`, `404`, `409`        |
-| `GET`       | `/api/rule-systems/:id/search`                     | Query rule system search index (`browser` context)               | `200`, `404`               |
-| `GET`       | `/api/rule-systems/:id/nodes`                      | Fetch specific rule tree nodes (`browser` context)               | `200`, `404`               |
-| `GET`       | `/api/rule-systems/:id/mapping`                    | Fetch rule column mapping structure (`browser` context)          | `200`, `404`               |
-| `GET`       | `/api/rule-systems/:id/backups`                    | Download standalone rulebook backup JSON                         | `200`, `404`               |
-| `POST`      | `/api/rule-systems/backups/imports`                | Import standalone rulebook backup JSON                           | `201`, `422`               |
-| `POST`      | `/api/rule-systems/backups/imports/:previewId/confirm` | Atomically publish imported rulebook backup                  | `200`, `404`, `409`        |
-| `POST`      | `/api/audio/transcriptions`                        | Transcribe speech recording via local Faster-Whisper             | `200`, `422`, `503`        |
-| `GET`       | `/api/templates`                                   | List campaign starter blueprints                                 | `200`                      |
-| `POST`      | `/api/templates`                                   | Save campaign snapshot as starter template blueprint             | `201`, `422`               |
-| `DELETE`    | `/api/templates/:id`                               | Delete campaign starter blueprint                                | `200`, `404`               |
-| `POST`      | `/api/templates/:id/campaigns`                     | Instantiate new campaign from template blueprint                 | `201`, `404`, `422`        |
-| `GET`       | `/api/character-templates`                         | List character starter blueprints                                | `200`                      |
-| `POST`      | `/api/character-templates`                         | Save character snapshot as starter template blueprint            | `201`, `422`               |
-| `DELETE`    | `/api/character-templates/:id`                     | Delete character starter blueprint                               | `200`, `404`               |
-| `POST`      | `/api/campaigns/:id/characters/from-template`      | Instantiate character into campaign from character template      | `201`, `404`, `422`        |
+Statuses below are representative, not exhaustive: shared boundary denials, `422 validation`, database/service `503` errors and conflicts can affect additional routes. List cursors are numeric offsets; opaque rule lookup cursors use a separate mechanism. `/settings` serves capabilities/defaults; `/providers` serves provider discovery/model choices.
+
+| HTTP Method | Route Endpoint                                         | Purpose & Input Contract                                           | Status Codes               |
+| :---------- | :----------------------------------------------------- | :----------------------------------------------------------------- | :------------------------- |
+| `GET`       | `/api/health`                                          | Health & PostgreSQL connectivity probe                             | `200`, `503`               |
+| `GET`       | `/api/settings`                                        | Server capabilities, active providers, dice/rules support          | `200`                      |
+| `GET`       | `/api/providers`                                       | List available LLM CLI providers and detection status              | `200`                      |
+| `GET`       | `/api/lan/status`                                      | Mobile LAN pairing status and connect URLs                         | `200`                      |
+| `POST`      | `/api/lan/code`                                        | Generates 4-byte uppercase hex pairing code (Desktop only)         | `200`, `403`               |
+| `POST`      | `/api/lan/pair`                                        | Mobile client exchanges code for 12-hour `rpg-device` cookie       | `200`, `403`, `429`        |
+| `POST`      | `/api/lan/revoke`                                      | Revoke all active paired mobile sessions (Desktop only)            | `200`, `403`               |
+| `GET`       | `/api/campaigns`                                       | List campaigns (`limit`, numeric-offset `cursor` pagination)       | `200`                      |
+| `POST`      | `/api/campaigns`                                       | Create empty campaign with metadata, rule selection & settings     | `201`, `422`, `503`        |
+| `GET`       | `/api/campaigns/:id`                                   | Read campaign plus characters, sources, knowledge and recent turns | `200`, `404`               |
+| `PATCH`     | `/api/campaigns/:id`                                   | Update campaign metadata, pinned items, settings, instructions     | `200`, `404`, `409`, `422` |
+| `DELETE`    | `/api/campaigns/:id`                                   | Delete idle campaign with `{ revision }`; cascade dependent data   | `200`, `404`               |
+| `PATCH`     | `/api/campaigns/:id/notes`                             | Update human private notes (`{ notes, notesRevision }`)            | `200`, `404`, `409`, `422` |
+| `GET`       | `/api/campaigns/:id/export`                            | Export standalone JSON archive (v4, excludes binaries)             | `200`, `404`, `409`        |
+| `POST`      | `/api/campaigns/import`                                | Import standalone archive (supports v1, v2, v3, v4)                | `201`, `422`               |
+| `GET`       | `/api/campaigns/:id/rule-system`                       | Read active rule library metadata or unresolved status             | `200`, `404`               |
+| `PATCH`     | `/api/campaigns/:id/rule-system`                       | Bind or switch campaign rule library partition                     | `200`, `409`, `422`        |
+| `GET`       | `/api/campaigns/:id/rule-system/resolution`            | Inspect candidate diff for unresolved rule reference in archive    | `200`, `404`, `409`        |
+| `POST`      | `/api/campaigns/:id/rule-system/resolution`            | Confirm rule reference resolution for imported campaign            | `200`, `404`, `409`, `422` |
+| `POST`      | `/api/campaigns/:id/sources`                           | Add raw text source document (`{ revision, name, text }`)          | `201`, `409`, `422`        |
+| `POST`      | `/api/campaigns/:id/sources/extract`                   | Upload file/PDF or Google Doc URL (multipart form, max 20 MiB)     | `201`, `413`, `422`        |
+| `PATCH`     | `/api/campaigns/:id/sources/:sourceId`                 | Edit extracted text or toggle confirmation status                  | `200`, `404`, `409`, `422` |
+| `DELETE`    | `/api/campaigns/:id/sources/:sourceId`                 | Delete source document & remove its `source_chunks`                | `200`, `404`, `409`        |
+| `GET`       | `/api/campaigns/:id/sources/:sourceId/sections`        | Fetch chunked source sections with character offsets and pages     | `200`, `404`               |
+| `GET`       | `/api/campaigns/:id/sources/:sourceId/original`        | Download or stream original uploaded binary document               | `200`, `404`               |
+| `POST`      | `/api/campaigns/:id/characters`                        | Add new character (player or NPC) to campaign                      | `201`, `409`, `422`        |
+| `PATCH`     | `/api/campaigns/:id/characters/:characterId`           | Update character attributes, inventory, notes, description         | `200`, `404`, `409`, `422` |
+| `DELETE`    | `/api/campaigns/:id/characters/:characterId`           | Remove character from campaign                                     | `200`, `404`, `409`        |
+| `POST`      | `/api/campaigns/:id/character-drafts`                  | Generate character sheet draft from confirmed source               | `200`, `422`, `503`        |
+| `GET`       | `/api/campaigns/:id/turns`                             | Fetch recent turns for a campaign                                  | `200`, `404`               |
+| `POST`      | `/api/campaigns/:id/turns`                             | Submit player action to initiate an asynchronous turn              | `202`, `409`, `422`        |
+| `GET`       | `/api/campaigns/:id/turns/:turnId`                     | Fetch turn status, narrative, dice rolls, rule citations           | `200`, `404`               |
+| `GET`       | `/api/campaigns/:id/turns/:turnId/context`             | Inspect full compiled context manifest and system prompt for turn  | `200`, `404`               |
+| `GET`       | `/api/campaigns/:id/turns/:turnId/events`              | SSE stream pushing turn status updates until terminal              | `200`, `404`               |
+| `GET`       | `/api/campaigns/:id/turns/:turnId/rule-reads`          | Fetch rule reads receipt history for turn (`cursor` pagination)    | `200`, `404`               |
+| `POST`      | `/api/campaigns/:id/turns/:turnId/retry`               | Retry eligible failed/cancelled/interrupted local dice turn        | `202`, `409`, `422`        |
+| `POST`      | `/api/campaigns/:id/turns/:turnId/cancel`              | Cancel an in-flight pending/running turn                           | `200`, `404`, `409`        |
+| `POST`      | `/api/campaigns/:id/undo`                              | Undo latest completed turn via snapshot without AI                 | `200`, `409`               |
+| `POST`      | `/api/campaigns/:id/memory`                            | Manually review/override history compaction summary                | `200`, `409`, `422`        |
+| `GET`       | `/api/rule-systems`                                    | List installed rule systems & publication status                   | `200`                      |
+| `POST`      | `/api/rule-systems`                                    | Create new empty rule system partition                             | `201`, `422`               |
+| `GET`       | `/api/rule-systems/:id`                                | Fetch rule system metadata and column overview                     | `200`, `404`               |
+| `PATCH`     | `/api/rule-systems/:id/instructions`                   | Update custom instructions for a rule system                       | `200`, `404`, `422`        |
+| `POST`      | `/api/rule-systems/:id/imports`                        | Multipart streaming import of rule manifest & markdown             | `201`, `413`, `422`        |
+| `POST`      | `/api/rule-systems/:id/imports/:previewId/confirm`     | Atomically publish previewed rule partition                        | `200`, `404`, `409`        |
+| `GET`       | `/api/rule-systems/:id/search`                         | Query rule system search index (`browser` context)                 | `200`, `404`               |
+| `GET`       | `/api/rule-systems/:id/nodes`                          | Fetch specific rule tree nodes (`browser` context)                 | `200`, `404`               |
+| `GET`       | `/api/rule-systems/:id/mapping`                        | Fetch rule column mapping structure (`browser` context)            | `200`, `404`               |
+| `GET`       | `/api/rule-systems/:id/backups`                        | Download standalone rulebook backup JSON                           | `200`, `404`               |
+| `POST`      | `/api/rule-systems/backups/imports`                    | Import standalone rulebook backup JSON                             | `201`, `422`               |
+| `POST`      | `/api/rule-systems/backups/imports/:previewId/confirm` | Atomically publish imported rulebook backup                        | `200`, `404`, `409`        |
+| `POST`      | `/api/audio/transcriptions`                            | Transcribe speech recording via local Faster-Whisper               | `200`, `422`, `503`        |
+| `GET`       | `/api/templates`                                       | List campaign starter blueprints                                   | `200`                      |
+| `POST`      | `/api/templates`                                       | Save campaign snapshot as starter template blueprint               | `201`, `422`               |
+| `DELETE`    | `/api/templates/:id`                                   | Delete campaign starter blueprint                                  | `200`, `404`               |
+| `POST`      | `/api/templates/:id/campaigns`                         | Instantiate new campaign from template blueprint                   | `201`, `404`, `422`        |
+| `GET`       | `/api/character-templates`                             | List character starter blueprints                                  | `200`                      |
+| `POST`      | `/api/character-templates`                             | Save character snapshot as starter template blueprint              | `201`, `422`               |
+| `DELETE`    | `/api/character-templates/:id`                         | Delete character starter blueprint                                 | `200`, `404`               |
+| `POST`      | `/api/campaigns/:id/characters/from-template`          | Instantiate character into campaign from character template        | `201`, `404`, `422`        |
 
 ---
 
 ### 2.2 The Game Turn Lifecycle (Action to Committed State)
 
-The turn execution pipeline guarantees idempotency, crash resilience, and ACID transactions.
+Implementation evidence: [turns.ts](../rpg_be_local/src/services/turns.ts), [store.ts](../rpg_be_local/src/store.ts), [app.ts](../rpg_be_local/src/app.ts).
+
+`TurnService.submit` hashes the exact parsed input with SHA-256. The same request ID and input return the existing turn, even if provider availability changed; changed input conflicts. Campaign locks and the active-turn index protect submission and commit. Generation runs outside transactions. Recovery marks expired work interrupted; it does not automatically restart inference.
 
 ```mermaid
 sequenceDiagram
@@ -238,7 +248,7 @@ sequenceDiagram
     TurnSvc->>PG: Query existing request_id (Payload hash idempotency check)
     TurnSvc->>PG: Acquire Row Lock FOR UPDATE on Campaign & verify revision
     TurnSvc->>PG: assertIdle() -> Ensure no other turn is pending/running
-    TurnSvc->>Ctx: Retrieve lexical rule matches (tsvector rank) & relevant NPCs
+    TurnSvc->>Ctx: Retrieve confirmed campaign source chunks (tsvector rank) & relevant NPCs
     TurnSvc->>Ctx: buildContext() -> compile ContextManifest
     TurnSvc->>PG: INSERT INTO turns (status='pending', lease_until=now()+45s, owner=ownerId)
     TurnSvc-->>Player: 202 Accepted { data: Turn (status: 'pending') }
@@ -260,6 +270,7 @@ sequenceDiagram
         TurnSvc->>Tools: Bind function call handler over bidirectional JSON-RPC
     end
 
+    TurnSvc->>PG: Create/reuse dice session; freeze prompt, digest, knowledge & tools
     loop In-Session Tool Calls
         Runner->>Tools: Tool Call: roll_dice({ slot: 0, groups: [...] })
         Tools->>TurnSvc: Dispatch to GameplayTools
@@ -294,7 +305,9 @@ sequenceDiagram
 
 ### 2.3 In-Session Tool Calling Architecture & Provider Transports
 
-During a game turn, the model has access to application-owned tools exposed strictly through private local loopback connections:
+Implementation evidence: [gameplayTools.ts](../rpg_be_local/src/providers/gameplayTools.ts), [claudeDice.ts](../rpg_be_local/src/providers/claudeDice.ts), [codexDice.ts](../rpg_be_local/src/providers/codexDice.ts), [antigravityMcpBook.ts](../rpg_be_local/src/providers/antigravityMcpBook.ts), [discovery.ts](../rpg_be_local/src/providers/discovery.ts).
+
+During a game turn, the model has access to application-owned tools exposed through authenticated private loopback HTTP MCP (Claude/Antigravity) or stdio JSON-RPC dynamic tools (Codex). Default v4 gameplay exposes dice and knowledge recall; book mode adds rule lookup tools:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -309,23 +322,23 @@ During a game turn, the model has access to application-owned tools exposed stri
 │                                                                        │
 │ 2. rules_map / rules_search / rules_get / rules_list:                  │
 │    - Read-only navigation across installed game rulebooks.             │
-│    - rules_get produces an immutable RuleRead receipt in the DB.       │
+│    - Persisted rule calls create immutable DB RuleRead receipts.      │
 │    - Citing a rule in the final narrative requires the receipt ID!     │
 │                                                                        │
 │ 3. campaign_knowledge_search / campaign_knowledge_get:                 │
 │    - Queries the campaign's frozen knowledge registry.                 │
-│    - Scoped strictly to immutable campaign facts; cannot see host      │
+│    - Scoped to frozen facts, rumors and beliefs; cannot see host      │
 │      system, other campaigns, or private player notes.                 │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 #### Provider Transports & Sandboxing
 
-| Provider         | Transport Architecture                                                      | Sandboxing & Isolation Parameters                                                                                                                                                                                  |
-| :--------------- | :-------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Claude Code**  | Ephemeral loopback HTTP Streamable MCP Server (`@modelcontextprotocol/sdk`) | `--safe-mode`, `--no-session-persistence`, `--tools ""`, `--allowedTools "mcp__dice__*"`, `--strict-mcp-config`, `--settings '{"disableAllHooks":true,"enabledPlugins":{}}'`, stripped API keys in child env       |
-| **OpenAI Codex** | Native dynamic function calls via `codex app-server --stdio`                | `--ephemeral`, `--sandbox read-only`, `--ignore-user-config`, isolated temporary `CODEX_HOME` with hardlinked `auth.json`, custom model catalog with empty instructions                                            |
-| **Antigravity**  | Private HTTP MCP Server registered to temporary agent                       | `--sandbox`, temporary `USERPROFILE`, generated `.gemini/config/agents/local-rpg-*`, hooks disabled check (`/hooks`), `deny: command(*), unsandboxed(*), read_file(*), write_file(*), read_url(*), execute_url(*)` |
+| Provider         | Transport Architecture                                                      | Sandboxing & Isolation Parameters                                                                                                                                                                                          |
+| :--------------- | :-------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Claude Code**  | Ephemeral loopback HTTP Streamable MCP Server (`@modelcontextprotocol/sdk`) | `--permission-mode dontAsk`, `--no-session-persistence`, `--tools ""`, `--allowedTools "mcp__dice__*"`, `--strict-mcp-config`, `--settings '{"disableAllHooks":true,"enabledPlugins":{}}'`, stripped API keys in child env |
+| **OpenAI Codex** | Native dynamic function calls via `codex app-server --stdio`                | App-server thread options `ephemeral: true`, `sandbox: 'read-only'`; isolated config/home with hardlinked `auth.json`, custom catalog and explicit narrator instructions                                                   |
+| **Antigravity**  | Private HTTP MCP Server registered to temporary agent                       | `--sandbox`, temporary `USERPROFILE`, generated `.gemini/config/agents/local-rpg-*`, hooks disabled check (`/hooks`), `deny: command(*), unsandboxed(*), read_file(*), write_file(*), read_url(*), execute_url(*)`         |
 
 ##### Exact Runtime Assertions in Provider Adapters (`claudeDice.ts`, `codexDice.ts`, `antigravityDice.ts`, `adapters.ts`)
 
@@ -339,13 +352,14 @@ During a game turn, the model has access to application-owned tools exposed stri
   - **MCP Handshake Validation**: Asserts `event.type === 'system'` and `event.subtype === 'init'` contains exactly 1 MCP server named `dice` with status `Connected`. Asserts `event.tools` matches the registered tool list with zero extraneous tools; any ambient tool causes an immediate 502 `dice_isolation` error.
 - **OpenAI Codex (`codexDice.ts`)**:
   - **Transport Protocol**: Spawns `codex app-server --stdio` running a bidirectional JSON-RPC loop over standard input and output.
-  - **Ephemeral Storage & Hardlinked Auth**: Discovers user home (`codexHome`), generates an isolated temporary directory `mkdtemp(path.join(home, 'rpg-isolated-'))`, and hardlinks `auth.json` (`link(path.join(home, 'auth.json'), path.join(isolatedHome, 'auth.json'))`). This allows Codex to verify the user's ChatGPT subscription without copying credentials to an unsecured directory or requiring an API key.
+  - **Ephemeral Storage & Hardlinked Auth**: Resolves Codex home from `CODEX_HOME` or `~/.codex`, creates `mkdtemp(path.join(home, 'rpg-isolated-'))`, and hardlinks `auth.json` into it. The CLI retains access to the user's file-backed subscription login; absence of hardlink support fails explicitly. This is credential access by the child process, not removal of credentials.
   - **Safe Cleanup Guarantee**: Asserts `path.dirname(isolatedHome) === home` and `path.basename(isolatedHome).startsWith('rpg-isolated-')` before recursive deletion, preventing path traversal attacks.
-  - **Model Catalog Synthesis**: Injects custom `codex-dice-models.json` enforcing `supports_parallel_tool_calls: false` to guarantee sequential dice resolution.
-  - **Stream Assertion**: Disallows unapproved item types during gameplay turns; any item not in `['agent_message', 'reasoning', 'error']` triggers a 502 `provider_isolation` exception.
+  - **Model Catalog Synthesis**: Injects custom `codex-dice-models.json` with `supports_parallel_tool_calls: false`. Backend `GameplayTools` also serializes dispatch independently of this hint. With an explicit v4 system prompt, catalog base instructions are empty; other paths supply the narrator there.
+  - **Stream Assertion**: Disallows unapproved item types during gameplay turns; the gameplay allowlist is `['agentMessage', 'userMessage', 'reasoning', 'dynamicToolCall']` (`CODEX_DICE_ITEM_TYPES`). The snake_case `agent_message`/`reasoning`/`error` list belongs to basic Codex output parsing, not app-server gameplay.
 - **Antigravity (`antigravityDice.ts`, `antigravityMcpBook.ts`)**:
   - **Environment Sanitization (`antigravityDiceEnvironment`)**: Unsets all variables matching `/^ANTIGRAVITY_|^CASCADE_|^MCP_|API_KEY|AUTH_TOKEN|OAUTH_TOKEN|^GEMINI_|^GOOGLE_/i`.
-  - **Streaming Event Parsing (`parseAntigravityDicePhase`)**: Expects newline-delimited JSON stream with strictly 1 `init` event and 1 `result` event. Restricts `step_update` event types strictly to `user_input` and `agent_response`; any unapproved step type (e.g. bash execution, file read) throws a 502 `dice_isolation` error.
+  - **Legacy Phase Parser (`parseAntigravityDicePhase`)**: Expects newline-delimited JSON stream with strictly 1 `init` event and 1 `result` event. Restricts `step_update` event types strictly to `user_input` and `agent_response`; any unapproved step type (e.g. bash execution, file read) throws a 502 `dice_isolation` error.
+  - **Current Transport**: `generateAntigravityDice` delegates to `generateAntigravityMcpBook`; the legacy phase parser above is not the live entry point. Current code verifies private MCP configuration, stream activity and owned calls.
   - **Subprocess Confinement**: Employs isolated `USERPROFILE` (`rpg-agy-private-*`) and denies native OS permissions: `command(*)`, `unsandboxed(*)`, `read_file(*)`, `write_file(*)`, `read_url(*)`, `execute_url(*)`.
 - **Sequential Tool Promise Tail (`gameplayTools.ts: GameplayTools.call`)**:
   - Tools are strictly serialized through an internal promise chain (`this.tail = work.then(...)`).
@@ -370,6 +384,8 @@ To prevent injection attacks, path traversal, or unpredictable Windows command-l
 
 ### 2.4 Automatic Response Repair & Self-Correction Loop
 
+Implementation evidence: [responseRetry.ts](../rpg_be_local/src/domain/responseRetry.ts), [turns.ts](../rpg_be_local/src/services/turns.ts).
+
 When the LLM finishes generation, its response undergoes strict validation via Zod schemas. If the model fails (e.g., outputs markdown instead of JSON, violates schema, forgets to explain a dice roll, or invents a fake receipt ID), the backend executes **automatic response repair** (`responseRetry.ts: withResponseRetries`):
 
 ```mermaid
@@ -377,7 +393,7 @@ flowchart TD
     RunAttempt["Attempt LLM Generation (Attempt 0)"] --> ParseResponse{"Parse Output with Zod"}
     ParseResponse -- Valid --> DBCommit["Commit State to PostgreSQL"]
     ParseResponse -- Invalid --> CheckRetry{"Attempt < 2 & Not Aborted?"}
-    CheckRetry -- Yes --> PrepareRetry["Reset Dice Attempt Counters\n(Preserve Saved Faces)"]
+    CheckRetry -- Yes --> PrepareRetry["Reset Dice Requests & Next Slot\n(Preserve Faces & Transcript Bytes)"]
     PrepareRetry --> ConstructFeedback["Construct Specific Error Feedback\n(e.g., 'Acknowledge roll UUID x', 'Cite only retrieved text')"]
     ConstructFeedback --> NextAttempt["Re-invoke LLM with Feedback & Enforced Roll Replay"]
     NextAttempt --> ParseResponse
@@ -390,7 +406,7 @@ The system checks against `RETRYABLE_RESPONSE_CODES`:
 
 - `provider_json`: SyntaxError or failure to output valid JSON.
 - `provider_protocol`, `provider_failure`: Subprocess stream or execution anomalies.
-- `dice_protocol`, `dice_references`: Failed to explain every generated dice roll exactly once.
+- `dice_protocol`: Invalid dice transport envelope. `dice_references`: Missing, duplicated or unknown recorded roll references.
 - `rules_citations_invalid`: Hallucinated receipt IDs or start/end character offsets that do not match the exact quoted substring in the book.
 - `invalid_operation`: Mismatch between expected prior character attribute/inventory value and actual state.
 - `knowledge_invalid`: Duplicate NPC introduction or invalid provenance links.
@@ -398,7 +414,8 @@ The system checks against `RETRYABLE_RESPONSE_CODES`:
 
 #### Retry Budget & Prompt Injection Mechanism
 
-- **Budget**: `RESPONSE_RETRY_COUNT = 2` (up to 2 repair attempts, total 3 invocations).
+- **Persisted accounting**: Outer repair resets only `dice_attempts.requests` and `next_slot`; `transcript_bytes` and session `new_faces` remain. It does not reset persisted rule-call budgets or delete rule receipts. The tool registry is recreated per repair and rule request IDs include the repair number.
+- **Budget**: `RESPONSE_RETRY_COUNT = 2` permits up to two outer repair attempts (three generation callbacks). This does not cap native model inference count or all adapter-internal recovery. `ZodError` and `SyntaxError` are retryable too; aborts and non-allowlisted ownership/context/isolation failures stop immediately.
 - **Feedback & Enforced Replay**: The retry prompt dynamically appends the validation error plus explicit dice replay instructions:
   ```text
   Response correction: Your previous response was rejected: [specific error]. Correct it and return the complete required JSON. All saved dice are authoritative; replay their original requests without changing their specifications or faces. Cite only retrieved original text. For each citation, start and end must identify exactly the quoted substring (end = start + quote.length), not the whole retrieved section. Never invent receipt IDs or state.
@@ -409,9 +426,11 @@ The system checks against `RETRYABLE_RESPONSE_CODES`:
 
 ### 2.5 Turn Recovery, Leases & Heartbeats
 
-To ensure turns never become permanently stuck if the server crashes or loses power:
+Implementation evidence: [turns.ts](../rpg_be_local/src/services/turns.ts), [store.ts](../rpg_be_local/src/store.ts), [server.ts](../rpg_be_local/src/server.ts).
 
-1. **45-Second Lease**: When a turn begins running, it claims a database lease (`lease_until = now() + interval '45 seconds'`) tied to a process-unique `ownerId`.
+Expired leases enable recovery while the server and PostgreSQL are available. This is eventual interruption marking, not a guarantee of progress during database outage:
+
+1. **45-Second Lease**: On pending turn insertion, it claims a database lease (`lease_until = now() + interval '45 seconds'`) tied to a process-unique `ownerId`.
 2. **10-Second Heartbeat & Abort Propagation (`TurnService.run`)**:
    - A background interval renews the lease every 10 seconds (`TURN_HEARTBEAT_INTERVAL_MS = 10_000`):
      ```sql
@@ -419,7 +438,7 @@ To ensure turns never become permanently stuck if the server crashes or loses po
      SET lease_until = now() + (45 * interval '1 second')
      WHERE id = $1 AND owner = $2 AND status IN ('pending', 'running')
      ```
-   - If the database disconnects, another node claims the lock, or campaign revision diverges, the heartbeat catches the error, records `heartbeatFailure = error`, and triggers `ctl.abort()`, terminating the CLI subprocess immediately.
+   - If the database disconnects, ownership/lease checks fail, campaign revision diverges or the captured rule context changes, the heartbeat catches the error, records `heartbeatFailure = error`, and triggers `ctl.abort()`, propagating cancellation to the CLI process runner. Shutdown and database failure recording are asynchronous.
 3. **Store Recovery on Startup (`Store.recover`)**:
    Whenever the server boots or runs its recovery pass, any turns with status `pending` or `running` whose leases expired are updated atomically via PostgreSQL JSONB operations:
    ```sql
@@ -436,24 +455,26 @@ To ensure turns never become permanently stuck if the server crashes or loses po
      AND (lease_until IS NULL OR lease_until < now());
    ```
 4. **Zero-Partial-Mutation Rollback Invariant**:
-   If an error occurs, the turn status transitions to `cancelled` (if `ctl.signal.aborted`) or `failed`. Because database changes occur inside an atomic transaction only upon final schema success, failed or interrupted turns leave `campaign.state`, `characters`, and `revision` completely unmutated.
+   If an error occurs, the turn status transitions to `cancelled` (if `ctl.signal.aborted`) or `failed`. Proposed narrative, character/state/knowledge changes and snapshots commit together only after final validation. Failure does not partially apply that proposal. Earlier memory compaction, dice records and rule receipts are separate committed writes and remain; independent human edits are not rolled back. Failure status recording is best-effort; if PostgreSQL is unavailable, lease recovery must later mark the attempt interrupted.
 5. **Idempotent Manual Retry & Dynamic Availability Checks (`Store.hydrateTurns`)**:
-   An interrupted or failed turn can be retried (`POST /turns/:id/retry`). Upon retrieval, `Store.hydrateTurns` dynamically computes whether `diceRetry` is available without storing derived state in the database:
+   An eligible interrupted, failed or cancelled local dice turn can be retried (`POST /turns/:id/retry`). Upon retrieval, `Store.hydrateTurns` dynamically computes whether `diceRetry` is available without storing derived state in the database:
    - Verifies the session was not imported (`session.imported === false`).
    - Asserts no subsequent action has superseded this turn (`latest.rows[0].id === turn.id`).
    - Asserts the rule system has not been modified (`outdatedRules === false`).
    - Re-computes `gameplayDigest` from current state to verify that game context is identical (`session.context_digest === digest`).
-   - If valid, previously rolled dice faces are retained, and the model is instructed to replay existing specifications before requesting new rolls.
+   - Eligibility is advisory; retry rechecks revision, idle status, latest attempt, rule identity and digest under locks. It creates a new Turn ID sharing the original dice session and frozen prompt. Previously rolled faces remain authoritative.
 
 ---
 
 ### 2.6 Source Extraction, Audio Pipelines & Character Parsing
 
+Implementation evidence: [sources.ts](../rpg_be_local/src/services/sources.ts), [sourceLibrary.ts](../rpg_be_local/src/services/sourceLibrary.ts), [characterParser.ts](../rpg_be_local/src/services/characterParser.ts), [sourceSections.ts](../rpg_be_local/src/domain/sourceSections.ts), [extract.py](../rpg_be_local/python/extract.py), [transcribe.py](../rpg_be_local/python/transcribe.py).
+
 #### Source Import & Immediate Confirmation Policy
 
-Under the current import policy, all successful source uploads create **confirmed sources immediately** (`status: SourceStatus.Confirmed`):
+OCR warnings do not force an explicit review gate on initial import; users can review/correct or mark sources draft afterward. Under the current import policy, successful pasted text, file/PDF and Google Docs imports create **confirmed sources immediately**, including OCR output (`status: SourceStatus.Confirmed`):
 
-- **Plain-text and Markdown files** (`.txt`, `.md`, `.markdown`): Decoded as UTF-8; non-printable ASCII control characters (codepoints $\le 8$ or $14 \le \text{code} \le 31$) trigger a 415 `source_format` error ("Binary documents are unsupported; export as text or PDF").
+- **Non-PDF files**: Any extension other than `.pdf` is accepted if strict UTF-8 decoding and control-character checks pass; there is no `.txt`/`.md` extension allowlist. Decoded as UTF-8; non-printable ASCII control characters (codepoints $\le 8$ or $14 \le \text{code} \le 31$) trigger a 415 `source_format` error ("Binary documents are unsupported; export as text or PDF").
 - **PDF documents**: Verified via magic bytes (`bytes.subarray(0, 5) === '%PDF-'`) and passed to `python/extract.py` in an isolated temp folder (`path.join(os.tmpdir(), 'rpg-source-')`).
 - **Binary Artifact Persistence (`source_artifacts`)**: When a source is uploaded with binary bytes, the raw buffer is saved to the PostgreSQL `source_artifacts` table (`campaign_id, source_id, bytes, content_type`). Clients can retrieve the original file anytime via `GET /api/campaigns/:id/sources/:sourceId/original` (`Content-Disposition: inline`).
 - **Public Google Docs Streaming (`extractGoogle`)**:
@@ -461,7 +482,7 @@ Under the current import policy, all successful source uploads create **confirme
   - Streams plain text via `https://docs.google.com/document/d/${id}/export?format=txt` with an explicit 20-second abort timeout (`AbortSignal.timeout(20000)`).
   - Inspects stream chunks on the fly; if total bytes exceed 10 MiB (`MAX_SOURCE_TEXT_BYTES`) or the server returns an HTML login page, the stream is cancelled and a 413 or 422 error is thrown.
 - **Source Editing, Versioning & Search Invalidation (`SourceLibrary.correct`)**:
-  - Editing source text increments `source.version++`.
+  - Every successful correction call increments `source.version`, even when text is unchanged and only confirmation/name is being changed.
   - **Automatic Invalidation of Pinned Sections**: Because character offsets change upon text modification, all existing pins for that source in `campaign.pinnedSourceSections` are automatically purged (`pin.sourceId !== sourceId`).
   - If toggled to unconfirmed (`confirmed: false`), it is also removed from `campaign.pinnedSourceIds`.
   - PostgreSQL search chunks are atomically rebuilt via `Store.reindex(campaign)`.
@@ -471,12 +492,12 @@ Under the current import policy, all successful source uploads create **confirme
 - **Safety Limits**: Max 300 pages (`MAX_PAGES = 300`), max 10 MiB extracted text (`MAX_TEXT_BYTES = 10 * 1024 * 1024`), and max 30,000,000 render pixels (`MAX_RENDER_PIXELS = 30_000_000`).
 - **Extraction Hierarchy**:
   1. `pypdfium2` extracts native text.
-  2. If page text has $\ge 40$ characters, converts page via MarkItDown (`enable_plugins=False`).
-  3. If text is $< 40$ characters (scanned or image page), renders page at 300 DPI (`OCR_SCALE = 300 / 72`) and invokes Tesseract OCR (`RPG_TESSERACT_BIN`) with TSV word bounding boxes and confidence scores, emitting an OCR review warning.
+  2. If native text has $\ge 40$ characters, attempts MarkItDown (`enable_plugins=False`) and uses its non-empty result. It then rechecks length; a shortened conversion can still enter OCR.
+  3. If resulting text is $< 40$ characters (including scanned or image pages), renders page at 300 DPI (`OCR_SCALE = 300 / 72`) and invokes Tesseract OCR (`RPG_TESSERACT_BIN`) with TSV word bounding boxes and confidence scores, emitting an OCR review warning.
 
 #### Audio Dictation Subprocess (`python/transcribe.py`)
 
-- **Safety Limits**: Max 120 seconds recording (`MAX_AUDIO_SECONDS = 120`), max 40,000 transcribed characters. Supported language codes: `auto`, `en`, `pt`.
+- **Safety Limits**: Max 120 seconds decoded recording (`MAX_SECONDS` in Python; `MAX_AUDIO_SECONDS` in TypeScript). The Node response validator caps text at 40,000 characters; Python does not enforce that text limit. Supported language codes: `auto`, `en`, `pt`.
 - **Validation & Execution**:
   - Uses PyAV (`import av`) to decode audio frame-by-frame, verifying sample rate and asserting $0 < \text{duration} \le 120\text{ seconds}$.
   - Runs local Faster-Whisper (`compute_type="int8"`, `device=os.environ.get("RPG_WHISPER_DEVICE", "cpu")`, `local_files_only=True`) against a pre-downloaded offline model directory (`RPG_WHISPER_MODEL_PATH`).
@@ -485,11 +506,13 @@ Under the current import policy, all successful source uploads create **confirme
   - Backend provides **speech-to-text dictation only** (`POST /api/audio/transcriptions`).
   - **Text-to-Speech (TTS)** for reading GM narrative is exclusively client-side via the browser's native Web Speech API (`window.speechSynthesis`) using installed operating system voices.
 
+The backend has no TTS route; actual voice availability and whether a browser voice uses local synthesis depend on the client. PDF extraction has a 120-second subprocess timeout, OCR invokes Tesseract with a 100-second per-page timeout, and transcription has a 180-second subprocess timeout. These extraction/audio deadlines remain active even though gameplay AI generation has no application deadline.
+
 #### Source Text Slicing & Section Indexing (`sourceSections.ts`)
 
 When source documents are indexed for full-text search (`source_chunks` table):
 
-- **4,000-Character Target Chunks**: Slices source text into chunks of up to 4,000 characters.
+- **4,000-Character Target Chunks**: Uses a 4,000 UTF-16 code-unit target. Paragraph snapping can include the two newline characters beyond that target, so this is not an absolute 4,000-character maximum.
 - **Intact Paragraph Snapping**: Snaps backward to the nearest double-newline (`\n\n`) if the paragraph extends past the first 1,000 characters of the window.
 - **Surrogate-Pair Safety**: Inspects slice boundaries for low UTF-16 surrogate codepoints (`/[\uDC00-\uDFFF]/`), decrementing the index to prevent splitting multi-byte unicode characters.
 - **Page Break Alignment**: Scans for `\n## Page (\d+)` markdown headings; if a page boundary occurs within the window, the chunk snaps cleanly to the start of the new page.
@@ -499,7 +522,7 @@ When source documents are indexed for full-text search (`source_chunks` table):
 
 When generating a player character from a confirmed source document (`POST /api/campaigns/:id/character-drafts`):
 
-1. **Capacity Evaluation**: If the entire text fits within the model's single-request capacity, it generates the draft in one call with `draftSchema`.
+1. **Capacity Evaluation**: If the serialized parser prompt fits the capacity number returned by `generator.capacity` using a UTF-8 byte comparison, it generates the draft in one call with `draftSchema`.
 2. **Chunking via Binary Search**: If oversized, it uses binary search to find the largest text slice fitting capacity.
 3. **UTF-16 & Paragraph Snapping**:
    - Inspects chunk boundary for UTF-16 surrogate pairs (`/[\uDC00-\uDFFF]/`) to prevent corrupting multi-byte unicode characters.
@@ -515,6 +538,8 @@ When generating a player character from a confirmed source document (`POST /api/
 ---
 
 ### 2.7 Rulebook Imports, Previews & Private Backups
+
+Implementation evidence: [ruleUpload.ts](../rpg_be_local/src/services/ruleUpload.ts), [ruleLibrary.ts](../rpg_be_local/src/services/ruleLibrary.ts), [ruleImport.ts](../rpg_be_local/src/domain/ruleImport.ts), [rulePreview.ts](../rpg_be_local/src/services/rulePreview.ts), [ruleBackup.ts](../rpg_be_local/src/services/ruleBackup.ts), [ruleMapping.ts](../rpg_be_local/src/domain/ruleMapping.ts).
 
 Game rulebooks (e.g., core manuals, bestiaries) operate as standalone shared libraries partitioned into **11 canonical columns**:
 
@@ -532,19 +557,19 @@ Game rulebooks (e.g., core manuals, bestiaries) operate as standalone shared lib
 | `gm_guidance` | Encounter building, hazard design, loot tables, running the game            |
 | `others`      | Appendixes, conversion guidelines, legacy mechanics                         |
 
-#### Streaming Upload & Preview Lifecycle (`sourceLibrary.ts`, `library.ts`)
+#### Streaming Upload & Preview Lifecycle (`ruleUpload.ts`, `ruleLibrary.ts`)
 
-- **Multipart Streaming Upload** (`POST /api/rule-systems/:id/imports`): Uploads a `manifest.json` and up to 12 Markdown files (max 10 MiB per file, max 20 MiB streaming total).
-- **Validation & Hash Verification**: `RuleLibrary.preview()` parses markdown ASTs, verifies schema definitions, checks cross-references, and calculates canonical SHA-256 node hashes.
+- **Multipart Streaming Upload** (`POST /api/rule-systems/:id/imports`): Uploads a `manifest.json` and up to 11 listed Markdown column files (12 files total including the manifest) (max 10 MiB per file, max 20 MiB streaming total).
+- **Validation & Hash Verification**: `RuleLibrary.preview()` calls the line-oriented `parseRuleBook` parser: it validates manifest/schema, declared column-file SHA-256 hashes, control markers, parent/enrichment paths, page bounds, node/content limits and a 30-second validation deadline. It is not a general Markdown AST parser and does not prove arbitrary prose cross-references. Publication computes a canonical hash of system content; the parser returns a package input hash, not per-node hashes. A declared original PDF hash is not independently verified because the PDF is not uploaded.
 - **Isolated Preview Token**: Generates an ephemeral preview token valid for 30 minutes (`RULE_LIMITS.previewTtlMs = 1,800,000ms`), scoped to the system (max 2 active previews per system, 8 across the entire server).
-- **Atomic Confirmation** (`POST /imports/:previewId/confirm`): Replaces the rulebook partition under an atomic database lock (`FOR UPDATE`), incrementing the revision number and updating the stored generated `has_original_text` column while preserving existing campaign instructions.
+- **Atomic Confirmation** (`POST /imports/:previewId/confirm`): Replaces one source/book slug across the columns under `FOR UPDATE`, preserving other books and system instructions. `has_original_text` is database-generated. `RuleStore.write` advances revision only if the content hash changes; identical publication can retain revision. Campaign instructions are separate and untouched.
 - **Private Rule Backups (`services/ruleBackup.ts`)**:
   - Exports and imports standalone JSON backups (`format: 'local-rpg-rules'`, `version: 1`, max 32 MiB via `RULE_LIMITS.backupBytes`).
   - **Mandatory Content Hash Integrity**: Asserts `ruleContentHash(system.content) === system.contentHash`; corrupted or tampered payloads trigger an immediate rejection.
   - **Default System Protection**: Asserts `(system.kind === RuleSystemKind.ModelKnowledge) === (system.systemKey === DEFAULT_RULE_SYSTEM_KEY)`, preventing users from overwriting or masquerading the default model-knowledge system.
   - **Two-Phase Preview & Confirmation**:
     - `POST /api/rule-systems/backups/imports`: Validates schema and hash, saving a 30-minute preview.
-    - `POST /api/rule-systems/backups/imports/:previewId/confirm`: Atomically publishes the system under a database lock with optimistic concurrency (`expectedRevision`).
+    - `POST /api/rule-systems/backups/imports/:previewId/confirm`: Atomically publishes the system under a database lock with optimistic concurrency (`revision`, nullable for a new target), target identity, `requestId` and explicit `replace`.
 
 #### Rulebook AST, Mapping & Overview Synthesis (`domain/ruleMapping.ts`)
 
@@ -562,6 +587,8 @@ To allow models to navigate massive rulebooks without context exhaustion, `gener
 
 ### 2.8 Campaign Archiving, Normalization & Templates
 
+Implementation evidence: [library.ts](../rpg_be_local/src/services/library.ts), [versions.ts](../rpg_be_local/src/domain/versions.ts).
+
 - **Campaign Export (`GET /api/campaigns/:id/export`)**: Generates a standalone JSON archive (`format: 'local-rpg'`, `version: 4`). Permitted only when the campaign is idle. Excludes original raw binary documents (`source_artifacts`) and active authentication tokens.
 - **Campaign Import & Upward Version Migration (`services/library.ts: remapArchive`)**:
   - Supports upward migration across all schema iterations:
@@ -569,18 +596,18 @@ To allow models to navigate massive rulebooks without context exhaustion, `gener
     - **Version 2 (Dice Mechanics)**: Adds `diceSessions` and `diceRecords`.
     - **Version 3 (Rulebooks & Citations)**: Adds portable `ruleReference`, `ruleReads`, and `ruleCitations`.
     - **Version 4 (Knowledge Graph)**: Adds `campaign.knowledge`, `frozenKnowledge`, and `toolDefinitions`.
-  - Upward normalization: When importing v1, v2, or v3 archives into a v4 database, missing `knowledge`, `diceSessions`, and `diceRecords` arrays are automatically initialized to `[]`.
+  - Upward normalization: When importing v1, v2, or v3 archives into a v4 database, missing campaign `knowledge`, `diceSessions` and `diceRecords` are normalized to `[]`. This is archive format normalization, not a database schema migration.
 - **Re-UUID Isolation Pattern**:
-  - To prevent primary key collisions or accidental overwrites of existing database records, `remapArchive()` generates brand new UUIDs (`randomUUID()`) for **every entity in the archive**:
+  - To prevent primary key collisions or accidental overwrites of existing database records, `remapArchive()` generates brand new UUIDs (`randomUUID()`) for entities and structured historical references handled by the importer:
     - Campaign ID, character IDs, source IDs, turn IDs, memory IDs, dice session IDs, dice record IDs, rule read receipt IDs, and knowledge record IDs.
-  - All foreign key linkages (e.g. `turn.diceSessionId`, `knowledge.characterIds`, `knowledge.holderId`, `citation.receiptId`, `snapshot.document.beforeCharacters[i].id`) are re-mapped through the translation dictionary, guaranteeing absolute referential integrity.
+  - Structured references (e.g. `turn.diceSessionId`, `knowledge.characterIds`, `knowledge.holderId`, `citation.receiptId`, `snapshot.beforeCharacters[i].id`) are validated and remapped through an ID dictionary. Historical narrative and serialized prompt text remain unchanged and can contain old IDs. Rule-system identities remain historical references rather than receiving universally new UUIDs.
   - Imported dice sessions are marked `imported: true`, rendering them non-executable and preserved purely for audit.
 - **Unresolved Rule Reference Reconciliation (`ruleResolution`)**:
   - If an imported campaign references a rulebook, the backend attempts to match it against local PostgreSQL rule systems by `systemKey` and `contentHash`.
-  - If the system exists by slug but the content hash has diverged, the campaign is flagged with an unresolved `ruleResolution` status (`candidate`, `hashChanged: true`).
+  - If the system exists by slug but the content hash has diverged, the campaign is flagged with `ruleResolution: { status: 'unresolved', reference }`. The resolution GET response computes `candidate` and `hashChanged`; those are not stored status fields.
   - Players can inspect candidate differences via `GET /api/campaigns/:id/rule-system/resolution`, confirm resolution via `POST /api/campaigns/:id/rule-system/resolution`, or rebind the campaign to any installed system via `PATCH /api/campaigns/:id/rule-system`.
 - **Templates**:
-  - `templates`: Campaign starter blueprints. Omits turns, snapshots, and knowledge timeline.
+  - `templates`: Starter blueprints containing description, instructions, characters, sources, settings, pins, budgets and a portable rule reference. They omit campaign state, memory and turn/knowledge timelines. Stored setup contains original character notes; instantiation clears those notes, assigns fresh IDs and marks original binaries unavailable.
   - `character_templates`: Character blueprints. Explicitly strips private player notes (`notes: ''`).
 
 ---
@@ -591,8 +618,12 @@ To allow models to navigate massive rulebooks without context exhaustion, `gener
 
 ### 3.1 PostgreSQL Relational & JSONB Schema
 
+Implementation evidence: [0001_local.sql](../rpg_be_local/migrationssql/0001_local.sql), [0004_dice_rolls.sql](../rpg_be_local/migrationssql/0004_dice_rolls.sql), [0005_rule_systems.sql](../rpg_be_local/migrationssql/0005_rule_systems.sql), [0008_campaign_knowledge.sql](../rpg_be_local/migrationssql/0008_campaign_knowledge.sql), [config.ts](../rpg_be_local/src/config.ts).
+
+This is a field summary, not complete DDL; the eight migration files define defaults, composite foreign keys, indexes and triggers. Characters, sources, knowledge and current memory live inside `campaigns.document`, not separate entity tables. Source IDs and nested JSON links generally require application validation. The database name is configured rather than hardcoded; `databaseUrl` restricts it to loopback PostgreSQL and requires a distinct `_test` database in test mode.
+
 ```
-PostgreSQL Database: rpg_local
+PostgreSQL Database: configured loopback DB (commonly rpg_local)
 ├── campaigns                     (Campaign entities stored as JSONB documents)
 │   ├── id (UUID, PK)
 │   ├── document (JSONB: name, description, instructions, state, characters, sources, knowledge)
@@ -643,6 +674,7 @@ PostgreSQL Database: rpg_local
 │   ├── frozen_prompt (TEXT)
 │   ├── frozen_revision (INTEGER)
 │   ├── character_ids (JSONB array)
+│   ├── imported (BOOLEAN; archived sessions are non-executable)
 │   ├── new_faces (INTEGER, max 200)
 │   ├── prompt_contract_version (INTEGER)
 │   ├── digest_version (INTEGER)
@@ -660,6 +692,7 @@ PostgreSQL Database: rpg_local
 │
 ├── dice_records                  (Individual cryptographic dice rolls)
 │   ├── id (UUID, PK)
+│   ├── campaign_id (UUID; composite FK with session_id)
 │   ├── session_id (UUID, FK -> dice_sessions.id)
 │   ├── slot (INTEGER, 0 to 11)
 │   ├── spec_digest (SHA-256 of request arguments)
@@ -724,6 +757,8 @@ PostgreSQL Database: rpg_local
 
 ### 3.2 Database Integrity Invariants, Constraints & Immutable Triggers
 
+Implementation evidence: [0004_dice_rolls.sql](../rpg_be_local/migrationssql/0004_dice_rolls.sql), [0005_rule_systems.sql](../rpg_be_local/migrationssql/0005_rule_systems.sql), [0007_rule_selection_metadata.sql](../rpg_be_local/migrationssql/0007_rule_selection_metadata.sql), [0008_campaign_knowledge.sql](../rpg_be_local/migrationssql/0008_campaign_knowledge.sql), [ruleStore.ts](../rpg_be_local/src/services/ruleStore.ts).
+
 The database schema evolves through 8 deterministic SQL migrations (`migrationssql/`):
 
 | Migration File                     | Primitives Introduced                                                                                  | Security & Integrity Invariants                                                                                                                                                       |
@@ -733,7 +768,7 @@ The database schema evolves through 8 deterministic SQL migrations (`migrationss
 | `0003_character_templates.sql`     | `character_templates`                                                                                  | Sanitized character starter blueprints with stripped private notes                                                                                                                    |
 | `0004_dice_rolls.sql`              | `dice_sessions`, `dice_attempts`, `dice_records`                                                       | `valid_dice_groups(groups jsonb)` validation function; `dice_sessions_immutable` and `dice_records_immutable` triggers                                                                |
 | `0005_rule_systems.sql`            | `rule_systems`, `rule_confirmations`, `campaign_rule_bindings`, `turn_rule_budgets`, `turn_rule_reads` | `campaign_rule_mirror` CHECK constraint; `protect_rule_default()`, `rule_confirmations_immutable`, `rule_reads_immutable` triggers                                                    |
-| `0006_rule_archive_audit.sql`      | Audit portability extension                                                                            | Drops `turn_rule_reads_system_id_fkey` constraint so historical receipts survive reference-only campaign imports before private libraries are installed                                |
+| `0006_rule_archive_audit.sql`      | Audit portability extension                                                                            | Drops `turn_rule_reads_system_id_fkey` constraint so historical receipts survive reference-only campaign imports before private libraries are installed                               |
 | `0007_rule_selection_metadata.sql` | `has_original_text` column                                                                             | Recursive `rule_tree_has_text` and `rule_column_has_text` functions across 11 book sections                                                                                           |
 | `0008_campaign_knowledge.sql`      | Knowledge columns on `dice_sessions`                                                                   | Adds `prompt_contract_version`, `digest_version`, `system_prompt`, `frozen_knowledge`, `tool_definitions` with updated immutability trigger; `{knowledge: []}` default initialization |
 
@@ -743,7 +778,7 @@ The database schema evolves through 8 deterministic SQL migrations (`migrationss
    ```sql
    CREATE UNIQUE INDEX one_active_turn ON turns(campaign_id) WHERE status IN ('pending', 'running');
    ```
-   Guarantees that a campaign can never run concurrent turns, eliminating race conditions at the database engine level.
+   Prevents multiple pending/running database turns per campaign. Locks, revisions and owner/lease checks are still needed; the index alone does not eliminate every race or prevent a stale subprocess from briefly running.
 2. **Campaign-Rule Mirror Constraint**:
    ```sql
    ALTER TABLE campaigns ADD CONSTRAINT campaign_rule_mirror CHECK (
@@ -754,45 +789,57 @@ The database schema evolves through 8 deterministic SQL migrations (`migrationss
 3. **Strict Dice Group Validation Function**:
    `valid_dice_groups(groups jsonb)` checks that groups array length is 1..8, labels are unique and 1..80 chars, sides are integers between 2 and 1,000,000, faces array length is 1..50, total faces per call $\le 100$, and every face is within range $[1, \text{sides}]$.
 4. **Append-Only Immutability Triggers**:
-   - `dice_sessions_immutable`: Rejects updates or deletions unless the parent campaign is deleted.
+   - `dice_sessions_immutable`: Rejects changes to frozen identity/context metadata and rejects deletion while the campaign exists. Updates to `new_faces` remain allowed.
    - `dice_records_immutable`: Enforces append-only dice audit.
    - `rule_confirmations_immutable`: Protects confirmation audit rows.
    - `rule_reads_immutable`: Protects rule citation receipts.
-   - `rule_default_protected`: Prohibits deleting or renaming the default `model-knowledge` rule system.
+   - `rule_default_protected`: Prohibits deleting the default or changing its ID, kind or system key. Display name and instructions can change; the trigger also prevents any system's revision from decreasing.
+
+**Rule-budget enforcement limitation:** `turn_rule_budgets` still has SQL limits of 12 requests and 8,192 cumulative transcript bytes. Current `RuleStore.read` checks each new result against the full 8,192-byte allowance, then increments the cumulative columns; it does not subtract prior usage or explicitly check the request counter. Therefore a SQL CHECK can reject a read before a friendly budget error is returned. The v4 registry receives no explicit call-count limits; the legacy `VERIFIED_BOOK_LIMITS` values are `Number.MAX_SAFE_INTEGER`. Do not infer unlimited successful persisted rule reads from those registry values.
 
 ---
 
 ### 3.3 The File System & Transient Directories
 
-The backend strictly confines temporary file activity to the OS temporary directory (`os.tmpdir()`) or an isolated subfolder of the user profile, ensuring no scratch files or private artifacts leak into the source repository:
+Implementation evidence: [service.ts](../rpg_be_local/src/providers/service.ts), [antigravity.ts](../rpg_be_local/src/providers/antigravity.ts), [promptLog.ts](../rpg_be_local/src/providers/promptLog.ts), [rulePreview.ts](../rpg_be_local/src/services/rulePreview.ts).
 
-| Directory Pattern                             | Purpose                                                                    | Lifetime                                               |
-| :-------------------------------------------- | :------------------------------------------------------------------------- | :----------------------------------------------------- |
-| `os.tmpdir()/rpg-cli-*`                       | CLI output schema and prompt files for basic generation                    | Created before CLI launch; deleted in `finally` block  |
-| `os.tmpdir()/rpg-rules-cli-*`                 | Isolated working directory for book gameplay turns                         | Deleted in `finally` block                             |
-| `os.tmpdir()/rpg-owned-cli-*`                 | Isolated working directory for owned tool gameplay turns                   | Deleted in `finally` block                             |
-| `os.tmpdir()/rpg-dice-cli-*`                  | Isolated working directory for dice CLI generation subprocess              | Deleted in `finally` block                             |
-| `os.tmpdir()/rpg-agy-private-*`               | Temporary `USERPROFILE` for Antigravity containing isolated agent settings | Deleted with retry logic upon subprocess exit          |
-| `path.join(codexHome, 'rpg-isolated-*')`      | Temporary isolated `CODEX_HOME` with hardlinked `auth.json` for OpenAI    | Deleted with traversal checks upon subprocess exit     |
-| `os.tmpdir()/rpg-source-*`                    | Intermediate rendering files for PDFium/Tesseract OCR                      | Deleted immediately after text extraction              |
-| `os.tmpdir()/rpg-audio-*`                     | Temporary audio snippet for Whisper transcription                          | Deleted immediately after transcription completes      |
-| `../log/YYYYMMDD__HHMMSS__<action>*.json`     | Git-ignored local audit log of prompts sent to LLMs                        | Persisted locally for developer inspection & debugging |
+Most subprocess scratch files use `os.tmpdir()` or an isolated Codex home. Prompt logs intentionally persist in repository-root `log/` (git-ignored); private content is not confined exclusively to temporary storage. `finally` cleanup handles normal exits/errors, but abrupt process termination can leave files:
+
+| Directory Pattern                                   | Purpose                                                                    | Lifetime                                                            |
+| :-------------------------------------------------- | :------------------------------------------------------------------------- | :------------------------------------------------------------------ |
+| `os.tmpdir()/rpg-cli-*`                             | CLI output schema and prompt files for basic generation                    | Created before CLI launch; deleted in `finally` block               |
+| `os.tmpdir()/rpg-rules-cli-*`                       | Isolated working directory for book gameplay turns                         | Deleted in `finally` block                                          |
+| `os.tmpdir()/rpg-owned-cli-*`                       | Isolated working directory for owned tool gameplay turns                   | Deleted in `finally` block                                          |
+| `os.tmpdir()/rpg-dice-cli-*`                        | Isolated working directory for dice CLI generation subprocess              | Deleted in `finally` block                                          |
+| `os.tmpdir()/rpg-agy-private-*`                     | Temporary `USERPROFILE` for Antigravity containing isolated agent settings | Deleted with retry logic upon subprocess exit                       |
+| `path.join(codexHome, 'rpg-isolated-*')`            | Temporary isolated `CODEX_HOME` with hardlinked `auth.json` for OpenAI     | Deleted with traversal checks upon subprocess exit                  |
+| `os.tmpdir()/rpg-source-*`                          | Intermediate rendering files for PDFium/Tesseract OCR                      | Deleted immediately after text extraction                           |
+| `os.tmpdir()/rpg-audio-*`                           | Temporary audio snippet for Whisper transcription                          | Deleted immediately after transcription completes                   |
+| `os.tmpdir()/rpg-local-rule-previews/*.json`        | Staged rule import/backup payloads                                         | Removed on consumption/expiry/close or preview-store initialization |
+| `os.tmpdir()/rpg-native-*`, `rpg-ocr-*`             | Python per-page conversion/render files                                    | Python temporary-directory context cleanup                          |
+| `<repository>/log/YYYYMMDD__HHMMSS__<action>*.json` | Git-ignored local audit log of prompts sent to LLMs                        | Persisted locally for developer inspection & debugging              |
+
+Basic Antigravity generation also writes a uniquely named agent definition under the real user home `.gemini/config/agents/local-rpg-*`, then removes that file/directory. Owned gameplay puts its `local-rpg-gameplay` agent and permissions in the temporary profile instead. Prompt logs are not a complete audit of every transport: basic Claude and Antigravity generation log, gameplay adapters log, and Antigravity additionally logs selected final/rejected events. Basic Codex generation has no corresponding `logPrompt` call.
 
 ---
 
 ### 3.4 In-Memory State & Caches
 
+Implementation evidence: [ruleStore.ts](../rpg_be_local/src/services/ruleStore.ts), [ruleLookup.ts](../rpg_be_local/src/services/ruleLookup.ts), [service.ts](../rpg_be_local/src/providers/service.ts), [security.ts](../rpg_be_local/src/security.ts), [server.ts](../rpg_be_local/src/server.ts).
+
 - **Periodic Store Recovery Timer** (`server.ts`):
   - Runs `store.recover()` every **15,000ms (15 seconds)** to automatically sweep and mark any abandoned turns whose 45-second lease expired as `interrupted`.
 - **Rule Snapshot Cache** (`ruleStore.ts: snapshotCaches`):
-  - Uses a `WeakMap<Store, Map<string, RuleSystem>>`.
+  - Uses a `WeakMap<Store, Map<string, { system: RuleSystem; bytes: number }>>`, keyed by captured identity/revision/hash/kind.
   - Caches up to **4 systems** or **64 MiB** of serialized JSON rule trees.
   - Frozen via `Object.freeze` to guarantee immutability.
   - Authoritative database revision is always checked via `SELECT ... FOR SHARE` before returning a cached snapshot.
 - **Rule Search Cache** (`ruleLookup.ts: searchCaches`):
   - Retains at most 8 queries or 4096 candidate hits per rule system.
 - **Active Turn Abort Controllers** (`TurnService.aborts`):
-  - `Map<string, AbortController>` allowing the player to instantly cancel an in-flight turn (`POST /turns/:id/cancel`).
+  - `Map<string, AbortController>` for cancellation propagation after the cancel transaction marks the turn terminal (`POST /turns/:id/cancel`).
+- **Rule Previews** (`RulePreview.entries`): In-memory token/expiry metadata points to JSON files under `os.tmpdir()/rpg-local-rule-previews`. A new preview store removes leftover UUID-named staged files; expiry is checked on staging/get, not by a dedicated timer.
+- **Provider Discovery** (`ProviderService.cache`, `locations`): Caches advertised options and executable locations; `/api/providers?refresh=true` explicitly refreshes discovery. Availability and capability warnings are distinct from a successful live call.
 - **LAN Pairing Sessions** (`LanAccess.sessions`):
   - Token and expiry array held purely in memory. Server restart automatically revokes all paired mobile devices.
 
@@ -802,20 +849,22 @@ The backend strictly confines temporary file activity to the OS temporary direct
 
 ### 4.1 The Context Manifest & Budgeting Heuristics
 
-Every gameplay prompt is compiled by `buildContext()` in `domain/context.ts` into a structured JSON payload called the **Context Manifest**.
+Implementation evidence: [context.ts](../rpg_be_local/src/domain/context.ts), [options.ts](../rpg_be_local/src/domain/options.ts), [service.ts](../rpg_be_local/src/providers/service.ts).
+
+`buildContext()` returns a **ContextManifest** containing serialized JSON `prompt`, revision, estimates, source/history IDs and optional system prompt/frozen metadata. The manifest itself is not the user payload sent to inference.
 
 Because different models have different context window tolerances, the application enforces **soft token budgets**:
 
-- `gameplay`: default 16,000 tokens (retrieval and history ceiling).
+- `gameplay`: default 16,000 estimated tokens (optional retrieval target, not a history ceiling).
 - `compaction`: default 8,000 tokens.
 - `memory`: default 2,000 tokens.
 
-To prevent token estimation errors, token counts are estimated conservatively:
+To prevent token estimation errors, the standard estimate is deliberately pessimistic; book mode uses a softer heuristic:
 
 - Standard mode: `Buffer.byteLength(text, 'utf8')` (1 token = 1 byte, highly pessimistic upper bound).
-- Book mode: `Buffer.byteLength(text, 'utf8') / 2` (2 bytes per token heuristic).
+- Book mode: `Math.ceil(Buffer.byteLength(text, 'utf8') / 2)` (2 bytes per token heuristic).
 
-#### The Non-Lossy Budget Invariant: "Budgets Guide Retrieval, Never Data Loss"
+#### Mandatory Payload Preservation: Budgets Guide Optional Retrieval
 
 A critical architectural invariant in `context.ts` is that **mandatory game state is never discarded to satisfy a budget ceiling**:
 
@@ -835,11 +884,13 @@ for (const rule of rules) {
 
 - The mandatory base (campaign description, state, pinned facts, pinned rules, all player characters, scene-relevant NPCs, action, and JSON schema), active history, and prior valid memory are **always included**. If their combined byte size exceeds the initial `ceiling`, `ceiling` is dynamically elevated to accommodate them.
 - Only dynamically retrieved search rules (`source_chunks`) are pruned if they do not fit within the ceiling.
-- If history tokens exceed `AUTO_COMPACTION_HISTORY_THRESHOLD_TOKENS` (6,000 tokens) or `estimatedTokens > capacity * CONTEXT_REBUILD_THRESHOLD` (0.8), the backend executes **bounded compaction** before launching the turn, replacing older turns with an incremental summary while preserving unresolved threads.
+- `TurnService.run` considers compaction above 6,000 uncovered-history tokens, a missing prompt or 80% of soft capacity. It runs only for new actions with more than one uncovered turn. The model is instructed to preserve unresolved threads; that is not a lossless-summary guarantee. Provider capacity methods return planning ceilings after availability checks, not a measured native context limit.
 
 ---
 
 ### 4.2 Relevant Entity Selection & Lexical Retrieval Algorithms
+
+Implementation evidence: [context.ts](../rpg_be_local/src/domain/context.ts), [knowledgeRecall.ts](../rpg_be_local/src/domain/knowledgeRecall.ts), [diceContext.ts](../rpg_be_local/src/domain/diceContext.ts), [store.ts](../rpg_be_local/src/store.ts).
 
 To avoid flooding the model context, dynamic filtering occurs before prompt compilation:
 
@@ -859,8 +910,8 @@ To avoid flooding the model context, dynamic filtering occurs before prompt comp
    - Queries `source_chunks` using `to_tsquery('simple', $2)` and orders by `ts_rank` descending (limit 8).
    - Only chunks fitting within the remaining token ceiling are appended.
 4. **Relevant Knowledge Selection (`selectRelevantKnowledge`)**:
-   - Mandatory inclusion: Active records where kind is `debt` or `objective`, or linked to player characters, or directly mentioned in `sceneTerms`.
-   - Optional inclusion: Other active records ranked by keyword match score (title match = 3 pts, body match = 1 pt) and recency, appended until budget is reached.
+   - Mandatory inclusion: Active debts/objectives, records linked to player characters, or records whose ID or title occurs in the action/scene corpus.
+   - Optional inclusion: Other active records with positive keyword scores (title match = 3 pts, otherwise body match = 1 pt per word), ranked by score and recency. Selection compares serialized JSON character counts with `c.budgets.gameplay`; this is separate from the final prompt's remaining token allowance.
 5. **Context Digest Stability (`diceContext.ts: gameplayDigest`)**:
    - Computes a SHA-256 digest over the campaign's structural state to verify that game context hasn't shifted between rolls and retries.
    - **Privacy & Note Immunity**: The character mapping explicitly strips private notes and revision counters:
@@ -869,13 +920,15 @@ To avoid flooding the model context, dynamic filtering occurs before prompt comp
        ({ notes: _notes, revision: _revision, ...character }) => character
      );
      ```
-     This ensures that editing private notes or incrementing character version counters does not invalidate recorded dice sessions!
+     This excludes notes and character revision counters from the retry digest. Character PATCH still increments campaign revision and can abort an active turn; a later retry must supply current revision. Campaign-private notes use a separate `notesRevision`.
 
 ---
 
 ### 4.3 Anatomical Breakdown of a Gameplay Prompt
 
-In Schema Version 4 (`responseVersion === 4`), natural language directives (`instructions`, `systemInstructions`, `campaignInstructions`) are decoupled from data payloads and formatted into the top-level `systemPrompt` technical envelope (`gameplayInstructionEnvelope`). The JSON payload passed as user input encapsulates structured state (`mandatory`, `memory`, `history`, `rules`) and schema definitions:
+Implementation evidence: [context.ts](../rpg_be_local/src/domain/context.ts), [gameplayResponse.ts](../rpg_be_local/src/domain/gameplayResponse.ts), [knowledge.ts](../rpg_be_local/src/domain/knowledge.ts).
+
+In Schema Version 4 (`responseVersion === 4`), natural language directives (`instructions`, `systemInstructions`, `campaignInstructions`) are decoupled from data payloads and formatted into the top-level `systemPrompt` technical envelope (`gameplayInstructionEnvelope`). The JSON user payload contains `mandatory`, `memory`, `history` and `rules`. This schematic example abbreviates the real schema/knowledge record and uses symbolic IDs; it is not a copyable validated response or a complete wire fixture. The actual schema is generated from Zod. `dice`/`interpretations` history fields are omitted when a turn has no rolls; book mode also includes `rulesOverview`.
 
 ```json
 {
@@ -983,7 +1036,9 @@ In Schema Version 4 (`responseVersion === 4`), natural language directives (`ins
 
 ### 4.4 System Prompts & Technical Envelopes
 
-The LLM receives instructions via a technical system prompt (`gameplayInstructionEnvelope` in `domain/gameplayNarrator.ts`) that strictly defines its duties and boundaries:
+Implementation evidence: [gameplayNarrator.ts](../rpg_be_local/src/domain/gameplayNarrator.ts).
+
+V4 gameplay receives `gameplayInstructionEnvelope` (`domain/gameplayNarrator.ts`) separately from the JSON user payload. Earlier contracts embed instruction fields in the payload. The excerpt below describes behavioral instructions; instructions alone do not enforce model semantics:
 
 ```text
 Selected system instructions:
@@ -1007,31 +1062,22 @@ Read older campaign knowledge using campaign_knowledge_search and campaign_knowl
 
 ### 4.5 Privacy Boundaries: What is Explicitly Filtered Out / Kept Secret
 
-The backend enforces strict information boundaries to prevent accidental prompt contamination or leakage of private data:
+Implementation evidence: [context.ts](../rpg_be_local/src/domain/context.ts), [knowledgeRecall.ts](../rpg_be_local/src/domain/knowledgeRecall.ts), [service.ts](../rpg_be_local/src/providers/service.ts), [codex.ts](../rpg_be_local/src/providers/codex.ts), [claudeDice.ts](../rpg_be_local/src/providers/claudeDice.ts), [antigravityDice.ts](../rpg_be_local/src/providers/antigravityDice.ts), [promptLog.ts](../rpg_be_local/src/providers/promptLog.ts), [library.ts](../rpg_be_local/src/services/library.ts).
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        DATA NEVER SENT TO LLM                          │
-├────────────────────────────────────────────────────────────────────────┤
-│ 1. Campaign Private Notes (campaign.notes): Kept purely for the human  │
-│ 2. Character Private Notes (character.notes): Kept for the player      │
-│ 3. Undone Turns (turn.undone == true): Omitted from prompt history     │
-│ 4. Failed / Cancelled / Interrupted Turns: Omitted from history        │
-│ 5. Database Connection Strings / Credentials: Stripped at root config  │
-│ 6. Provider Subscription Tokens & API Keys: Unset from child env       │
-│ 7. Host File Paths & OS Details: Sandboxed to temporary relative paths │
-│ 8. Unrelated NPCs: Pruned if not in current scene or action terms      │
-│ 9. Unconfirmed Source Documents: Draft scans never enter prompts       │
-└────────────────────────────────────────────────────────────────────────┘
-```
+`buildContext` omits campaign and character `notes`, non-completed/undone turns, and unconfirmed source text. It includes all player characters and only name/ID-matched NPC sheets. These are field-selection guarantees: notes pasted into an action, source, description or instruction field are still ordinary model input.
+
+The boundary has distinct scopes:
+
+- **Prompt content**: No database connection string or login token is intentionally assembled by the context engine. Full source text, knowledge, actions and narrative selected for the prompt may reach provider-hosted inference through the authenticated CLI. Local orchestration does not establish offline inference.
+- **Child environment**: Adapters remove selected key/token variables, but start from a copy of `process.env`. They do not remove every secret or configuration value. In particular, `RPG_DATABASE_URL` is not stripped by these filters; it is inherited by subprocesses even though it is not a prompt field.
+- **Provider authentication**: Subscription login remains available to the CLI. Codex explicitly hardlinks `auth.json` into its isolated home. Removing API-key environment variables does not mean authentication material is unavailable to the process.
+- **Host metadata**: Absolute working directories, executable paths, profile/home paths and ordinary environment variables are supplied to the process. Isolation controls tools/customizations; it does not anonymize all host metadata.
+- **Knowledge recall**: Frozen knowledge contains every record, character ID/name and source ID/version. The model can retrieve inactive records and records linked to NPCs whose full sheets were omitted. The frozen source ID/version list includes draft sources, but not their text. Compaction's knowledge subset is selected by attribution turn links and can include inactive records.
+- **Local retention**: Prompt logs save full prompts/system instructions without automatic redaction or expiry. Archives preserve private campaign/character notes and prompt/history text. Template setup can retain character notes even though instantiation clears them. Git ignore is not encryption or access control.
 
 #### Environment Variable Cleansing
 
-When spawning CLI child processes, `service.ts` and `claudeDice.ts` sanitize `process.env`, unsetting:
-
-- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`
-- `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CODEX_API_KEY`
-- Disables Claude memory systems: `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, `CLAUDE_CODE_DISABLE_ORG_MEMORY=1`, `CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS=1`.
+Basic generation in `service.ts` removes named API-key/token/base-URL variables and Claude routing overrides. Gameplay applies adapter-specific filters: Claude removes `CLAUDE_CODE_*`, `ANTHROPIC_*`, `MCP_*` and key/token patterns; Codex removes `CODEX_*` except the explicitly replaced `CODEX_HOME`, key/token patterns and OpenAI routing identifiers; Antigravity removes its own, Gemini/Google/MCP and key/token patterns. Claude gameplay then injects the four memory/plugin-disable flags listed in section 2.3. These are explicit filters, not a complete environment allowlist.
 
 ---
 
@@ -1039,24 +1085,26 @@ When spawning CLI child processes, `service.ts` and `claudeDice.ts` sanitize `pr
 
 ### 5.1 Zero-Trust Output Validation & Epistemic Knowledge Governance
 
+Implementation evidence: [gameplayResponse.ts](../rpg_be_local/src/domain/gameplayResponse.ts), [schemas.ts](../rpg_be_local/src/domain/schemas.ts), [knowledge.ts](../rpg_be_local/src/domain/knowledge.ts).
+
 The application operates under the fundamental assumption that **the LLM will hallucinate, invent fields, miscalculate arithmetic, or fail to follow rules**.
 
 Therefore:
 
 - **No Direct DB Writes**: The model returns an abstract declarative proposal, never SQL or raw mutations.
-- **Strict Zod Parsing**: The output is validated against `gameplayResponseSchema`. Any unexpected property causes immediate rejection.
-- **Strict String and Object Limits**: Entity names $\le 200$ chars, JSON objects $\le 100\text{ KB}$, turn narrative $\le 40,000$ chars.
+- **Strict Zod Parsing**: The output is validated against `gameplayResponseSchema`. Unexpected top-level/structured operation properties are rejected. Flexible attribute/inventory/description/state objects intentionally accept domain-specific keys.
+- **Strict String and Object Limits**: Entity names are limited to 200 characters and flexible objects to 100,000 serialized UTF-16 code units (`JSON.stringify(value).length`, not UTF-8 bytes). Live GM narrative and generated memory are non-empty strings with no maximum in their response schemas. The 40,000-character limit applies to player turn input (and transcription responses); archive validators have separate limits.
 
 #### The Epistemic Knowledge Modality Matrix (`domain/knowledge.ts`)
 
 Campaign knowledge records govern facts, rumors, debts, and relationships with strict epistemic metadata:
 
-| Dimension     | Permitted Values                                                      | Semantic & Governance Rules                                                                                           |
-| :------------ | :-------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
-| **Kind**      | `npc`, `place`, `relationship`, `debt`, `objective`, `event`, `other` | Categorizes game entities. `debt` and `objective` records are treated as high-priority mandatory context.             |
-| **Origin**    | `source`, `gm`, `player`, `unknown`                                   | Identifies who or what asserted the claim.                                                                            |
-| **Certainty** | `established`, `rumor`, `belief`                                      | Modality tag. Rumors and beliefs must identify claimant; model cannot promote rumors to established without evidence. |
-| **Status**    | `active`, `resolved`, `retracted`                                     | Lifecycle status. Inactive records (`resolved`, `retracted`) are excluded from prompts unless explicitly queried.     |
+| Dimension     | Permitted Values                                                      | Semantic & Governance Rules                                                                                                                                                                             |
+| :------------ | :-------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Kind**      | `npc`, `place`, `relationship`, `debt`, `objective`, `event`, `other` | Categorizes game entities. `debt` and `objective` records are treated as high-priority mandatory context.                                                                                               |
+| **Origin**    | `source`, `gm`, `player`, `unknown`                                   | Identifies who or what asserted the claim.                                                                                                                                                              |
+| **Certainty** | `established`, `rumor`, `belief`                                      | Modality tag. Prompt instruction asks for attributed rumors/beliefs; runtime checks enums and origin/evidence consistency, not semantic claimant attribution or evidence for every certainty promotion. |
+| **Status**    | `active`, `resolved`, `retracted`                                     | Lifecycle status. Inactive records (`resolved`, `retracted`) are excluded from prompts unless explicitly queried.                                                                                       |
 
 ##### The Origin-Evidence Complementarity Invariant
 
@@ -1068,9 +1116,11 @@ To ensure provenance hygiene, `validateKnowledgeEvidence()` strictly enforces:
   1. `campaign_source`: Must match an exact substring within a supplied source span (`end === start + quote.length`).
   2. `book`: Must cite an authentic `rules_get` receipt verified against the active rule system hash.
 
-##### Immutable Attribution Timeline & Snapshot Diffing
+##### Application-Maintained Attribution Timeline & Snapshot Diffing
 
-Every knowledge record retains a historical array `attributions: KnowledgeAttribution[]`. Whenever a record is updated or re-evaluated, an immutable entry `{ origin, evidence, turnId, at }` is appended, recording the entire history of which turns and actions shaped that belief.
+Every knowledge record retains a historical array `attributions: KnowledgeAttribution[]`. Whenever a record is created or updated, an attribution entry `{ origin, evidence, turnId, at }` is appended, recording provenance proposed through this path. This is an application-maintained JSONB array, not a database append-only attribution table; undo restores earlier slices.
+
+Updates append the new provenance to `attributions` while retaining the record's original top-level `origin` and `evidence`. Consumers must inspect the attribution timeline to see later provenance assertions; those assertions do not automatically overwrite creation provenance.
 
 When `applyKnowledgeChanges()` executes, it computes exact `before` and `after` states for all touched knowledge records. These slices are saved directly into the turn's snapshot document (`beforeKnowledge`, `afterKnowledge`), allowing the undo engine to restore prior epistemic belief states without running AI inference.
 
@@ -1088,9 +1138,11 @@ Knowledge records do not exist as isolated strings; they form a rich semantic en
 
 ### 5.2 Atomic State Transitions with Expected Prior Values
 
+Implementation evidence: [state.ts](../rpg_be_local/src/domain/state.ts), [knowledge.ts](../rpg_be_local/src/domain/knowledge.ts), [turns.ts](../rpg_be_local/src/services/turns.ts).
+
 State updates use an **Optimistic Concurrency & Expected-Value Pattern** (`domain/state.ts: applyResponse`).
 
-For every modification to a character or the campaign state, the LLM must provide the **exact prior value** (`expected`) it believes it is modifying:
+For `set` operations on existing characters and `state` replacements, the LLM must provide the **exact prior value** (`expected`) it believes it is modifying:
 
 ```json
 {
@@ -1118,7 +1170,7 @@ When introducing a new character, the model emits an `op: 'create'` in `operatio
 
 1. `applyResponse` generates a UUID (`char.id = randomUUID()`) and records the mapping in `aliases.set(operationIndex, char.id)`.
 2. Any subsequent fact in `knowledgeChanges` in the same response can reference `{ operationIndex: number }` (e.g. `{ operationIndex: 0 }`).
-3. The backend resolves the staged index to the real UUID before persisting, eliminating race conditions or hallucinated IDs.
+3. The backend resolves the staged index to the real UUID before persisting, allowing validated links to staged characters. The index refers to the full operations array, not a create-only index.
 
 #### Automatic NPC Introduction & Duplicate Guard
 
@@ -1136,10 +1188,14 @@ When validating an undo request, `undoSnapshot()` checks for manual human edits 
 
 ### 5.3 Cryptographic Trusted Dice Mechanics & Replay Verification
 
-- **No Model-Generated Randomness**: If an LLM states "I rolled an 18 for you", the backend rejects the response. All dice must originate from `roll_dice`.
+Implementation evidence: [dice.ts](../rpg_be_local/src/domain/dice.ts), [dice.ts](../rpg_be_local/src/services/dice.ts), [diceResponse.ts](../rpg_be_local/src/domain/diceResponse.ts), [diceContext.ts](../rpg_be_local/src/domain/diceContext.ts), [gameplayMcp.ts](../rpg_be_local/src/providers/gameplayMcp.ts).
+
+- **Trusted Structured Roll Audit**: `roll_dice` supplies persisted faces; final roll IDs must match saved records. The prompt forbids invented randomness, but the backend does not parse narrative prose or verify arithmetic, required roll coverage or rules interpretation. A fabricated roll stated only in prose is not necessarily rejected.
 - **Pre-Declaration & Blind Draw**: The model must declare its `reason` (e.g. "Attack roll vs Goblin AC 15") and `declaration` before receiving the random numbers.
 - **Ordered Replay Verification**: On a retry, the model cannot change its previous rolls or request different dice. It must consume existing recorded rolls in sequential slot order ($0, 1, 2, \dots$) before requesting any new rolls.
 - **Every Roll Acknowledged**: `validateRollInterpretations` ensures that every roll recorded during the turn is explained in `rollInterpretations` in the final response. Duplicate, missing, or hallucinated roll IDs trigger an immediate rejection.
+
+Acknowledgment validates IDs and non-empty explanation fields, not the explanation's arithmetic. The current owned HTTP MCP transport also imposes `RULE_LIMITS.requestBytes` (1,024 bytes) on tool arguments, so Claude/Antigravity MCP requests can fail before reaching the dice service's 4,096-byte input limit. Codex uses the native dynamic-tool transport.
 
 #### The Cryptographic Dice Service Limits (`domain/dice.ts: DICE_LIMITS`)
 
@@ -1156,7 +1212,7 @@ To prevent resource exhaustion, context pollution, or denial-of-service via infi
 | **`requestsPerAttempt`** | `24`        | Max 24 dice tool requests per turn attempt.                                                                  |
 | **`inputBytes`**         | `4,096`     | Max JSON byte length of the tool input payload.                                                              |
 | **`transcriptBytes`**    | `8,192`     | Max cumulative bytes reserved for dice request and result transcripts in prompt context.                     |
-| **`attemptMs`**          | `180,000`   | 3-minute hard execution timeout per attempt.                                                                 |
+| **`attemptMs`**          | `180,000`   | Legacy declared value; current gameplay adapters use `timeoutMs: 0` and do not enforce this deadline.        |
 
 ##### Transaction Safety of Invalid Requests
 
@@ -1167,12 +1223,12 @@ In `DiceService.roll()`:
 // the transaction commits its counter; throwing inside would incorrectly roll it back.
 ```
 
-If the model issues an invalid request (malformed schema, unmapped character UUID, out-of-order slot, or modified spec), the transaction **increments and commits `dice_attempts.requests`** before returning the error. This prevents a misbehaving model from spinning in an infinite loop without consuming its attempt allowance!
+If the model issues an invalid request (malformed schema, unmapped character UUID, out-of-order slot, or modified spec), the transaction **increments and commits `dice_attempts.requests`** before returning the error. These invalid requests consume the allowance. Ownership/session/rule-guard failures occur before this increment, and the model can still make further calls that receive limit errors; this is not a global inference deadline.
 
 ##### Specification Digest (`spec_digest`) Verification
 
 When a roll is recorded, PostgreSQL stores the SHA-256 `spec_digest` of the request:
-$$\text{spec\_digest} = \text{SHA256}(\text{canonical}(\text{slot}, \text{groups}, \text{reason}, \text{declaration}, \text{actorId}, \text{targetId}, \text{rerollOf}))$$
+$$\text{spec\_digest} = \text{SHA256}(\text{JSON.stringify}(\text{parsed diceInput}))$$
 During an auto-repair attempt or retry:
 
 - If slot $0$ was previously rolled for an "Attack check with 1d20", the model must send the **exact same specification** for slot $0$.
@@ -1181,15 +1237,18 @@ During an auto-repair attempt or retry:
 
 ---
 
-### 5.4 Verifiable Rule Citations via Ephemeral DB Receipts
+### 5.4 Verifiable Rule Citations via Persisted DB Receipts
 
-When playing in **Library Rulebook Mode**, the GM cannot simply invent rule mechanics:
+Implementation evidence: [ruleCitationValidation.ts](../rpg_be_local/src/domain/ruleCitationValidation.ts), [rules.ts](../rpg_be_local/src/domain/rules.ts), [ruleStore.ts](../rpg_be_local/src/services/ruleStore.ts).
+
+In **Library Rulebook Mode**, supplied structured citations must match retrieved original text. The prompt asks for book-backed rulings, but empty citation arrays are allowed; the backend does not prove that every narrative ruling follows the book:
 
 1. **Receipt Generation**:
    - The model must call `rules_get` to retrieve original book text.
-   - **Receipt Validity Rule**: Only `rules_get` with `view: 'text'` produces citable receipts (`turn_rule_reads`). Calls to `rules_map`, `rules_search`, `rules_list`, or `rules_get(view: 'fields')` are strictly navigation and are rejected by `validateRuleCitations` if cited!
+   - **Receipt Validity Rule**: Only successful, non-structural `rules_get` with `view: 'text'` produces citable receipts (`turn_rule_reads`). Calls to `rules_map`, `rules_search`, `rules_list`, or `rules_get(view: 'fields')` are strictly navigation and are rejected by `validateRuleCitations` if cited!
 2. **Database Receipt Registration**:
    Each read generates an immutable database receipt (`turn_rule_reads`) with a unique UUID, capturing `argument_digest` and `result_hash`.
+   Receipts also exist for navigation and recorded lookup errors; replay of the same transport identity/arguments returns the existing receipt. Receipts persist until campaign deletion and remain in archive audit history. Only current-turn text receipts can back new citations.
 3. **Exact Substring Verification**:
    In the final response, any cited rule in `ruleCitations` must supply the `receiptId`. The backend verifies:
    $$\text{end} = \text{start} + \text{quote.length}$$
@@ -1198,11 +1257,13 @@ When playing in **Library Rulebook Mode**, the GM cannot simply invent rule mech
 4. **Page Provenance Precision Calculation**:
    The validator computes continuous page coverage across `payload.pageSpans`:
    - If the cited span has continuous, unbroken coverage across PDF pages, precision must be `'exact'`, and `pdfPages` / `printedPages` must match the covered pages.
-   - If page coverage is interrupted or approximate, precision must be `'approximate'` or `'unknown'`. Hallucinating exact page numbers triggers an immediate rejection.
+   - Without full non-null PDF page-span coverage, precision/page arrays must match the receipt's fallback metadata: `'approximate'` only when that metadata is approximate, otherwise `'unknown'`. This verifies consistency with stored provenance, not independent agreement with an unavailable original PDF.
 
 ---
 
 ### 5.5 Snapshot-Driven Zero-AI Undo Engine
+
+Implementation evidence: [state.ts](../rpg_be_local/src/domain/state.ts), [turns.ts](../rpg_be_local/src/services/turns.ts).
 
 When a player clicks **Undo** (`POST /api/campaigns/:id/undo`):
 
@@ -1215,13 +1276,13 @@ When a player clicks **Undo** (`POST /api/campaigns/:id/undo`):
    - `changedFields` (granular record of modified fields per character: `name`, `attributes`, `inventory`, `description`)
 3. **Manual Conflict Verification (`domain/state.ts: undoSnapshot`)**:
    Before reverting, the engine verifies that no human edits conflict with the rollback:
-   - **Knowledge Integrity**: Verifies that active campaign knowledge records match `afterKnowledge`.
+   - **Knowledge Integrity**: Verifies only touched knowledge records recorded in `afterKnowledge`; unrelated records are preserved.
    - **Character Integrity**: Verifies that character fields modified in this turn match `afterCharacters`.
-   - **Campaign State Integrity**: Verifies that `campaign.state` matches `afterState`.
+   - **Campaign State Integrity**: Verifies `campaign.state` against `afterState` only when the turn changed state; otherwise later manual state changes are preserved.
    - **New Character Note Guard**: If a character was created during this turn and the player subsequently added manual notes to it, the undo is rejected (`409 Conflict: 'New character has manual notes; remove or copy them before undo'`) to prevent silent player note loss.
-4. **Instantaneous Reversion with Note Preservation**:
+4. **Deterministic Reversion with Note Preservation**:
    - For existing modified characters, attributes are reverted to `beforeCharacters` while **preserving player private notes** (`notes = c.characters[index].notes`).
-   - The rollback executes **instantaneously without any LLM inference**.
+   - The rollback uses database transactions and deterministic comparisons without LLM inference; this is not a latency guarantee.
    - The undone turn is marked `undone: true` in the database, preserving it for audit while excluding it from subsequent prompt context.
 5. **Backward Memory Milestone Restoration (`turns.ts: undo`)**:
    If the undone turn was previously summarized into a memory milestone:
@@ -1232,29 +1293,35 @@ When a player clicks **Undo** (`POST /api/campaigns/:id/undo`):
 
 ---
 
-### 5.6 Context Compaction without Information Loss
+### 5.6 Context Compaction & Transcript Retention
 
-When the total uncompressed history exceeds `AUTO_COMPACTION_HISTORY_THRESHOLD_TOKENS` (6,000 tokens):
+Implementation evidence: [context.ts](../rpg_be_local/src/domain/context.ts), [schemas.ts](../rpg_be_local/src/domain/schemas.ts), [turns.ts](../rpg_be_local/src/services/turns.ts).
+
+Compaction is lossy model-authored summarization. Original turns remain in PostgreSQL, but covered turn text is replaced by memory in subsequent gameplay prompts. Schema validation establishes a non-empty text field, not completeness or factual fidelity.
+
+For new actions, compaction is considered when uncovered completed history exceeds 6,000 estimated tokens, the prompt is missing, or its estimate exceeds 80% of the soft selected capacity. It runs only with more than one uncovered turn and is skipped on manual retry:
 
 1. **Consecutive Prefix Batching (`context.ts: compactionBatch`)**:
-   Selects a consecutive prefix of uncovered completed turns fitting within `c.budgets.compaction`. It never recursively summarizes the full transcript.
-2. **Knowledge Attribution Preservation**:
+   Selects a consecutive prefix of uncovered completed turns. Its soft ceiling is enlarged to accommodate each individual turn, so the batch can exceed `c.budgets.compaction`. It includes prior valid memory for incremental summarization rather than resending the complete covered transcript.
+2. **Knowledge Attribution Instruction**:
    If campaign knowledge exists, `compactionBatch` filters records linked to or created/updated in the batch's turns, injecting an explicit instruction envelope:
    ```text
    Preserve origins and certainty: allegations, rumors and beliefs must remain attributed and uncertain; memory never replaces canonical registry records.
    ```
 3. **Memory Record Insertion**:
-   The model returns a structured `Memory` object (`{ text }`). The backend inserts a new row into the `memories` table, linked to the exact `coveredTurnIds`.
+   The model returns `{ text }`; the backend constructs the Memory ID, timestamp, valid flag and cumulative `coveredTurnIds` (prior valid coverage plus this batch). Each milestone is committed separately before gameplay generation and can survive later turn failure. Generated text is not checked against `c.budgets.memory`; manual reviewed memory is.
 4. **Active State Continuity**:
-   Pinned facts, current character state, active knowledge records, and recent turns outside the compacted prefix remain in the prompt context.
+   Pinned facts, player/scene-relevant character state, selected active knowledge records, prior valid memory and all uncovered turns remain in context. There is no fixed last-N preservation rule; a batch may cover all uncovered turns.
 5. **Reversibility**:
    If an undo rolls back past a compacted turn, the milestone is invalidated (`valid: false`) and prior milestones are restored as described above.
+
+Manual memory (`POST /api/campaigns/:id/memory`) is a separate reviewed path: it requires `confirm: true`, an idle campaign, the current revision, a non-empty exact consecutive prefix of active completed turn IDs, and text whose UTF-8 byte estimate fits the memory budget. Neither automatic nor manual memory mutates canonical character state or knowledge records.
 
 ---
 
 ## 6. Interactive Educational Blueprint (Future Visualizer Roadmap)
 
-This section outlines how the technical concepts documented above can be transformed into an interactive educational web app (HTML/JS) for teaching developers how modern AI-native backend systems work.
+This section is a proposal, not implemented backend functionality. A future visualizer should distinguish prompt instructions, application validation and database constraints. Simulating a stale `expected` value can demonstrate response repair; a real concurrent human edit may instead trigger revision conflict/cancellation and will not automatically be repaired.
 
 ### Proposed Visualizer Modules
 
