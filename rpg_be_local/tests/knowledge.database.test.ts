@@ -150,7 +150,7 @@ test(
     );
     const library = new LibraryService(store);
     const archive = await library.export(c.id);
-    assert.equal(archive.version, 4);
+    assert.equal(archive.version, 5);
     const imported = await library.import(archive);
     assert.equal(imported.knowledge?.[0]?.certainty, C.Rumor);
     assert.notEqual(imported.knowledge?.[0]?.id, (await store.campaign(c.id)).knowledge![0]!.id);

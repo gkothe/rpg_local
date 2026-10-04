@@ -31,9 +31,61 @@ test('prompt logs preserve full text, safe filenames and repeated calls without 
     assert.equal(data.prompt, prompt);
     assert.equal(data.systemInstructions, 'System instructions');
     assert.equal(data.provider, 'agy');
+    const readable = await readFile(first.replace(/\.json$/, '.md'), 'utf8');
+    assert.ok(readable.includes('## System instructions\n\n```text\nSystem instructions'));
+    assert.ok(readable.includes(`## Prompt\n\n\`\`\`text\n${prompt}`));
+    assert.ok((await readFile(second.replace(/\.json$/, '.md'), 'utf8')).includes(prompt));
     const blocked = path.join(directory, 'not-a-directory');
     await writeFile(blocked, 'fixture');
     await assert.rejects(logPrompt('failure', settings, prompt, undefined, blocked));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('readable logs indent nested JSON without changing the exact audit prompt', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'rpg-readable-log-'));
+  try {
+    const prompt = JSON.stringify({ mandatory: { characters: [{ name: 'Mira', hp: 10 }] } });
+    const instructions = 'First line\n```\n### Literal prompt heading\nLast line';
+    const file = await logPrompt(
+      'generate',
+      { provider: 'codex', model: 'fixture', effort: null },
+      prompt,
+      instructions,
+      directory
+    );
+    const readable = await readFile(file.replace(/\.json$/, '.md'), 'utf8');
+    assert.ok(
+      readable.includes(`\`\`\`json\n${JSON.stringify(JSON.parse(prompt), null, 2)}\n\`\`\``)
+    );
+    assert.ok(readable.includes(`\`\`\`\`text\n${instructions}\n\`\`\`\``));
+    const exact = JSON.parse(await readFile(file, 'utf8'));
+    assert.equal(exact.prompt, prompt);
+    assert.equal(exact.systemInstructions, instructions);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('readable logs separate appended transport instructions and preserve non-JSON prompts', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'rpg-readable-text-log-'));
+  try {
+    const settings = { provider: 'codex', model: 'fixture', effort: null };
+    const json = JSON.stringify({ action: 'Cross the bridge' });
+    const suffix = 'Use the owned tools.\nReturn the final response.';
+    const file = await logPrompt('mixed', settings, `${json}\n${suffix}`, undefined, directory);
+    const readable = await readFile(file.replace(/\.json$/, '.md'), 'utf8');
+    assert.ok(
+      readable.includes(`\`\`\`json\n${JSON.stringify(JSON.parse(json), null, 2)}\n\`\`\``)
+    );
+    assert.ok(readable.includes(`\`\`\`text\n${suffix}\n\`\`\``));
+    assert.ok(!readable.includes('## System instructions'));
+    for (const prompt of ['{malformed', 'Plain text\nNext line', 'null', '"JSON scalar"']) {
+      const plain = await logPrompt('plain', settings, prompt, undefined, directory);
+      assert.ok((await readFile(plain.replace(/\.json$/, '.md'), 'utf8')).includes(prompt));
+      assert.equal(JSON.parse(await readFile(plain, 'utf8')).prompt, prompt);
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

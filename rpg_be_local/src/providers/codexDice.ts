@@ -31,7 +31,7 @@ import {
   type RollCallback,
 } from './diceProtocol.js';
 import { runProcess } from './processRunner.js';
-import { logPrompt } from './promptLog.js';
+import { logPrompt, traceEvent, safeTraceFailure, type PromptTraceContext } from './promptLog.js';
 
 const rpcSchema = z
   .object({
@@ -61,7 +61,8 @@ export async function generateCodexDice(
   env: NodeJS.ProcessEnv,
   roll: RollCallback,
   signal?: AbortSignal,
-  book?: BookGameplayAdapter
+  book?: BookGameplayAdapter,
+  trace?: PromptTraceContext
 ): Promise<unknown> {
   const narrator = book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR);
   const inspected = await inspectCodex(executable, env);
@@ -110,9 +111,11 @@ export async function generateCodexDice(
       config,
       roll,
       signal,
-      book
+      book,
+      trace
     );
   } catch (error) {
+    await traceEvent(trace, 'failure', safeTraceFailure(error));
     failed = true;
     throw error;
   } finally {
@@ -137,7 +140,8 @@ export async function runCodexDicePhases(
   config: Record<string, unknown>,
   roll: RollCallback,
   signal?: AbortSignal,
-  book?: BookGameplayAdapter
+  book?: BookGameplayAdapter,
+  trace?: PromptTraceContext
 ): Promise<unknown> {
   const args = [...executable.prefix, 'app-server', '--stdio'];
   for (const [key, value] of Object.entries(config))
@@ -165,7 +169,9 @@ export async function runCodexDicePhases(
       book ? 'generateCodexBookGameplay' : 'generateCodexGameplay',
       settings,
       phasePrompt,
-      `${book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR)} Return a transport object with payload_json encoding the application JSON.`
+      `${book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR)} Return a transport object with payload_json encoding the application JSON.`,
+      undefined,
+      trace
     );
     await runProcess(executable.binary, args, '', {
       cwd,
@@ -304,6 +310,12 @@ export async function runCodexDicePhases(
                 'context_overflow',
                 'Codex dice phase exceeded its context budget'
               );
+            await traceEvent(trace, 'usage', {
+              inputTokens: usage.tokenUsage.last.inputTokens,
+              outputTokens: usage.tokenUsage.last.outputTokens,
+              cacheReadTokens: usage.tokenUsage.last.cachedInputTokens,
+              phase,
+            });
             book?.observe?.({
               provider: 'codex',
               phase,
@@ -373,6 +385,8 @@ export async function runCodexDicePhases(
     });
     if (!completed)
       throw new Problem(502, 'provider_protocol', 'Codex closed before completing its dice phase');
-    return nativeGameplaySchema(book, !!book).parse(final);
+    const validated = nativeGameplaySchema(book, !!book).parse(final);
+    await traceEvent(trace, 'final', { response: validated });
+    return validated;
   }
 }

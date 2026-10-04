@@ -12,6 +12,41 @@ const settings = { provider: 'claude', model: 'fixture', effort: null };
 const campaign = { id: 'campaign', revision: 3, turns: [], settings } as unknown as CampaignDetail;
 afterEach(() => vi.unstubAllGlobals());
 describe('turn lifecycle', () => {
+  it('resumes only editing with stable request identity after a lost acknowledgement', async () => {
+    const attempt = {
+      id: 'saved',
+      status: 'failed',
+      editingPending: true,
+      editingResume: { available: true, reason: null },
+    } as Turn;
+    const current = { ...campaign, turns: [attempt] };
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('Lost acknowledgement'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { ...attempt, status: 'running' } }), { status: 202 })
+      );
+    vi.stubGlobal('fetch', fetcher);
+    const { result, unmount } = renderHook(() => useTurn(current, vi.fn(), options));
+    expect(result.current.editingBlocked).toBe(true);
+    await act(async () => {
+      expect(await result.current.send('another action', settings)).toBe(false);
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    await act(async () => {
+      expect(await result.current.resumeEditing(attempt)).toBe(false);
+    });
+    expect(result.current.uncertainEditingResume).toBe(true);
+    const first = JSON.parse(fetcher.mock.calls[0][1].body);
+    await act(async () => {
+      expect(await result.current.resumeEditing()).toBe(true);
+    });
+    expect(fetcher.mock.calls[1][0]).toContain('/saved/resume-editing');
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual(first);
+    expect(Object.keys(first).sort()).toEqual(['requestId', 'revision']);
+    unmount();
+  });
+
   it('preserves the dice retry identity after an uncertain response and blocks a new action', async () => {
     const fetcher = vi
       .fn()

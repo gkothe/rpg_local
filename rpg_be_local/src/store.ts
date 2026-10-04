@@ -196,7 +196,10 @@ export class Store {
               : session.context_digest !== digest
                 ? 'Game context changed; start a new action'
                 : null;
-      turn.diceRetry = { available: reason === null, reason };
+      if (turn.editingPending) {
+        turn.editingResume = { available: reason === null, reason };
+        delete turn.diceRetry;
+      } else turn.diceRetry = { available: reason === null, reason };
     }
     return turns;
   }
@@ -204,7 +207,7 @@ export class Store {
     const turn = await this.turn(campaignId, turnId);
     if (
       !turn.context ||
-      turn.context.promptContractVersion !== KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION ||
+      (turn.context.promptContractVersion ?? 0) < KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION ||
       !turn.diceSessionId
     )
       return turn.context;
@@ -213,7 +216,7 @@ export class Store {
       [turn.diceSessionId, campaignId]
     );
     const root = saved.rows[0];
-    if (!root || root.prompt_contract_version !== KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
+    if (!root || root.prompt_contract_version !== turn.context.promptContractVersion)
       throw new Problem(409, 'dice_context', 'Frozen turn context is missing');
     return {
       ...turn.context,
@@ -224,19 +227,22 @@ export class Store {
       digestVersion: root.digest_version,
       systemPrompt: root.system_prompt,
       frozenKnowledge: root.frozen_knowledge,
+      ...(root.frozen_sources ? { frozenSources: root.frozen_sources } : {}),
       toolDefinitions: root.tool_definitions,
     };
   }
   async saveTurn(t: Turn, client: PoolClient): Promise<void> {
     const document = { ...t };
     delete document.diceRetry;
+    delete document.editingResume;
     if (
       document.context?.diceSessionId &&
-      document.context.promptContractVersion === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+      (document.context.promptContractVersion ?? 0) >= KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
     ) {
       document.context = { ...document.context };
       delete document.context.systemPrompt;
       delete document.context.frozenKnowledge;
+      delete document.context.frozenSources;
     }
     await client.query('UPDATE turns SET document=$2,status=$3 WHERE id=$1', [
       t.id,
@@ -246,7 +252,7 @@ export class Store {
   }
   async assertIdle(id: string, client: PoolClient): Promise<void> {
     const r = await client.query(
-      'SELECT id FROM turns WHERE campaign_id=$1 AND status IN ($2,$3)',
+      "SELECT id FROM turns WHERE campaign_id=$1 AND (status IN ($2,$3) OR document->>'editingPending'='true')",
       [id, TurnStatus.Pending, TurnStatus.Running]
     );
     if (r.rowCount) throw conflict('Wait for or cancel the active turn first');
@@ -275,7 +281,7 @@ export class Store {
   }
   async recover(): Promise<number> {
     const r = await this.pool.query(
-      "UPDATE turns SET status=$1,document=jsonb_set(jsonb_set(document,'{status}',to_jsonb($1::text)),'{error}',to_jsonb($4::text)),owner=NULL,lease_until=NULL WHERE status IN ($2,$3) AND (lease_until IS NULL OR lease_until < now())",
+      "UPDATE turns SET status=$1,document=jsonb_set(jsonb_set(document,'{status}',to_jsonb($1::text)),'{error}',to_jsonb(CASE WHEN document->>'editingPending'='true' THEN 'Narrative editing was interrupted; resume editing to finish without repeating gameplay.' ELSE $4::text END)),owner=NULL,lease_until=NULL WHERE status IN ($2,$3) AND (lease_until IS NULL OR lease_until < now())",
       [
         TurnStatus.Interrupted,
         TurnStatus.Pending,

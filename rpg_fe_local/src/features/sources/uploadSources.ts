@@ -7,7 +7,8 @@ export async function uploadSources(
   language: string,
   uploadBytes: number,
   onProgress: (message: string) => void,
-  isCurrent: () => boolean
+  isCurrent: () => boolean,
+  purpose?: string
 ) {
   let revision = campaign.revision;
   let latestCampaign = campaign;
@@ -22,6 +23,7 @@ export async function uploadSources(
       body.append('file', file);
       body.append('revision', String(revision));
       body.append('language', language);
+      if (purpose) body.append('purpose', purpose);
       const updated = await request<Campaign>(`/campaigns/${campaign.id}/sources/extract`, {
         method: 'POST',
         body,

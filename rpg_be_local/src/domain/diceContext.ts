@@ -1,4 +1,10 @@
-import { KNOWLEDGE_GAMEPLAY_DIGEST_VERSION, LEGACY_GAMEPLAY_DIGEST_VERSION } from './versions.js';
+import { SourcePurpose } from './options.js';
+import { legacyKnowledge } from './knowledge.js';
+import {
+  AUDITED_GAMEPLAY_DIGEST_VERSION,
+  KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
+  LEGACY_GAMEPLAY_DIGEST_VERSION,
+} from './versions.js';
 import { createHash } from 'node:crypto';
 import type { Campaign, Turn } from './types.js';
 import type { RuleContext } from './rules.js';
@@ -12,8 +18,13 @@ export function gameplayDigest(
   digestVersion = LEGACY_GAMEPLAY_DIGEST_VERSION
 ): string {
   return diceDigest({
-    ...(digestVersion === KNOWLEDGE_GAMEPLAY_DIGEST_VERSION
-      ? { knowledge: campaign.knowledge ?? [] }
+    ...(digestVersion >= KNOWLEDGE_GAMEPLAY_DIGEST_VERSION
+      ? {
+          knowledge:
+            digestVersion === KNOWLEDGE_GAMEPLAY_DIGEST_VERSION
+              ? legacyKnowledge(campaign.knowledge ?? [])
+              : (campaign.knowledge ?? []),
+        }
       : {}),
     ...(ruleContext
       ? {
@@ -30,12 +41,18 @@ export function gameplayDigest(
     characters: campaign.characters.map(
       ({ notes: _notes, revision: _revision, ...character }) => character
     ),
-    sources: campaign.sources.map(({ id, version, status, text }) => ({
-      id,
-      version,
-      status,
-      text,
-    })),
+    sources: campaign.sources.map((source) => {
+      const { id, version, status, text } = source;
+      return {
+        id,
+        version,
+        status,
+        text,
+        ...(digestVersion === AUDITED_GAMEPLAY_DIGEST_VERSION
+          ? { purpose: source.purpose ?? SourcePurpose.Reference }
+          : {}),
+      };
+    }),
     pinnedFacts: campaign.pinnedFacts,
     pinnedSourceIds: campaign.pinnedSourceIds,
     pinnedSourceSections: campaign.pinnedSourceSections ?? [],

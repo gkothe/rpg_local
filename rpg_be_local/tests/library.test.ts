@@ -183,6 +183,7 @@ test('replaced source versions stay historical after frozen lookup and archive r
   const input = knowledgeArchive();
   const captured = input.diceSessions[0]!.frozenKnowledge;
   const replacement = textSource('Replacement', 'A new version contains different information.');
+  delete replacement.purpose;
   replacement.id = captured.sourceIds[0]!;
   replacement.version = 3;
   input.campaign.sources = [replacement];
@@ -286,6 +287,7 @@ test('archive remaps only schema references and preserves UUID-looking narrative
   c.description = c.id;
   c.state = { literal: c.id };
   const source = textSource(c.id, c.id);
+  delete source.purpose;
   c.sources = [source];
   const out = remapArchive({
     format: 'local-rpg',
@@ -362,4 +364,67 @@ test('archive rejects unresolved undo field references and snapshot entity colli
   archive.snapshots[0]!.changedFields = [];
   archive.snapshots[0]!.afterCharacters[0]!.id = c.id;
   assert.throws(() => remapArchive(archive), /collides with another entity/);
+});
+
+test('v5 archive retains secret metadata, source purpose and remaps frozen source receipts', () => {
+  const input = knowledgeArchive();
+  const source = textSource('Preparation', 'A public corridor. A secret room.');
+  input.campaign.sources = [{ ...source, purpose: 'campaign' } as typeof source];
+  const data = { ...input, version: 5 } as unknown as import('../src/domain/types.js').Archive;
+  const r = data.campaign.knowledge![0]!;
+  r.visibility = 'gm_only' as import('../src/domain/knowledge.js').KnowledgeVisibility;
+  r.introductionVisibility = r.visibility;
+  r.attributions[0]!.visibility = r.visibility;
+  data.snapshots[0]!.afterKnowledge = [structuredClone(r)];
+  const session = data.diceSessions![0]!;
+  session.promptContractVersion = 5;
+  session.digestVersion = 3;
+  session.frozenKnowledge!.records = [structuredClone(r)];
+  session.frozenSources = {
+    campaignId: data.campaign.id,
+    sources: [
+      {
+        id: source.id,
+        version: source.version,
+        name: source.name,
+        text: source.text,
+        purpose: 'campaign' as import('../src/domain/options.js').SourcePurpose,
+      },
+    ],
+  };
+  const receiptId = randomUUID();
+  data.turns[0]!.sourceReads = [
+    {
+      id: receiptId,
+      campaignId: data.campaign.id,
+      turnId: data.turns[0]!.id,
+      sessionId: session.id,
+      tool: 'campaign_sources_get',
+      transportRequestId: 'get-1',
+      argumentDigest: 'a'.repeat(64),
+      payload: {
+        receiptId,
+        sourceSpan: {
+          id: source.id,
+          version: source.version,
+          name: source.name,
+          text: source.text,
+          start: 0,
+          end: source.text.length,
+        },
+      },
+      createdAt: data.campaign.createdAt,
+    },
+  ];
+  const out = remapArchive(data);
+  assert.equal(out.campaign.knowledge![0]!.visibility, 'gm_only');
+  assert.equal(out.campaign.sources[0]!.purpose, 'campaign');
+  assert.equal(out.diceSessions![0]!.frozenSources!.sources[0]!.id, out.campaign.sources[0]!.id);
+  assert.equal(
+    (out.turns[0]!.sourceReads![0]!.payload.sourceSpan as { id: string }).id,
+    out.campaign.sources[0]!.id
+  );
+  assert.equal(out.turns[0]!.sourceReads![0]!.payload.receiptId, out.turns[0]!.sourceReads![0]!.id);
+  assert.notEqual(out.turns[0]!.sourceReads![0]!.id, receiptId);
+  assert.throws(() => remapArchive({ ...data, version: 4 }));
 });

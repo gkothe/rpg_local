@@ -1,4 +1,5 @@
 import { responseSchemaExample } from './responseSchemaExample';
+import { responseSchemaV5Example } from './responseSchemaV5Example';
 // Authored teaching fixtures, never submitted to a provider or campaign API.
 export const ids = {
   player: '22222222-2222-4222-8222-222222222222',
@@ -46,6 +47,21 @@ export const proposal = {
   ],
   ruleCitations: [],
   knowledgeChanges: [],
+};
+export const proposalV5 = {
+  ...proposal,
+  version: 5 as const,
+  operationExplanations: [
+    {
+      operationIndex: 0,
+      reason:
+        'The broken rail causes a minor injury during the crossing, after the saved roll is interpreted.',
+      basis: 'dice',
+      rollIds: [ids.roll],
+      evidence: [],
+      visibility: 'player',
+    },
+  ],
 };
 export const knowledgeRecord = {
   id: '66666666-6666-4666-8666-666666666666',
@@ -180,5 +196,26 @@ export function examplePayload(pinned: boolean, mentioned: boolean, book: boolea
       },
     ],
     rules: [],
+  };
+}
+
+export function examplePayloadV5(pinned: boolean, mentioned: boolean, book: boolean) {
+  const legacy = examplePayload(pinned, mentioned, book);
+  return {
+    ...legacy,
+    mandatory: {
+      ...legacy.mandatory,
+      campaignSources: [
+        {
+          id: ids.source,
+          version: 1,
+          name: 'River town notes',
+          purpose: 'reference',
+          sectionCount: 1,
+        },
+      ],
+      campaignSourceSeeds: [],
+      schema: responseSchemaV5Example,
+    },
   };
 }

@@ -14,7 +14,7 @@ import {
 } from './diceProtocol.js';
 import { startDiceMcp } from './diceMcp.js';
 import { runProcess } from './processRunner.js';
-import { logPrompt } from './promptLog.js';
+import { logPrompt, traceEvent, safeTraceFailure, type PromptTraceContext } from './promptLog.js';
 import { startGameplayMcp } from './gameplayMcp.js';
 import { gameplayToolDefinitions, type BookGameplayAdapter } from './gameplayTools.js';
 import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
@@ -47,7 +47,8 @@ export async function generateClaudeDice(
   env: NodeJS.ProcessEnv,
   roll: RollCallback,
   signal?: AbortSignal,
-  book?: BookGameplayAdapter
+  book?: BookGameplayAdapter,
+  trace?: PromptTraceContext
 ): Promise<unknown> {
   const names = (book?.definitions ?? gameplayToolDefinitions(!!book)).map(
     (definition) => `mcp__dice__${definition.name}`
@@ -73,7 +74,9 @@ export async function generateClaudeDice(
       book ? 'generateClaudeBookGameplay' : 'generateClaudeGameplay',
       settings,
       prompt,
-      book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR)
+      book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR),
+      undefined,
+      trace
     );
     await runProcess(
       executable.binary,
@@ -188,6 +191,7 @@ export async function generateClaudeDice(
                   'provider_protocol',
                   'Claude did not report a verified dice continuation budget'
                 );
+              await traceEvent(trace, 'usage', { models: usage, modelTurns: event.num_turns });
               const text = event.result.trim();
               book?.observe?.({
                 provider: 'claude',
@@ -219,8 +223,11 @@ export async function generateClaudeDice(
     );
     if (!completed)
       throw new Problem(502, 'provider_protocol', 'Claude closed before completing the dice turn');
-    return nativeGameplaySchema(book, !!book).parse(final);
+    const validated = nativeGameplaySchema(book, !!book).parse(final);
+    await traceEvent(trace, 'final', { response: validated });
+    return validated;
   } catch (error) {
+    await traceEvent(trace, 'failure', safeTraceFailure(error));
     failed = true;
     throw error;
   } finally {

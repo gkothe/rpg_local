@@ -6,7 +6,7 @@ import { fixtureCampaign, fixtureTurn, options } from './fixtures';
 afterEach(() => vi.unstubAllGlobals());
 
 function expandContext() {
-  const details = screen.getByText('Inspect last turn context').closest('details')!;
+  const details = screen.getByText(/Advanced: inspect last turn context/).closest('details')!;
   details.open = true;
   fireEvent(details, new Event('toggle'));
 }

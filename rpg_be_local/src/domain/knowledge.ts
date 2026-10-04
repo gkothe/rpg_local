@@ -5,6 +5,10 @@ import { MAX_ENTITY_NAME_CHARS, MAX_LONG_TEXT_CHARS } from './limits.js';
 import { ruleCitationSchema, type RuleRead, type RuleContext } from './rules.js';
 import { validateRuleCitations } from './ruleCitationValidation.js';
 import type { Character } from './types.js';
+export enum KnowledgeVisibility {
+  Player = 'player',
+  GmOnly = 'gm_only',
+}
 export enum KnowledgeKind {
   Npc = 'npc',
   Place = 'place',
@@ -110,8 +114,67 @@ export const knowledgeRecordSchema = z
     attributions: z.array(knowledgeAttributionSchema),
   })
   .strict();
-export type CampaignKnowledge = z.infer<typeof knowledgeRecordSchema>;
+export const knowledgeAttributionV5Schema = knowledgeAttributionSchema
+  .extend({
+    visibility: z.enum(KnowledgeVisibility).optional(),
+    revealReason: text.optional(),
+  })
+  .strict();
+export const campaignKnowledgeSchema = knowledgeRecordSchema
+  .extend({
+    visibility: z.enum(KnowledgeVisibility).optional(),
+    introductionVisibility: z.enum(KnowledgeVisibility).optional(),
+    attributions: z.array(knowledgeAttributionV5Schema),
+  })
+  .strict();
+export const knowledgeProvenanceV5Schema = knowledgeProvenanceSchema
+  .extend({
+    visibility: z.enum(KnowledgeVisibility),
+  })
+  .strict();
+export const knowledgeChangeV5Schema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('create'), ...mutable, ...knowledgeProvenanceV5Schema.shape }).strict(),
+  z
+    .object({
+      op: z.literal('update'),
+      id: z.uuid(),
+      expectedRevision: z.number().int().positive(),
+      changes: z
+        .object({ ...mutable, visibility: z.enum(KnowledgeVisibility) })
+        .partial()
+        .strict()
+        .refine((v) => Object.keys(v).length > 0),
+      ...knowledgeProvenanceSchema.shape,
+      revealReason: text.optional(),
+    })
+    .strict(),
+]);
+export type KnowledgeChangeV5 = z.infer<typeof knowledgeChangeV5Schema>;
+export type CampaignKnowledge = z.infer<typeof campaignKnowledgeSchema>;
+export function normalizeKnowledge(records: readonly CampaignKnowledge[]): CampaignKnowledge[] {
+  return records.map((r) =>
+    campaignKnowledgeSchema.parse({
+      ...r,
+      visibility: r.visibility ?? KnowledgeVisibility.Player,
+      introductionVisibility: r.introductionVisibility ?? KnowledgeVisibility.Player,
+      attributions: r.attributions.map((a) => ({
+        ...a,
+        visibility: a.visibility ?? KnowledgeVisibility.Player,
+      })),
+    })
+  );
+}
+export function legacyKnowledge(
+  records: readonly CampaignKnowledge[]
+): z.infer<typeof knowledgeRecordSchema>[] {
+  // Retain the original key order for frozen v4 digest compatibility.
+  return records.map(({ visibility: _visibility, introductionVisibility: _intro, ...record }) => ({
+    ...record,
+    attributions: record.attributions.map(({ visibility: _v, revealReason: _r, ...a }) => a),
+  }));
+}
 export type KnowledgeValidation = {
+  rolls?: readonly import('./dice.js').DiceRecord[];
   sourceSpans?: readonly SourceSpan[];
   ruleReads?: readonly RuleRead[];
   ruleContext?: RuleContext;
@@ -164,10 +227,11 @@ export function validateKnowledgeEvidence(
 }
 export function applyKnowledgeChanges(
   original: readonly CampaignKnowledge[],
-  raw: readonly KnowledgeChange[],
+  raw: readonly (KnowledgeChange | KnowledgeChangeV5)[],
   characters: readonly Character[],
   aliases: ReadonlyMap<number, string>,
-  context: KnowledgeValidation
+  context: KnowledgeValidation,
+  version = 4
 ): {
   records: CampaignKnowledge[];
   before: CampaignKnowledge[];
@@ -186,12 +250,36 @@ export function applyKnowledgeChanges(
     return id!;
   };
   for (const value of raw) {
-    const op = knowledgeChangeSchema.parse(value);
+    const op =
+      version === 5 ? knowledgeChangeV5Schema.parse(value) : knowledgeChangeSchema.parse(value);
     validateKnowledgeEvidence(op, context);
     const now = new Date().toISOString();
     const current = op.op === 'update' ? records.find((r) => r.id === op.id) : undefined;
     if (op.op === 'update' && (!current || current.revision !== op.expectedRevision))
       invalid('Knowledge expected prior revision does not match');
+    const modern = version === 5 ? (op as KnowledgeChangeV5) : undefined;
+    const requestedVisibility =
+      modern?.op === 'create'
+        ? modern.visibility
+        : modern?.op === 'update'
+          ? (modern.changes.visibility ?? current?.visibility)
+          : current?.visibility;
+    const revealing =
+      current?.visibility === KnowledgeVisibility.GmOnly &&
+      requestedVisibility === KnowledgeVisibility.Player;
+    if (
+      revealing &&
+      (modern?.op !== 'update' ||
+        !modern.revealReason ||
+        !modern.changes.text ||
+        !modern.changes.title ||
+        !modern.changes.characterIds ||
+        modern.changes.holderId === undefined)
+    )
+      invalid(
+        'Revelation requires a reason and explicit public title, text, character links and holder'
+      );
+    const visibility = requestedVisibility ?? KnowledgeVisibility.Player;
     const fields = op.op === 'create' ? op : op.changes;
     const ids = fields.characterIds?.map(link) ?? current?.characterIds ?? [];
     if (new Set(ids).size !== ids.length) invalid('Knowledge character links must be unique');
@@ -208,11 +296,20 @@ export function applyKnowledgeChanges(
       evidence: structuredClone(op.evidence),
       turnId: context.turnId,
       at: now,
+      ...(version === 5
+        ? {
+            visibility,
+            ...(modern?.op === 'update' && modern.revealReason
+              ? { revealReason: modern.revealReason }
+              : {}),
+          }
+        : {}),
     };
     const record: CampaignKnowledge = current
       ? {
           ...current,
           ...fields,
+          ...(version === 5 ? { visibility } : {}),
           characterIds: ids,
           characterNames: names,
           holderId: holder,
@@ -223,6 +320,7 @@ export function applyKnowledgeChanges(
         }
       : {
           id: randomUUID(),
+          ...(version === 5 ? { visibility, introductionVisibility: visibility } : {}),
           kind: op.op === 'create' ? op.kind : KnowledgeKind.Other,
           title: op.op === 'create' ? op.title : '',
           text: op.op === 'create' ? op.text : '',
@@ -243,13 +341,14 @@ export function applyKnowledgeChanges(
     if (holder)
       record.holderName = characters.find((c) => c.id === holder)?.name ?? record.holderName;
     else delete record.holderName;
-    knowledgeRecordSchema.parse(record);
+    campaignKnowledgeSchema.parse(record);
     if (current) records[records.indexOf(current)] = record;
     else records.push(record);
     touched.add(record.id);
-    changes.push(
-      `${record.title}: knowledge ${current ? 'updated' : 'introduced'} (${record.origin}, ${record.certainty}, ${record.status})`
-    );
+    if (visibility === KnowledgeVisibility.Player)
+      changes.push(
+        `${record.title}: knowledge ${current ? 'updated' : 'introduced'} (${record.origin}, ${record.certainty}, ${record.status})`
+      );
   }
   return {
     records,
@@ -274,5 +373,3 @@ export const KNOWLEDGE_STATUS_OPTIONS = Object.values(KnowledgeStatus).map((id) 
   id,
   label: id[0]!.toUpperCase() + id.slice(1),
 }));
-
-export const campaignKnowledgeSchema = knowledgeRecordSchema;

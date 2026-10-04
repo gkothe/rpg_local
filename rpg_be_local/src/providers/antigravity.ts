@@ -8,7 +8,7 @@ import { runProcess, type RunOptions } from './processRunner.js';
 import type { GameplayMcpEndpoint } from './gameplayMcp.js';
 import type { ModelOption } from './service.js';
 import { MAX_PROVIDER_INPUT_TOKENS } from './options.js';
-import { logPrompt } from './promptLog.js';
+import { logPrompt, type PromptTraceContext } from './promptLog.js';
 // Tested evidence baseline only; version differences produce a warning, never a gate.
 export const ANTIGRAVITY_ISOLATED_VERSION = '1.2.14';
 export const ANTIGRAVITY_INPUT_BYTES = 12_800;
@@ -49,6 +49,7 @@ export type AntigravityLaunchOptions = {
   deadlineMs?: number;
   maxOutputBytes?: number;
   onOutputBytes?: (bytes: number) => void;
+  trace?: PromptTraceContext;
 };
 
 export function parseModelCatalog(output: string) {
@@ -141,7 +142,14 @@ export async function generateAntigravity(
         'The bounded prompt must include its response schema'
       );
     const input = JSON.stringify({ event: 'user', message: { content: prompt } }) + '\n';
-    await logPrompt('generateAntigravity', settings, prompt, options.agentPrompt);
+    await logPrompt(
+      'generateAntigravity',
+      settings,
+      prompt,
+      options.agentPrompt,
+      undefined,
+      options.trace
+    );
     return await runProcess(
       executable.binary,
       [

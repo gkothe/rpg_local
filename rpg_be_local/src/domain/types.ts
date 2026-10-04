@@ -1,10 +1,17 @@
 import type { CampaignKnowledge, SourceSpan } from './knowledge.js';
+import type {
+  FrozenCampaignSources,
+  SourceSelectionDiagnostics,
+  CampaignSourceRead,
+} from './campaignSourceRecall.js';
+import type { OperationExplanation } from './operationExplanations.js';
 import type { FrozenKnowledge } from './knowledgeRecall.js';
 import type {
   CHARACTER_MUTABLE_FIELDS,
   CharacterType as CharacterTypeEnum,
   SourceKind as SourceKindEnum,
   SourceStatus as SourceStatusEnum,
+  SourcePurpose as SourcePurposeEnum,
   TurnStatus as TurnStatusEnum,
   OPERATION_KIND,
 } from './options.js';
@@ -36,6 +43,7 @@ export type Character = {
   revision: number;
 };
 export type Source = {
+  purpose?: `${SourcePurposeEnum}`;
   id: string;
   name: string;
   kind: SourceKind;
@@ -78,6 +86,12 @@ export type Campaign = {
   updatedAt: string;
 };
 export type Turn = {
+  sourceReads?: CampaignSourceRead[];
+  operationExplanations?: OperationExplanation[];
+  editingPending?: boolean;
+  editingResume?: { available: boolean; reason: string | null };
+  traceId?: string;
+  traceWarning?: string;
   ruleContext?: RuleContext;
   ruleReads?: RuleRead[];
   ruleCitations?: RuleCitation[];
@@ -103,7 +117,9 @@ export type Turn = {
 export type ContextManifest = {
   diceSessionId?: string;
   systemPrompt?: string;
-  promptContractVersion?: 4;
+  promptContractVersion?: 4 | 5;
+  frozenSources?: FrozenCampaignSources;
+  sourceSelection?: SourceSelectionDiagnostics;
   frozenKnowledge?: FrozenKnowledge;
   sourceSpans?: SourceSpan[];
   ruleContext?: RuleContext;

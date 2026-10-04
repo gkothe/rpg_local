@@ -8,7 +8,7 @@ import type { ProviderSettings } from '../domain/types.js';
 import type { Executable } from './discovery.js';
 import type { ModelOption } from './service.js';
 import { runProcess } from './processRunner.js';
-import { logPrompt } from './promptLog.js';
+import { logPrompt, traceEvent, safeTraceFailure, type PromptTraceContext } from './promptLog.js';
 import { MODEL_EFFORTS } from './options.js';
 
 // Tested evidence baseline only; version differences produce a warning, never a gate.
@@ -213,7 +213,8 @@ export async function generateCodex(
   _schemaPath: string,
   cwd: string,
   env: NodeJS.ProcessEnv,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  trace?: PromptTraceContext
 ): Promise<string> {
   if (signal?.aborted) throw new Problem(409, 'cancelled', 'Request cancelled');
   const inspected = await inspectCodex(executable, env);
@@ -246,7 +247,7 @@ export async function generateCodex(
     await writeFile(catalogPath, JSON.stringify(inspected.metadata), 'utf8');
     await writeFile(instructionsPath, narrator, 'utf8');
     await writeFile(transportSchemaPath, JSON.stringify(CODEX_TRANSPORT_SCHEMA), 'utf8');
-    await logPrompt('generateCodex', settings, prompt, narrator);
+    await logPrompt('generateCodex', settings, prompt, narrator, undefined, trace);
     return await runProcess(
       executable.binary,
       [
@@ -267,6 +268,7 @@ export async function generateCodex(
       }
     );
   } catch (error) {
+    await traceEvent(trace, 'failure', safeTraceFailure(error));
     failed = true;
     throw error;
   } finally {

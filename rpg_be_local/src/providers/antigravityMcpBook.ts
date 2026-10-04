@@ -15,7 +15,7 @@ import { antigravityDiceEnvironment } from './antigravityDice.js';
 import { startGameplayMcp } from './gameplayMcp.js';
 import { gameplayToolDefinitions, type BookGameplayAdapter } from './gameplayTools.js';
 import { DICE_NARRATOR } from './diceProtocol.js';
-import { logPrompt } from './promptLog.js';
+import { logPrompt, traceEvent, safeTraceFailure, type PromptTraceContext } from './promptLog.js';
 import { responseRetryFeedback } from '../domain/responseRetry.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -42,7 +42,8 @@ export async function generateAntigravityMcpBook(
   sourceEnv: NodeJS.ProcessEnv,
   book: BookGameplayAdapter,
   signal?: AbortSignal,
-  selectedBook = true
+  selectedBook = true,
+  trace?: PromptTraceContext
 ): Promise<unknown> {
   const profile = await mkdtemp(path.join(os.tmpdir(), PROFILE_PREFIX));
   const deadline = Infinity;
@@ -130,6 +131,7 @@ export async function generateAntigravityMcpBook(
       env,
       boundedSignal,
       {
+        trace,
         ownedProfile: profile,
         privateMcp: { name: MCP_SERVER, endpoint },
         agentPrompt:
@@ -194,6 +196,12 @@ export async function generateAntigravityMcpBook(
                     );
                   if (!inferences.has(step.step_index!)) {
                     inferences.set(step.step_index!, input!);
+                    await traceEvent(trace, 'usage', {
+                      inputTokens: input,
+                      outputTokens: step.usage.output_tokens,
+                      cacheReadTokens: step.usage.cache_read_tokens,
+                      phase: inferences.size - 1,
+                    });
                     book.observe?.({
                       provider: 'agy',
                       phase: inferences.size - 1,
@@ -221,7 +229,7 @@ export async function generateAntigravityMcpBook(
                   parameters?.ServerName !== MCP_SERVER ||
                   !tools.includes(parameters?.ToolName ?? '')
                 ) {
-                  await logPrompt('antigravityRejectedTool', settings, JSON.stringify(event));
+                  await traceEvent(trace, 'rejected_tool', { code: 'dice_isolation' });
                   const ownedDirectCall = typeof gateway === 'string' && tools.includes(gateway);
                   const recoverable = gateway === MCP_GATEWAY || ownedDirectCall;
                   throw new Problem(
@@ -312,7 +320,7 @@ export async function generateAntigravityMcpBook(
                 // The CLI emits an empty completion marker after tool continuation.
                 // It grants no capability and carries no tool or response content.
               } else if (step.step_type !== 'user_input') {
-                await logPrompt('antigravityUnexpectedStep', settings, JSON.stringify(event));
+                await traceEvent(trace, 'rejected_step', { code: 'provider_protocol' });
                 throw new Problem(
                   502,
                   'dice_isolation',
@@ -346,7 +354,18 @@ export async function generateAntigravityMcpBook(
                   'Antigravity did not complete one bounded private MCP turn'
                 );
               const text = result.response.trim();
-              await logPrompt('antigravityFinalResponse', settings, text);
+              try {
+                await logPrompt('antigravityFinalResponse', settings, text);
+              } catch {
+                if (trace?.trace) trace.trace.incomplete = true;
+                console.error(
+                  JSON.stringify({
+                    event: 'prompt_trace_incomplete',
+                    executionId: trace?.executionId,
+                  })
+                );
+              }
+              await traceEvent(trace, 'final', { response: text });
               const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(text);
               try {
                 final = responseSchema.parse(JSON.parse(fenced ? fenced[1]! : text));
@@ -376,6 +395,7 @@ export async function generateAntigravityMcpBook(
       );
     check();
   } catch (error) {
+    await traceEvent(trace, 'failure', safeTraceFailure(error));
     generationFailure = error;
   } finally {
     controller.abort();

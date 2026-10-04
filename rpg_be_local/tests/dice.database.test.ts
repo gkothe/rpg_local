@@ -35,18 +35,10 @@ before(async () => {
   const url = new URL(databaseUrl());
   url.searchParams.set('options', `-c search_path=${fixtureSchema}`);
   store = new Store(url.toString());
-  await store.pool.query(
-    await readFile(path.join(appRoot, 'migrationssql/0001_local.sql'), 'utf8')
-  );
-  await store.pool.query(
-    await readFile(path.join(appRoot, 'migrationssql/0004_dice_rolls.sql'), 'utf8')
-  );
-  await store.pool.query(
-    await readFile(path.join(appRoot, 'migrationssql/0005_rule_systems.sql'), 'utf8')
-  );
-  await store.pool.query(
-    await readFile(path.join(appRoot, 'migrationssql/0008_campaign_knowledge.sql'), 'utf8')
-  );
+  for (const file of (await readdir(path.join(appRoot, 'migrationssql')))
+    .filter((name) => name.endsWith('.sql'))
+    .sort())
+    await store.pool.query(await readFile(path.join(appRoot, 'migrationssql', file), 'utf8'));
 });
 after(async () => {
   if (enabled) {
@@ -134,6 +126,9 @@ test(
           throw new Problem(422, 'context_overflow', 'Fixture provider has insufficient capacity');
         return 16000;
       }
+      override async generate() {
+        return { narrative: 'Door opens' };
+      }
       override async generateOwnedGameplay(
         settings: ProviderSettings,
         prompt: string,
@@ -147,7 +142,13 @@ test(
           async (input, id) =>
             tools('roll_dice', input, id) as Promise<import('../src/domain/dice.js').DiceResult>
         );
-        return { ...result, version: 4, ruleCitations: [], knowledgeChanges: [] };
+        return {
+          ...result,
+          version: 5,
+          ruleCitations: [],
+          knowledgeChanges: [],
+          operationExplanations: [],
+        };
       }
       override async generateGameplay(
         _settings: ProviderSettings,

@@ -55,7 +55,7 @@ export const nodes: FlowItem[] = [
     'PostgreSQL stores the turn and its temporary permission to run, called a lease. A campaign lock prevents competing turns.',
     '2.2',
     ['rpg_be_local/src/services/turns.ts'],
-    'A pending turn has a 45-second lease. Every 10 seconds, a heartbeat checks that the attempt still has permission to run. Recovery checks for expired leases every 15 seconds and marks those turns interrupted. You must request a retry to run the AI again.'
+    'Required narrative editing is a separate stage: resume it without replaying gameplay or rolling again. A pending turn has a 45-second lease. Every 10 seconds, a heartbeat checks that the attempt still has permission to run. Recovery checks for expired leases every 15 seconds and marks those turns interrupted. You must request a retry to run the AI again.'
   ),
   item(
     'context',
@@ -67,7 +67,7 @@ export const nodes: FlowItem[] = [
     'The app reads PostgreSQL and copies campaign knowledge into memory for the turn. It leaves private notes out of the gameplay context it builds automatically.',
     '4.3',
     ['rpg_be_local/src/domain/context.ts', 'rpg_be_local/src/domain/knowledgeRecall.ts'],
-    'The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene. It also selects relevant campaign knowledge and searches source text for matching words. Context budgets guide these selections. Summaries can lose detail, so the app keeps the original turns.'
+    'V5 includes a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene. It also selects relevant campaign knowledge and searches source text for matching words. Context budgets guide these selections. Summaries can lose detail, so the app keeps the original turns.'
   ),
   item(
     'model',
@@ -75,7 +75,7 @@ export const nodes: FlowItem[] = [
     "The selected provider's language model writes the story and proposes campaign changes. It can also ask the app to run one of the allowed tools.",
     'While the app waits for the model, before it opens the transaction that saves the gameplay result.',
     'System instructions, the fixed user prompt, the required response format (schema), allowed tool definitions, and any tool results.',
-    "Tool requests followed by a final JSON proposal in the app's v4 response format.",
+    "Tool requests followed by a final JSON proposal in the app's v5 response format.",
     "The app runs locally, but the model response comes from the provider's cloud service.",
     '2.3',
     [
@@ -99,15 +99,15 @@ export const nodes: FlowItem[] = [
       'rpg_be_local/src/services/dice.ts',
       'rpg_be_local/src/services/ruleStore.ts',
     ],
-    'Default mode has three tools. Book mode adds four rulebook tools. The model cannot use these tools to run arbitrary SQL, shell commands, file access, or network requests. Instructions tell it when to call a tool; the app does not automatically verify every decision against the game rules.'
+    'Default mode has five tools, including campaign source search and reading. Book mode adds four rulebook tools. The model cannot use these tools to run arbitrary SQL, shell commands, file access, or network requests. Instructions tell it when to call a tool; the app does not automatically verify every decision against the game rules.'
   ),
   item(
     'validate',
-    'Validate proposal',
-    'The app checks the response before saving any gameplay changes. It verifies the JSON format, references, and the previous values that the model expects to change.',
+    'Validate and edit narration',
+    'The app validates gameplay first, then sends only the final narrative to a separate editor call. No gameplay change reaches the player until both stages succeed.',
     'After the model responds and before the app saves the gameplay result.',
-    'The v4 response: story text, proposed changes, explanations of dice rolls, rule citations, and campaign knowledge changes.',
-    'An accepted set of changes and a before-and-after record (snapshot), or an error explaining what failed.',
+    'The v5 response: story text, proposed changes, explanations of dice rolls, rule citations, and campaign knowledge changes.',
+    'Validated changes, their explanations and a prose-only edited narrative. An editing failure preserves the private candidate for editing-only resume.',
     'A rejected proposal leaves the saved gameplay state unchanged. For some errors, the app can ask the model to fix its response up to twice.',
     '5.1',
     [
@@ -115,7 +115,7 @@ export const nodes: FlowItem[] = [
       'rpg_be_local/src/domain/state.ts',
       'rpg_be_local/src/services/turns.ts',
     ],
-    "The app checks roll IDs, quoted text and its saved receipt, the origin of new facts, and expected previous values. It does not prove that the story's arithmetic or interpretation of a rule is correct. A response may have no citations. Repair attempts keep the tool records and share the same accumulated transcript budget."
+    "The app checks roll IDs, quoted text and its saved receipt, the origin of new facts, and expected previous values. It does not prove that the story's arithmetic or interpretation of a rule is correct. Mechanical mutations need indexed explanations backed by current state, original sources or saved dice. Hidden explanations remain private. The editor receives no campaign JSON, rules or tools and cannot change operations. A response may have no citations. Gameplay repair preserves saved tool records. Editor repair is separate and never replays gameplay."
   ),
   item(
     'commit',
@@ -189,14 +189,14 @@ const edgePairs = [
     'model',
     'validate',
     'Final proposal',
-    'A v4 JSON proposal that the app has not yet saved',
+    'A v5 JSON proposal that the app has not yet saved',
   ],
   [
     'write',
     'validate',
     'commit',
-    'Apply accepted diff',
-    'Checked changes with their expected previous values and snapshot',
+    'Commit edited accepted result',
+    'Checked changes, reasons and snapshot plus required narrative-only edit',
   ],
   [
     'refresh',
@@ -286,13 +286,77 @@ export const steps: FlowStep[] = [
     data: "The model proposes changing Mira's HP from 10 to 9. The app checks the response format, roll IDs, citations, and the origin of new facts. It also checks that Mira's saved HP really is 10.",
   },
   {
+    id: 'edit',
+    label: '8. Edit the final narrative',
+    node: 'validate',
+    data: 'The same selected CLI, model and effort rewrites only the validated final prose. Numbers, names, quoted dialogue and the player decision are checked conservatively. The original candidate stays private if editing fails; Resume narrative editing continues this stage without new dice or a new GM turn.',
+  },
+  {
     id: 'commit',
-    label: '8. Commit and refresh',
+    label: '9. Commit and refresh',
     node: 'commit',
     data: 'The app checks once more that the turn can finish and the campaign version still matches. It saves the changes, snapshot, and story in one transaction, then refreshes the journal.',
   },
 ];
 export const tools: FlowTool[] = [
+  {
+    ...item(
+      'campaign_sources_search',
+      'campaign_sources_search',
+      'Find relevant original campaign document sections.',
+      'During the GM action.',
+      'A query, optional source ID and cursor.',
+      'Original section matches with source version and offsets.',
+      'Searches the frozen confirmed-source snapshot. Every accepted request has a persisted read receipt.',
+      '2.3',
+      [
+        'rpg_be_local/src/domain/campaignSourceRecall.ts',
+        'rpg_be_local/src/services/campaignSourceLookup.ts',
+      ]
+    ),
+    bookOnly: false,
+    args: { query: 'ferryman' },
+    result: {
+      entries: [
+        {
+          sourceId: ids.source,
+          version: 1,
+          sectionIndex: 0,
+          excerpt: 'The ferryman offers a safe crossing.',
+        },
+      ],
+      nextCursor: null,
+      reason: null,
+    },
+  },
+  {
+    ...item(
+      'campaign_sources_get',
+      'campaign_sources_get',
+      'Read the original section behind a campaign source match.',
+      'After finding a section or using the catalog.',
+      'Source ID, version and section index.',
+      'A persisted receipt ID and original UTF-16 source span.',
+      'The frozen text stays fixed through this logical action; it is distinct from published rulebook text.',
+      '2.3',
+      ['rpg_be_local/src/services/campaignSourceLookup.ts']
+    ),
+    bookOnly: false,
+    args: { sourceId: ids.source, version: 1, sectionIndex: 0 },
+    result: {
+      receiptId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      sectionIndex: 0,
+      sourceSpan: {
+        id: ids.source,
+        version: 1,
+        name: 'River town notes',
+        text: 'The ferryman offers a safe crossing.',
+        start: 0,
+        end: 36,
+      },
+    },
+  },
+
   {
     ...item(
       'roll_dice',
@@ -497,12 +561,12 @@ export const branches = [
   },
   {
     label: 'Archives & templates',
-    text: 'Version 4 archives include private notes but leave out original binary files. Import assigns new IDs to structured records. Saved templates may contain notes; creating a campaign from a template clears those notes and leaves out the played knowledge timeline.',
+    text: 'Version 5 archives include private notes and unrevealed GM knowledge but leave out original binary files. Import assigns new IDs to structured records. Saved templates may contain notes; creating a campaign from a template clears those notes and leaves out the played knowledge timeline.',
     section: '2.8',
   },
   {
     label: 'Prompt logs & privacy',
-    text: "The repository's log/ folder keeps prompt files that can contain full prompts and private content. The app does not automatically redact or expire them. A failed log write can stop generation and produces a prompt_log error. Private notes are excluded from automatically built gameplay context, but archives and logs can still contain private information.",
+    text: "The repository's log/ folder keeps prompt files that can contain full prompts and private content. New logs include an exact JSON file and a readable Markdown file with the same name. Open the .md file to read settings, system instructions, and the formatted prompt. The app does not automatically redact or expire them. A failed log write can stop generation and produces a prompt_log error. Private notes are excluded from automatically built gameplay context, but archives and logs can still contain private information.",
     section: '3.3',
   },
 ];

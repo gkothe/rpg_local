@@ -124,6 +124,7 @@ export interface Character {
   revision: number;
 }
 export interface Source {
+  purpose?: string;
   id: string;
   name: string;
   kind: string;
@@ -140,6 +141,17 @@ export interface Turn {
   ruleCitations?: RuleCitation[];
   diceSessionId?: string;
   retryOfTurnId?: string;
+  traceWarning?: string;
+  editingPending?: boolean;
+  editingResume?: { available: boolean; reason: string | null };
+  operationExplanations?: {
+    operationIndex: number;
+    reason: string;
+    basis: string;
+    visibility: string;
+    rollIds: string[];
+    evidence: unknown[];
+  }[];
   diceRetry?: { available: boolean; reason: string | null };
   rolls?: {
     id: string;
@@ -263,6 +275,7 @@ export interface CharacterTemplate {
   createdAt: string;
 }
 export interface Settings {
+  sourcePurposeOptions?: { id: string; label: string; default: boolean }[];
   knowledgeKindOptions?: { id: string; label: string }[];
   knowledgeOriginOptions?: { id: string; label: string }[];
   knowledgeCertaintyOptions?: { id: string; label: string }[];

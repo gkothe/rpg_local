@@ -1,3 +1,4 @@
+import { publicCampaign, publicTurn } from './domain/playerProjection.js';
 import { operationalProblem } from './processingErrors.js';
 import {
   KNOWLEDGE_KIND_OPTIONS,
@@ -60,6 +61,8 @@ import {
   CONTEXT_DEFAULTS,
   CharacterType,
   OCR_LANGUAGE_CODES,
+  SourcePurpose,
+  SOURCE_PURPOSE_OPTIONS,
 } from './domain/options.js';
 const revisionSchema = z.object({ revision: z.number().int().nonnegative() }).strict();
 const page = (req: Request) => ({
@@ -169,6 +172,7 @@ export function createApp(options: AppOptions) {
           turnStatusOptions: TURN_STATUS_OPTIONS,
           characterTypeOptions: CHARACTER_TYPE_OPTIONS,
           sourceKindOptions: SOURCE_KIND_OPTIONS,
+          sourcePurposeOptions: SOURCE_PURPOSE_OPTIONS,
           knowledgeKindOptions: KNOWLEDGE_KIND_OPTIONS,
           knowledgeOriginOptions: KNOWLEDGE_ORIGIN_OPTIONS,
           knowledgeCertaintyOptions: KNOWLEDGE_CERTAINTY_OPTIONS,
@@ -489,7 +493,7 @@ export function createApp(options: AppOptions) {
     '/api/campaigns',
     wrap(async (req, res) => {
       const { limit, offset } = page(req);
-      const items = await store!.list(limit + 1, offset);
+      const items = (await store!.list(limit + 1, offset)).map(publicCampaign);
       res.json({
         data: items.slice(0, limit),
         pagination: { nextCursor: items.length > limit ? String(offset + limit) : null },
@@ -501,7 +505,7 @@ export function createApp(options: AppOptions) {
     wrap(async (req, res) => {
       const input = campaignCreateSchema.parse(req.body);
       const c = await campaigns!.create(input);
-      res.status(201).json({ data: c });
+      res.status(201).json({ data: publicCampaign(c) });
     })
   );
   app.post(
@@ -509,7 +513,9 @@ export function createApp(options: AppOptions) {
     wrap(async (req, res) => {
       const { archive } = z.object({ archive: z.unknown() }).strict().parse(req.body);
       const c = await library!.import(archive);
-      res.status(201).json({ data: { ...c, turns: await store!.turns(c.id) } });
+      res.status(201).json({
+        data: { ...publicCampaign(c), turns: (await store!.turns(c.id)).map(publicTurn) },
+      });
     })
   );
   app.get(
@@ -517,7 +523,9 @@ export function createApp(options: AppOptions) {
     wrap(async (req, res) => {
       const id = param(req, 'id');
       const c = await store!.campaign(id);
-      res.json({ data: { ...c, turns: await store!.recentTurns(id) } });
+      res.json({
+        data: { ...publicCampaign(c), turns: (await store!.recentTurns(id)).map(publicTurn) },
+      });
     })
   );
   app.patch(
@@ -525,7 +533,7 @@ export function createApp(options: AppOptions) {
     wrap(async (req, res) => {
       const { revision, ...patch } = campaignPatchSchema.parse(req.body);
       const c = await campaigns!.patch(param(req, 'id'), revision, patch);
-      res.json({ data: c });
+      res.json({ data: publicCampaign(c) });
     })
   );
   app.delete(
@@ -548,7 +556,7 @@ export function createApp(options: AppOptions) {
         .strict()
         .parse(req.body);
       const c = await campaigns!.notes(param(req, 'id'), input);
-      res.json({ data: c });
+      res.json({ data: publicCampaign(c) });
     })
   );
   app.post(
@@ -558,7 +566,7 @@ export function createApp(options: AppOptions) {
         .extend({ revision: z.number().int().nonnegative() })
         .parse(req.body);
       const c = await campaigns!.addCharacter(param(req, 'id'), revision, input);
-      res.status(201).json({ data: c });
+      res.status(201).json({ data: publicCampaign(c) });
     })
   );
   app.patch(
@@ -572,7 +580,7 @@ export function createApp(options: AppOptions) {
         .parse(req.body);
       const characterId = param(req, 'characterId');
       const c = await campaigns!.patchCharacter(param(req, 'id'), characterId, revision, patch);
-      res.json({ data: c });
+      res.json({ data: publicCampaign(c) });
     })
   );
   app.delete(
@@ -581,22 +589,27 @@ export function createApp(options: AppOptions) {
       const { revision } = revisionSchema.parse(req.body);
       const characterId = param(req, 'characterId');
       const c = await campaigns!.deleteCharacter(param(req, 'id'), characterId, revision);
-      res.json({ data: c });
+      res.json({ data: publicCampaign(c) });
     })
   );
   app.post(
     '/api/campaigns/:id/sources',
     wrap(async (req, res) => {
-      const { revision, name, text } = z
+      const { revision, name, text, purpose } = z
         .object({
           revision: z.number().int().nonnegative(),
           name: z.string().min(1).max(MAX_ENTITY_NAME_CHARS),
           text: z.string().max(MAX_SOURCE_TEXT_CHARS),
+          purpose: z.enum(SourcePurpose).optional(),
         })
         .strict()
         .parse(req.body);
-      const c = await sources!.add(param(req, 'id'), revision, textSource(name, text));
-      res.status(201).json({ data: c });
+      const c = await sources!.add(
+        param(req, 'id'),
+        revision,
+        textSource(name, text, undefined, purpose)
+      );
+      res.status(201).json({ data: publicCampaign(c) });
     })
   );
   app.post(
@@ -606,14 +619,16 @@ export function createApp(options: AppOptions) {
       const id = param(req, 'id');
       const revision = z.coerce.number().int().nonnegative().parse(req.body.revision);
       const language = ocrLanguageSchema.default(OCR_LANGUAGE_CODES[0]).parse(req.body.language);
+      const purpose = z.enum(SourcePurpose).optional().parse(req.body.purpose);
       const source = req.file
-        ? await extractFile(req.file.buffer, req.file.originalname, language)
+        ? await extractFile(req.file.buffer, req.file.originalname, language, purpose)
         : await extractGoogle(
             z.string().max(2000).parse(req.body.url),
-            z.string().max(MAX_ENTITY_NAME_CHARS).optional().parse(req.body.name)
+            z.string().max(MAX_ENTITY_NAME_CHARS).optional().parse(req.body.name),
+            purpose
           );
       const c = await sources!.add(id, revision, source, req.file?.buffer);
-      res.status(201).json({ data: c });
+      res.status(201).json({ data: publicCampaign(c) });
     })
   );
   app.patch(
@@ -625,12 +640,13 @@ export function createApp(options: AppOptions) {
           text: z.string().min(1).max(MAX_SOURCE_TEXT_CHARS),
           name: z.string().min(1).max(MAX_ENTITY_NAME_CHARS).optional(),
           confirmed: z.boolean(),
+          purpose: z.enum(SourcePurpose).optional(),
         })
         .strict()
         .parse(req.body);
       const sourceId = param(req, 'sourceId');
       const c = await sources!.correct(param(req, 'id'), sourceId, input);
-      res.json({ data: c });
+      res.json({ data: publicCampaign(c) });
     })
   );
   app.delete(
@@ -639,7 +655,7 @@ export function createApp(options: AppOptions) {
       const { revision } = revisionSchema.parse(req.body);
       const sourceId = param(req, 'sourceId');
       const c = await sources!.delete(param(req, 'id'), sourceId, revision);
-      res.json({ data: c });
+      res.json({ data: publicCampaign(c) });
     })
   );
   app.get(
@@ -673,7 +689,7 @@ export function createApp(options: AppOptions) {
       const id = param(req, 'id');
       await store!.campaign(id);
       const { limit, offset } = page(req);
-      const items = await store!.turns(id, undefined, limit + 1, offset);
+      const items = (await store!.turns(id, undefined, limit + 1, offset)).map(publicTurn);
       res.json({
         data: items.slice(0, limit),
         pagination: { nextCursor: items.length > limit ? String(offset + limit) : null },
@@ -683,9 +699,9 @@ export function createApp(options: AppOptions) {
   app.post(
     '/api/campaigns/:id/turns',
     wrap(async (req, res) => {
-      res
-        .status(202)
-        .json({ data: await turns!.submit(param(req, 'id'), turnInputSchema.parse(req.body)) });
+      res.status(202).json({
+        data: publicTurn(await turns!.submit(param(req, 'id'), turnInputSchema.parse(req.body))),
+      });
     })
   );
   app.get(
@@ -697,23 +713,35 @@ export function createApp(options: AppOptions) {
   app.get(
     '/api/campaigns/:id/turns/:turnId',
     wrap(async (req, res) => {
-      res.json({ data: await store!.turn(param(req, 'id'), param(req, 'turnId')) });
+      res.json({ data: publicTurn(await store!.turn(param(req, 'id'), param(req, 'turnId'))) });
     })
   );
   app.post(
     '/api/campaigns/:id/turns/:turnId/retry',
     wrap(async (req, res) => {
       const input = turnInputSchema.omit({ action: true }).parse(req.body);
-      res
-        .status(202)
-        .json({ data: await turns!.retry(param(req, 'id'), param(req, 'turnId'), input) });
+      res.status(202).json({
+        data: publicTurn(await turns!.retry(param(req, 'id'), param(req, 'turnId'), input)),
+      });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/turns/:turnId/resume-editing',
+    wrap(async (req, res) => {
+      const input = z
+        .object({ revision: z.number().int().nonnegative(), requestId: z.uuid() })
+        .strict()
+        .parse(req.body);
+      res.status(202).json({
+        data: publicTurn(await turns!.resumeEditing(param(req, 'id'), param(req, 'turnId'), input)),
+      });
     })
   );
   app.post(
     '/api/campaigns/:id/turns/:turnId/cancel',
     wrap(async (req, res) => {
       z.object({}).strict().parse(req.body);
-      res.json({ data: await turns!.cancel(param(req, 'id'), param(req, 'turnId')) });
+      res.json({ data: publicTurn(await turns!.cancel(param(req, 'id'), param(req, 'turnId'))) });
     })
   );
   app.get(
@@ -735,7 +763,7 @@ export function createApp(options: AppOptions) {
         void store!
           .turn(id, turnId)
           .then((t) => {
-            res.write(`event: status\ndata: ${JSON.stringify(t)}\n\n`);
+            res.write(`event: status\ndata: ${JSON.stringify(publicTurn(t))}\n\n`);
             if (TURN_STATUS_OPTIONS.find((x) => x.id === t.status)?.terminal) {
               clearInterval(timer);
               res.end();
@@ -758,7 +786,9 @@ export function createApp(options: AppOptions) {
       const { revision } = revisionSchema.parse(req.body);
       const id = param(req, 'id');
       const c = await turns!.undo(id, revision);
-      res.json({ data: { ...c, turns: await store!.recentTurns(id) } });
+      res.json({
+        data: { ...publicCampaign(c), turns: (await store!.recentTurns(id)).map(publicTurn) },
+      });
     })
   );
   app.post(
@@ -773,7 +803,7 @@ export function createApp(options: AppOptions) {
         })
         .strict()
         .parse(req.body);
-      res.json({ data: await turns!.manualMemory(param(req, 'id'), input) });
+      res.json({ data: publicCampaign(await turns!.manualMemory(param(req, 'id'), input)) });
     })
   );
   app.get(
@@ -829,7 +859,7 @@ export function createApp(options: AppOptions) {
         input.templateId,
         input.revision
       );
-      res.status(201).json({ data: c });
+      res.status(201).json({ data: publicCampaign(c) });
     })
   );
   app.get(
@@ -874,7 +904,9 @@ export function createApp(options: AppOptions) {
         .object({ name: z.string().min(1).max(MAX_ENTITY_NAME_CHARS).optional() })
         .strict()
         .parse(req.body);
-      res.status(201).json({ data: await library!.instantiate(param(req, 'id'), name) });
+      res
+        .status(201)
+        .json({ data: publicCampaign(await library!.instantiate(param(req, 'id'), name)) });
     })
   );
   app.use('/api', (_req, _res, next) =>

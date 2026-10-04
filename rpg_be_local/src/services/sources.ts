@@ -7,7 +7,11 @@ import { runProcess } from '../providers/processRunner.js';
 import { Problem } from '../errors.js';
 import { appRoot, uploadBytes } from '../config.js';
 import type { Source } from '../domain/types.js';
-import { OCR_LANGUAGE_CODES, SourceKind, SourceStatus } from '../domain/options.js';
+import { OCR_LANGUAGE_CODES, SourceKind, SourceStatus, SourcePurpose } from '../domain/options.js';
+import {
+  ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+  AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+} from '../domain/versions.js';
 import { ocrLanguageSchema, transcriptionLanguageSchema } from '../domain/schemas.js';
 import {
   MAX_SOURCE_PAGES,
@@ -23,7 +27,8 @@ const extractionSchema = z.object({
 export function textSource(
   name: string,
   text: string,
-  kind: Source['kind'] = SourceKind.Text
+  kind: Source['kind'] = SourceKind.Text,
+  purpose?: `${SourcePurpose}`
 ): Source {
   if (!text.trim()) throw new Problem(422, 'source_empty', 'Source contains no text');
   if (Buffer.byteLength(text) > MAX_SOURCE_TEXT_BYTES)
@@ -37,12 +42,16 @@ export function textSource(
     version: 1,
     pages: [],
     warnings: [],
+    ...(ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION >= AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+      ? { purpose: purpose ?? SourcePurpose.Reference }
+      : {}),
   };
 }
 export async function extractFile(
   bytes: Buffer,
   name: string,
-  language: (typeof OCR_LANGUAGE_CODES)[number] = OCR_LANGUAGE_CODES[0]
+  language: (typeof OCR_LANGUAGE_CODES)[number] = OCR_LANGUAGE_CODES[0],
+  purpose?: `${SourcePurpose}`
 ): Promise<Source> {
   if (!ocrLanguageSchema.safeParse(language).success)
     throw new Problem(422, 'ocr_language', 'Choose English, Portuguese, or both');
@@ -64,7 +73,7 @@ export async function extractFile(
           'Binary documents are unsupported; export as text or PDF.'
         );
     }
-    return textSource(name, text, SourceKind.File);
+    return textSource(name, text, SourceKind.File, purpose);
   }
   if (extension !== '.pdf' || bytes.subarray(0, 5).toString() !== '%PDF-')
     throw new Problem(415, 'source_format', 'Use UTF-8 text, Markdown or a valid PDF');
@@ -83,7 +92,7 @@ export async function extractFile(
       )
     );
     return {
-      ...textSource(name, result.text, SourceKind.Pdf),
+      ...textSource(name, result.text, SourceKind.Pdf, purpose),
       pages: result.pages,
       warnings: result.warnings,
     };
@@ -127,7 +136,11 @@ export function googleDocumentId(url: string): string {
     );
   return match[1]!;
 }
-export async function extractGoogle(url: string, name = 'Google document'): Promise<Source> {
+export async function extractGoogle(
+  url: string,
+  name = 'Google document',
+  purpose?: `${SourcePurpose}`
+): Promise<Source> {
   const id = googleDocumentId(url);
   const response = await fetch(`https://docs.google.com/document/d/${id}/export?format=txt`, {
     redirect: 'error',
@@ -156,7 +169,7 @@ export async function extractGoogle(url: string, name = 'Google document'): Prom
   } finally {
     await reader.cancel();
   }
-  return textSource(name, Buffer.concat(chunks).toString('utf8'), SourceKind.GoogleDoc);
+  return textSource(name, Buffer.concat(chunks).toString('utf8'), SourceKind.GoogleDoc, purpose);
 }
 export async function audioDiagnostics(): Promise<{
   available: boolean;

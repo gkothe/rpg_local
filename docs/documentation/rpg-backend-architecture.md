@@ -1,6 +1,6 @@
 # Local RPG Backend (`rpg_be_local`) — Comprehensive Technical Architecture & Information Governance Guide
 
-This document describes backend processing, persistence and information handling. Source code remains authoritative; examples are illustrative unless marked exact. Static inspection does not establish live provider, device or database compatibility. Section 6 describes the educational Flow guide.
+This document describes backend processing, persistence and information handling. Source code remains authoritative; examples are illustrative unless marked exact. Static inspection does not establish live provider, device or database compatibility. New actions and exports use version 5; immutable version 1–4 contracts remain supported for historical imports and frozen retries. Sections 2.9, 3.5 and 4.6 describe the current source, privacy, auditing and mandatory narrative-editing additions. Section 6 describes the educational Flow guide.
 
 ---
 
@@ -176,8 +176,8 @@ Statuses below are representative, not exhaustive: shared boundary denials, `422
 | `PATCH`     | `/api/campaigns/:id`                                   | Update campaign metadata, pinned items, settings, instructions     | `200`, `404`, `409`, `422` |
 | `DELETE`    | `/api/campaigns/:id`                                   | Delete idle campaign with `{ revision }`; cascade dependent data   | `200`, `404`               |
 | `PATCH`     | `/api/campaigns/:id/notes`                             | Update human private notes (`{ notes, notesRevision }`)            | `200`, `404`, `409`, `422` |
-| `GET`       | `/api/campaigns/:id/export`                            | Export standalone JSON archive (v4, excludes binaries)             | `200`, `404`, `409`        |
-| `POST`      | `/api/campaigns/import`                                | Import standalone archive (supports v1, v2, v3, v4)                | `201`, `422`               |
+| `GET`       | `/api/campaigns/:id/export`                            | Export standalone JSON archive (v5, excludes binaries)             | `200`, `404`, `409`        |
+| `POST`      | `/api/campaigns/import`                                | Import standalone archive (supports v1–v5)                         | `201`, `422`               |
 | `GET`       | `/api/campaigns/:id/rule-system`                       | Read active rule library metadata or unresolved status             | `200`, `404`               |
 | `PATCH`     | `/api/campaigns/:id/rule-system`                       | Bind or switch campaign rule library partition                     | `200`, `409`, `422`        |
 | `GET`       | `/api/campaigns/:id/rule-system/resolution`            | Inspect candidate diff for unresolved rule reference in archive    | `200`, `404`, `409`        |
@@ -307,7 +307,7 @@ sequenceDiagram
 
 Implementation evidence: [gameplayTools.ts](../../rpg_be_local/src/providers/gameplayTools.ts), [claudeDice.ts](../../rpg_be_local/src/providers/claudeDice.ts), [codexDice.ts](../../rpg_be_local/src/providers/codexDice.ts), [antigravityMcpBook.ts](../../rpg_be_local/src/providers/antigravityMcpBook.ts), [discovery.ts](../../rpg_be_local/src/providers/discovery.ts).
 
-During a game turn, the model has access to application-owned tools exposed through authenticated private loopback HTTP MCP (Claude/Antigravity) or stdio JSON-RPC dynamic tools (Codex). Default v4 gameplay exposes dice and knowledge recall; book mode adds rule lookup tools:
+During a game turn, the model has access to application-owned tools exposed through authenticated private loopback HTTP MCP (Claude/Antigravity) or stdio JSON-RPC dynamic tools (Codex). Current v5 gameplay exposes dice, knowledge recall and campaign source lookup; book mode adds rule lookup tools. Historical v4 sessions retain their original dice/knowledge registry:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -812,23 +812,25 @@ Implementation evidence: [service.ts](../../rpg_be_local/src/providers/service.t
 
 Most subprocess scratch files use `os.tmpdir()` or an isolated Codex home. Prompt logs intentionally persist in repository-root `log/` (git-ignored); private content is not confined exclusively to temporary storage. `finally` cleanup handles normal exits/errors, but abrupt process termination can leave files:
 
-| Directory Pattern                                   | Purpose                                                                    | Lifetime                                                            |
-| :-------------------------------------------------- | :------------------------------------------------------------------------- | :------------------------------------------------------------------ |
-| `os.tmpdir()/rpg-cli-*`                             | CLI output schema and prompt files for basic generation                    | Created before CLI launch; deleted in `finally` block               |
-| `os.tmpdir()/rpg-rules-cli-*`                       | Isolated working directory for book gameplay turns                         | Deleted in `finally` block                                          |
-| `os.tmpdir()/rpg-owned-cli-*`                       | Isolated working directory for owned tool gameplay turns                   | Deleted in `finally` block                                          |
-| `os.tmpdir()/rpg-dice-cli-*`                        | Isolated working directory for dice CLI generation subprocess              | Deleted in `finally` block                                          |
-| `os.tmpdir()/rpg-agy-private-*`                     | Temporary `USERPROFILE` for Antigravity containing isolated agent settings | Deleted with retry logic upon subprocess exit                       |
-| `path.join(codexHome, 'rpg-isolated-*')`            | Temporary isolated `CODEX_HOME` with hardlinked `auth.json` for OpenAI     | Deleted with traversal checks upon subprocess exit                  |
-| `os.tmpdir()/rpg-source-*`                          | Intermediate rendering files for PDFium/Tesseract OCR                      | Deleted immediately after text extraction                           |
-| `os.tmpdir()/rpg-audio-*`                           | Temporary audio snippet for Whisper transcription                          | Deleted immediately after transcription completes                   |
-| `os.tmpdir()/rpg-local-rule-previews/*.json`        | Staged rule import/backup payloads                                         | Removed on consumption/expiry/close or preview-store initialization |
-| `os.tmpdir()/rpg-native-*`, `rpg-ocr-*`             | Python per-page conversion/render files                                    | Python temporary-directory context cleanup                          |
-| `<repository>/log/YYYYMMDD__HHMMSS__<action>*.json` | Git-ignored local audit log of prompts sent to LLMs                        | Persisted locally for developer inspection & debugging              |
+| Directory Pattern                                                      | Purpose                                                                    | Lifetime                                                            |
+| :--------------------------------------------------------------------- | :------------------------------------------------------------------------- | :------------------------------------------------------------------ |
+| `os.tmpdir()/rpg-cli-*`                                                | CLI output schema and prompt files for basic generation                    | Created before CLI launch; deleted in `finally` block               |
+| `os.tmpdir()/rpg-rules-cli-*`                                          | Isolated working directory for book gameplay turns                         | Deleted in `finally` block                                          |
+| `os.tmpdir()/rpg-owned-cli-*`                                          | Isolated working directory for owned tool gameplay turns                   | Deleted in `finally` block                                          |
+| `os.tmpdir()/rpg-dice-cli-*`                                           | Isolated working directory for dice CLI generation subprocess              | Deleted in `finally` block                                          |
+| `os.tmpdir()/rpg-agy-private-*`                                        | Temporary `USERPROFILE` for Antigravity containing isolated agent settings | Deleted with retry logic upon subprocess exit                       |
+| `path.join(codexHome, 'rpg-isolated-*')`                               | Temporary isolated `CODEX_HOME` with hardlinked `auth.json` for OpenAI     | Deleted with traversal checks upon subprocess exit                  |
+| `os.tmpdir()/rpg-source-*`                                             | Intermediate rendering files for PDFium/Tesseract OCR                      | Deleted immediately after text extraction                           |
+| `os.tmpdir()/rpg-audio-*`                                              | Temporary audio snippet for Whisper transcription                          | Deleted immediately after transcription completes                   |
+| `os.tmpdir()/rpg-local-rule-previews/*.json`                           | Staged rule import/backup payloads                                         | Removed on consumption/expiry/close or preview-store initialization |
+| `os.tmpdir()/rpg-native-*`, `rpg-ocr-*`                                | Python per-page conversion/render files                                    | Python temporary-directory context cleanup                          |
+| `<repository>/log/YYYYMMDD__HHMMSS__<action>*.json` and matching `.md` | Exact JSON prompt audit and readable Markdown companion                    | Persisted locally for developer inspection & debugging              |
+
+Each new log has two files with the same base name. The `.json` file preserves the exact prompt and system-instruction strings. Open the `.md` file for separate settings, system instructions and prompt sections: JSON objects and arrays are indented, while prose keeps its line breaks. Compact JSON followed by transport instructions is shown in separate blocks. This formatting changes the log display, not the model input. Existing logs are not converted automatically.
 
 Prompt log creation and writes are awaited. A failure raises `prompt_log` and can prevent generation; logs are not a best-effort side effect. Claude MCP and Codex isolated-home cleanup preserve an existing generation or cancellation error if cleanup also fails, while reporting the cleanup problem. If only cleanup fails, it raises `provider_cleanup`. Abrupt termination can still leave temporary files.
 
-Basic Antigravity generation also writes a uniquely named agent definition under the real user home `.gemini/config/agents/local-rpg-*`, then removes that file/directory. Owned gameplay puts its `local-rpg-gameplay` agent and permissions in the temporary profile instead. Prompt logs are not a complete audit of every transport: basic Claude and Antigravity generation log, gameplay adapters log, and Antigravity additionally logs selected final/rejected events. Basic Codex generation has no corresponding `logPrompt` call.
+Basic Antigravity generation also writes a uniquely named agent definition under the real user home `.gemini/config/agents/local-rpg-*`, then removes that file/directory. Owned gameplay puts its `local-rpg-gameplay` agent and permissions in the temporary profile instead. Prompt logs are not a complete audit of every transport: basic Claude and Antigravity generation log, gameplay adapters log, and Antigravity additionally logs selected final/rejected events. Basic Codex generation also calls `logPrompt` before launching its subprocess.
 
 ---
 
@@ -937,7 +939,7 @@ To avoid flooding the model context, dynamic filtering occurs before prompt comp
 
 Implementation evidence: [context.ts](../../rpg_be_local/src/domain/context.ts), [gameplayResponse.ts](../../rpg_be_local/src/domain/gameplayResponse.ts), [knowledge.ts](../../rpg_be_local/src/domain/knowledge.ts).
 
-In Schema Version 4 (`responseVersion === 4`), natural language directives (`instructions`, `systemInstructions`, `campaignInstructions`) are decoupled from data payloads and formatted into the top-level `systemPrompt` technical envelope (`gameplayInstructionEnvelope`). The JSON user payload contains `mandatory`, `memory`, `history` and `rules`. This schematic example abbreviates the real schema/knowledge record and uses symbolic IDs; it is not a copyable validated response or a complete wire fixture. The actual schema is generated from Zod. `dice`/`interpretations` history fields are omitted when a turn has no rolls; book mode also includes `rulesOverview`.
+In Schema Versions 4 and 5 (the example below illustrates the legacy v4 shape), natural language directives (`instructions`, `systemInstructions`, `campaignInstructions`) are decoupled from data payloads and formatted into the top-level `systemPrompt` technical envelope (`gameplayInstructionEnvelope`). The JSON user payload contains `mandatory`, `memory`, `history` and `rules`. This schematic example abbreviates the real schema/knowledge record and uses symbolic IDs; it is not a copyable validated response or a complete wire fixture. The actual schema is generated from Zod. `dice`/`interpretations` history fields are omitted when a turn has no rolls; book mode also includes `rulesOverview`.
 
 ```json
 {
@@ -1047,7 +1049,7 @@ In Schema Version 4 (`responseVersion === 4`), natural language directives (`ins
 
 Implementation evidence: [gameplayNarrator.ts](../../rpg_be_local/src/domain/gameplayNarrator.ts).
 
-V4 gameplay receives `gameplayInstructionEnvelope` (`domain/gameplayNarrator.ts`) separately from the JSON user payload. The envelope contains the application integration contract, a short narrative-style block adapted from humanizer, then the exact selected-system and campaign instruction columns. The style block applies only to new narration and dialogue; specific GM language/tone/style instructions override its defaults. It does not modify rules, saved facts, dice, citations, exact quotes or JSON fields. It adds no second AI call and does not load external skills at runtime. Frozen retries retain their saved prompt. Earlier contracts embed instruction fields in the payload. The excerpt below describes behavioral instructions; instructions alone do not enforce model semantics:
+V4 and v5 gameplay receive `gameplayInstructionEnvelope` (`domain/gameplayNarrator.ts`) separately from the JSON user payload. The envelope contains the application integration contract, a short narrative-style block adapted from humanizer, then the exact selected-system and campaign instruction columns. The style block applies only to new narration and dialogue; specific GM language/tone/style instructions override its defaults. It does not modify rules, saved facts, dice, citations, exact quotes or JSON fields. This instruction block does not itself add an AI call or load external skills. V5 separately requires a final narrative-only humanizer invocation before delivery (section 2.9). Frozen retries retain their saved prompt. Earlier contracts embed instruction fields in the payload. The excerpt below describes behavioral instructions; instructions alone do not enforce model semantics:
 
 ```text
 Application integration contract:
@@ -1339,7 +1341,7 @@ English journal interface teaches this architecture through four views:
 - **Journey**: clickable actors and directed connections, an eight-step action walkthrough,
   provider/mode differences and failure/repair/retry branches.
 - **Payload**: synthetic pin/NPC/book toggles, complete system/user prompt examples with the
-  v4 response schema, a final proposal and an expected-value acceptance/rejection comparison.
+  v5 response schema, a final proposal with indexed mechanical explanations and an expected-value acceptance/rejection comparison.
 - **Tools**: all seven named owned tools, example arguments/results and selectable request,
   validation, service, return and final-proposal stages. It distinguishes frozen knowledge recall
   from PostgreSQL rule lookup and persisted dice.
@@ -1367,3 +1369,48 @@ cause revision conflict/cancellation and is not automatically repaired.
 ---
 
 _Authored for the Local RPG project architecture records._
+
+### 2.9 Mandatory narrative editing and editor-only recovery
+
+New actions use gameplay response version 5. The native GM tool session finishes with a complete JSON proposal. The backend validates its schema, expected prior values, saved dice, original-text evidence, knowledge changes and indexed mechanical explanations in a short locked transaction. It then saves a **private candidate** without changing campaign state or exposing the original narrative.
+
+A separate ordinary CLI invocation receives the whole final narrative, a fixed editing instruction and the `{narrative}` response schema. It uses the selected CLI, model and effort, with **no tools**, campaign JSON, books or GM secrets. This is one invocation for the narrative, not one invocation per paragraph. Conservative checks preserve numbers, character names present in the original, quoted dialogue and the closing player question. These checks do not prove semantic equivalence.
+
+Gameplay response repair and narrative repair are separate loops. A malformed edit can be corrected automatically; quota, cancellation or unavailable-provider failures stop rather than retry indefinitely. There is no original-narrative fallback. An editing failure keeps the validated candidate private, preserves the saved dice and blocks another action until the player resumes editing or cancels that pending turn.
+
+`POST /api/campaigns/:id/turns/:turnId/resume-editing` accepts `{revision,requestId}` and returns 202 for the **same logical turn**. The persisted request identity handles lost acknowledgements. Resume claims an execution lease, checks the latest campaign/rule context and reuses an already saved completed edit after a crash. It never calls the GM again, resets dice slots or draws replacement faces. Cancellation abandons the candidate and releases the pending-stage block. Changed context requires cancelling the outdated pending candidate; it cannot silently apply an old proposal.
+
+After editing succeeds, ownership, revision, current rules and proposed changes are checked again. The edited narrative, campaign changes and undo snapshot commit atomically. No database transaction is held open while either CLI runs. Historical v1–v4 retries retain their saved contracts and behavior.
+
+Implementation: [turns.ts](../../rpg_be_local/src/services/turns.ts), [narrativeHumanizer.ts](../../rpg_be_local/src/services/narrativeHumanizer.ts), [editor prompt and checks](../../rpg_be_local/src/domain/narrativeHumanizer.ts), [useTurn.ts](../../rpg_fe_local/src/features/play/useTurn.ts).
+
+### 3.5 V5 persistence and correlated local audit
+
+| Location                               | Contents                                                                                                                                                                  |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `campaigns.document.sources[].purpose` | `campaign`, `character` or `reference`; older missing purpose is interpreted as reference in v5.                                                                          |
+| `campaigns.document.knowledge`         | Important continuity facts and NPC introductions, independently classified by origin, certainty, status and `player`/`gm_only` visibility.                                |
+| `dice_sessions.frozen_sources`         | Immutable confirmed-source text, names, versions and purposes for the logical gameplay action.                                                                            |
+| `turn_campaign_source_reads`           | Persisted search/get requests, transport identities, arguments and original source spans returned by the owned tools.                                                     |
+| `narrative_edit_candidates`            | Private validated GM response, original narrative, immutable candidate digest, captured context/settings, owner and optional completed edit.                              |
+| `narrative_edit_requests`              | Same-turn editing resume request identities and their candidate digest.                                                                                                   |
+| `turns.document.operationExplanations` | Indexed reasons and supporting evidence for mechanical changes.                                                                                                           |
+| ignored root `log/`                    | Exact prompt JSON and readable Markdown, plus ordered correlated JSONL events for requests, owned tool results, provider finals, repairs, narrative selection and commit. |
+
+Migrations [0009](../../rpg_be_local/migrationssql/0009_turn_reference_audit.sql) and [0010](../../rpg_be_local/migrationssql/0010_narrative_edits.sql) add these records without rewriting historical migrations. Candidate contents and completed edits are immutable; owner/status changes support recovery. New exports use archive 5 and preserve frozen source snapshots and read provenance while imported sessions remain non-executable. Pending editor candidates are not transported as resumable campaign saves. Templates start a fresh timeline and clear played knowledge.
+
+Logs retain the `YYYYMMdd__HHmmss__{action}` prefix, with collision-safe suffixes. Run, turn, execution and correction metadata distinguish one logical action from individual provider calls. Authentication/environment/native stderr data is excluded from trace payloads. Prompts and full local audit can still contain private campaign information. A mandatory pre-execution logging failure stops the call. Logging failure after a saved draw or commit marks the audit incomplete instead of repeating gameplay or pretending a rollback occurred.
+
+### 4.6 Campaign source reachability, justified changes and private GM continuity
+
+Every v5 prompt includes a catalog of confirmed campaign sources. An opening action means there are no completed non-undone turns; it does not depend on the player typing a particular word. Deterministic first sections seed campaign preparation, while character-purpose documents are excluded from opening preparation seeds. Retrieval targets guide optional selection, not a hard rejection. Selection diagnostics explain no sources, no keyword match or optional omissions; all catalogued documents remain reachable through tools.
+
+`campaign_sources_search` searches the frozen originals by query, with an optional source filter and query-scoped cursor. `campaign_sources_get` reads `{sourceId,version,sectionIndex}` and returns a persisted receipt ID plus `{id,version,name,text,start,end}`. Offsets are UTF-16 indices in the original text. These sources describe campaign/character material; published rulebooks remain the authority for covered mechanics through the existing rule tools. Bootstrap and tool-read spans both support provenance validation.
+
+Every character creation, attributes/inventory change and campaign-state operation needs one explanation by its zero-based `operationIndex`. Name/description-only edits do not require one. The explanation records its reason, basis (`initial_state`, `established_state`, `source`, `rule`, `dice` or `provisional`), current-turn saved roll IDs and exact evidence where applicable. Backend checks cover indexes, expected values and references; they do not implement an RPG-specific rules engine or prove that the GM's arithmetic is correct.
+
+GM-only knowledge stores unrevealed plans and secrets separately from visible NPC sheets and campaign memory. Reveal requires the expected knowledge revision, a reason and explicit disclosed text/links; a remaining secret belongs in another GM-only record. Ordinary campaign/turn HTTP responses and SSE use explicit player projections. Those projections also remove hidden historical attributions and evidence after partial disclosure. Public compaction uses the same nested projection rather than copying the full GM registry into the player summary.
+
+Full exports, ignored local logs and deliberately opened Advanced context diagnostics can reveal spoilers. This is a player presentation boundary, not access control against the owner of the local database. Prompts instruct the model to avoid putting secrets into narration, public state or visible change reasons; the app cannot establish that prose is free of every semantic spoiler.
+
+Implementation: [context.ts](../../rpg_be_local/src/domain/context.ts), [campaignSourceRecall.ts](../../rpg_be_local/src/domain/campaignSourceRecall.ts), [playerProjection.ts](../../rpg_be_local/src/domain/playerProjection.ts), [operationExplanations.ts](../../rpg_be_local/src/domain/operationExplanations.ts).

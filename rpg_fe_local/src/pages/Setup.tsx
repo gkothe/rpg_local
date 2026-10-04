@@ -103,7 +103,8 @@ export default function Setup() {
                 language || options.data.defaults.ocrLanguage,
                 options.data.limits.uploadBytes,
                 setProgress,
-                () => current.current
+                () => current.current,
+                options.data.sourcePurposeOptions?.find((option) => option.id === 'campaign')?.id
               );
               latest = result.campaign;
               created.current = latest;
@@ -117,6 +118,9 @@ export default function Setup() {
                 json('POST', {
                   revision: latest.revision,
                   url: campaignUrl.trim(),
+                  purpose: options.data?.sourcePurposeOptions?.find(
+                    (option) => option.id === 'campaign'
+                  )?.id,
                 })
               );
               created.current = latest;
@@ -131,7 +135,8 @@ export default function Setup() {
                   language || options.data.defaults.ocrLanguage,
                   options.data.limits.uploadBytes,
                   setProgress,
-                  () => current.current
+                  () => current.current,
+                  options.data.sourcePurposeOptions?.find((option) => option.id === 'character')?.id
                 );
                 latest = result.campaign;
                 created.current = latest;
@@ -143,6 +148,9 @@ export default function Setup() {
                   json('POST', {
                     revision: latest.revision,
                     url: characterUrl.trim(),
+                    purpose: options.data.sourcePurposeOptions?.find(
+                      (option) => option.id === 'character'
+                    )?.id,
                   })
                 );
                 created.current = latest;

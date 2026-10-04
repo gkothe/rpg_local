@@ -1,12 +1,23 @@
-import { KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from './versions.js';
-import { gameplayResponseSchema, type GameplayResponse } from './gameplayResponse.js';
+import { validateOperationExplanations } from './operationExplanations.js';
+import {
+  AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+  KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+} from './versions.js';
+import {
+  gameplayResponseSchema,
+  gameplayResponseV5Schema,
+  type GameplayResponseV5,
+  type GameplayResponse,
+} from './gameplayResponse.js';
 import {
   applyKnowledgeChanges,
   KnowledgeKind,
+  KnowledgeVisibility,
   KnowledgeCertainty,
   KnowledgeStatus,
   type KnowledgeValidation,
   type KnowledgeChange,
+  type KnowledgeChangeV5,
 } from './knowledge.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -24,14 +35,24 @@ const canonical = (c: Character) => ({
 });
 export function applyResponse(
   original: Campaign,
-  raw: GMResponse | GameplayResponse,
+  raw: GMResponse | GameplayResponse | GameplayResponseV5,
   turnId: string,
   evidence?: KnowledgeValidation
 ): { campaign: Campaign; snapshot: Snapshot; changes: string[] } {
-  const v4 = raw.version === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
-  const response = v4 ? gameplayResponseSchema.parse(raw) : responseSchema.parse(raw);
+  const v5 = raw.version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
+  const v4 = raw.version === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION || v5;
+  const response = v5
+    ? gameplayResponseV5Schema.parse(raw)
+    : v4
+      ? gameplayResponseSchema.parse(raw)
+      : responseSchema.parse(raw);
+  if (v5)
+    validateOperationExplanations(
+      response as GameplayResponseV5,
+      evidence ?? { campaignId: original.id, turnId }
+    );
   const aliases = new Map<number, string>();
-  const introductions: KnowledgeChange[] = [];
+  const introductions: (KnowledgeChange | KnowledgeChangeV5)[] = [];
   const c = structuredClone(original);
   const touched = new Set<string>();
   const changedFields = new Map<string, Set<'name' | 'attributes' | 'inventory' | 'description'>>();
@@ -46,6 +67,17 @@ export function applyResponse(
       };
       c.characters.push(char);
       aliases.set(operationIndex, char.id);
+      if (
+        v5 &&
+        'introduction' in op &&
+        (op.introduction as { visibility?: KnowledgeVisibility }).visibility ===
+          KnowledgeVisibility.GmOnly
+      )
+        throw new Problem(
+          422,
+          'knowledge_invalid',
+          'Characters are public; keep unrevealed NPCs in GM-only knowledge'
+        );
       if (v4 && char.type === CharacterType.Npc && 'introduction' in op)
         introductions.push({
           op: 'create',
@@ -56,7 +88,7 @@ export function applyResponse(
           status: KnowledgeStatus.Active,
           characterIds: [char.id],
           ...(
-            op as GameplayResponse['operations'][number] & {
+            op as (GameplayResponse | GameplayResponseV5)['operations'][number] & {
               introduction: import('zod').infer<
                 typeof import('./knowledge.js').knowledgeProvenanceSchema
               >;
@@ -115,7 +147,8 @@ export function applyResponse(
         [...introductions, ...(response as GameplayResponse).knowledgeChanges],
         c.characters,
         aliases,
-        evidence ?? { campaignId: c.id, turnId }
+        evidence ?? { campaignId: c.id, turnId },
+        v5 ? AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION : KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
       )
     : undefined;
   if (knowledge) {
@@ -146,7 +179,17 @@ export function applyResponse(
   }
   return {
     campaign: c,
-    changes,
+    changes: v5
+      ? changes.flatMap((change, index) => {
+          const explanation = (response as GameplayResponseV5).operationExplanations.find(
+            (e) => e.operationIndex === index
+          );
+          if (index >= response.operations.length || !explanation) return [change];
+          return explanation.visibility === KnowledgeVisibility.GmOnly
+            ? []
+            : [`${change}: ${explanation.reason}`];
+        })
+      : changes,
     snapshot: {
       turnId,
       ...(knowledge ? { beforeKnowledge: knowledge.before, afterKnowledge: knowledge.after } : {}),

@@ -19,7 +19,9 @@ export default function Journal({
     savingGuard = useRef(false);
   const [feedback, setFeedback] = useState('');
   const [inspectOpen, setInspectOpen] = useState(false);
-  const inspectedTurn = [...campaign.turns].reverse().find((turn) => turn.context);
+  const inspectedTurn = [...campaign.turns]
+    .reverse()
+    .find((turn) => turn.diceSessionId || turn.narrative || turn.context);
   const [notes, setNotes] = useState(campaign.notes),
     [campaignName, setCampaignName] = useState(campaign.name),
     [description, setDescription] = useState(campaign.description),
@@ -232,7 +234,11 @@ export default function Journal({
         </div>
       </details>
       <details className="panel" onToggle={(event) => setInspectOpen(event.currentTarget.open)}>
-        <summary>Inspect last turn context</summary>
+        <summary>Advanced: inspect last turn context (may reveal GM secrets)</summary>
+        <p className="muted">
+          Full saved prompts and source receipts may contain unrevealed GM information. Campaign
+          exports and local logs may also contain spoilers.
+        </p>
         {inspectOpen && inspectedTurn ? (
           <TurnContext
             key={`${campaign.id}:${inspectedTurn.id}`}

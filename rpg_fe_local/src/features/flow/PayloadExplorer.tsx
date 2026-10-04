@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { examplePayload, proposal } from './examples';
-import { systemPromptExamples } from './systemPromptExample';
+import { examplePayloadV5, proposalV5 } from './examples';
+import { systemPromptV5Examples } from './systemPromptExample';
 export default function PayloadExplorer() {
   const [pinned, setPinned] = useState(false),
     [mentioned, setMentioned] = useState(false),
     [book, setBook] = useState(false),
     [stale, setStale] = useState(false);
-  const payload = examplePayload(pinned, mentioned, book);
+  const payload = examplePayloadV5(pinned, mentioned, book);
   return (
     <section className="flow-card" aria-label="Payload explorer">
       <h2>What reaches the model?</h2>
@@ -54,22 +54,22 @@ export default function PayloadExplorer() {
       <details>
         <summary>Read the JSON user prompt and response schema</summary>
         <p>
-          This example keeps the knowledge and retrieved-source lists empty to keep the scene small.
-          In a real turn, the app can add relevant knowledge and source excerpts found by matching
-          words. The switches above change only this example.
+          This example has no initial knowledge or matching source excerpts, but its source catalog
+          remains available to the GM. In a real turn, the app can add relevant knowledge and source
+          excerpts found by matching words. The switches above change only this example.
         </p>
         <pre aria-label="User prompt JSON">{JSON.stringify(payload, null, 2)}</pre>
       </details>
       <details>
         <summary>System instructions and the context record</summary>
         <p>
-          The v4 system prompt combines the selected rule system's instructions, your campaign
+          The v5 system prompt combines the selected rule system's instructions, your campaign
           instructions, and the app's response and tool requirements. Source text and history are
           reference material, not instructions. This complete example is checked against the
           backend's prompt builder.
         </p>
         <pre aria-label="System prompt">
-          {book ? systemPromptExamples.book : systemPromptExamples.default}
+          {book ? systemPromptV5Examples.book : systemPromptV5Examples.default}
         </pre>
         <p>
           The app keeps a ContextManifest to record how it built the context. It contains the
@@ -97,10 +97,11 @@ export default function PayloadExplorer() {
       </details>
       <h2 style={{ marginTop: '1.5rem' }}>What comes back?</h2>
       <p>
-        The model returns a v4 JSON proposal with the story, character and state changes,
-        explanations of dice rolls, rule citations, and knowledge changes. For each new character,
-        it must also state where the introduction came from. The backend checks the proposal before
-        applying it.
+        The model returns a v5 JSON proposal with the story, character and state changes,
+        explanations of dice rolls and mechanical changes, rule citations, and visibility-tagged
+        knowledge changes. For each new character, it must also state where the introduction came
+        from. The backend checks the proposal before applying it. It then edits only the final
+        narrative in a separate no-tools call.
       </p>
       <div className="flow-diff">
         <span>
@@ -124,8 +125,18 @@ export default function PayloadExplorer() {
           : 'Accepted example: Mira has the expected 10 HP. The app records the attributes before and after the change in a snapshot. Her private notes stay unchanged.'}
       </p>
       <details>
-        <summary>Complete v4 final proposal</summary>
-        <pre aria-label="Final proposal JSON">{JSON.stringify(proposal, null, 2)}</pre>
+        <summary>Complete v5 final proposal</summary>
+        <pre aria-label="Final proposal JSON">{JSON.stringify(proposalV5, null, 2)}</pre>
+      </details>
+      <details>
+        <summary>Required narrative editing and private audit</summary>
+        <p>
+          The editor receives the final prose and focused writing guidance, using the same CLI,
+          model and effort. It cannot see or edit operations, dice, rules or hidden knowledge.
+          Editing failure blocks delivery and offers editing-only resume. Correlated private logs
+          distinguish a provider final from a committed result; logs and advanced context inspection
+          may contain spoilers.
+        </p>
       </details>
       <details>
         <summary>What validation does and does not prove</summary>

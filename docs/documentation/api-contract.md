@@ -210,3 +210,33 @@ the reference. Legacy contexts remain unchanged. Cross-campaign IDs return 404.
 If a v4 session cannot be created because database columns are missing, the turn
 fails before a CLI call with an actionable `setup-database.cmd` migration message
 instead of the generic invalid-response message. No game changes are committed.
+
+## Current audited gameplay contract (v5)
+
+New actions use response version 5, archive version 5 and context digest version 3.
+Older response/archive contracts remain strict and retain their original retry semantics.
+Campaign sources have a `purpose`: `campaign`, `character` or `reference`. Legacy sources
+without a purpose become references when preparing a v5 context. Confirmed source text
+is frozen for each action. Opening turns include deterministic source excerpts; the GM
+can retrieve more through `campaign_sources_search` and `campaign_sources_get`.
+Get results retain receipt IDs and exact source spans for evidence validation.
+
+Mechanical operations require `operationExplanations`, indexed by operation position,
+with a reason, basis and optional saved dice/evidence references. Knowledge certainty
+and visibility are separate: `player` records may appear in normal views; `gm_only`
+records and their private attribution are withheld. Ordinary campaign, turn and event
+responses use player projections. Explicit full exports and Advanced context diagnostics
+remain private local backups/inspection and may contain spoilers.
+
+A validated GM response is saved privately before narrative editing. The editor receives
+only the narrative and writing instructions, with no tools or campaign state. Nothing is
+committed or delivered until editing succeeds. Failed editing exposes `editingPending`
+and `editingResume: {available, reason}` on the turn, never the raw narrative.
+`POST /api/campaigns/:id/turns/:turnId/resume-editing` takes `{revision, requestId}`;
+reuse that UUID after an uncertain acknowledgement. Resume edits the same saved candidate,
+without another GM generation or dice roll. Changed campaign/rule context prevents resume.
+Cancel abandons the pending candidate. Pending editing blocks new actions.
+
+Local trace records correlate the action, provider attempts, tool requests/results,
+validation, editor and commit. `traceWarning` reports incomplete post-save logging;
+it does not undo a committed turn or trigger another roll.

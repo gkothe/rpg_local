@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import { locate } from './discovery.js';
@@ -14,7 +15,13 @@ import { Problem } from '../errors.js';
 import type { ProviderSettings } from '../domain/types.js';
 import type { GameplayToolDispatch, BookGameplayLimits } from './gameplayTools.js';
 import { VERIFIED_BOOK_LIMITS } from './gameplayTools.js';
-import { logPrompt } from './promptLog.js';
+import {
+  logPrompt,
+  createPromptTrace,
+  traceEvent,
+  safeTraceFailure,
+  type PromptTraceContext,
+} from './promptLog.js';
 import { BOOK_CONTEXT_BYTES_PER_TOKEN } from '../domain/context.js';
 import { z } from 'zod';
 import { generateCodexDice } from './codexDice.js';
@@ -70,7 +77,8 @@ export interface Generator {
     schema: unknown,
     systemPrompt: string,
     tools: GameplayToolDispatch,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    trace?: PromptTraceContext
   ): Promise<unknown>;
   bookGameplayLimits?(settings: ProviderSettings): Promise<BookGameplayLimits>;
   generateBookGameplay?(
@@ -78,21 +86,24 @@ export interface Generator {
     prompt: string,
     schema: unknown,
     tools: GameplayToolDispatch,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    trace?: PromptTraceContext
   ): Promise<unknown>;
   bookGameplayCapacity?(settings: ProviderSettings, ceiling?: number): Promise<number>;
   generate(
     settings: ProviderSettings,
     prompt: string,
     schema: unknown,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    trace?: PromptTraceContext
   ): Promise<unknown>;
   capacity(settings: ProviderSettings, ceiling?: number): Promise<number>;
   generateGameplay?(
     settings: ProviderSettings,
     prompt: string,
     roll: RollCallback,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    trace?: PromptTraceContext
   ): Promise<unknown>;
   gameplayCapacity?(settings: ProviderSettings, ceiling?: number): Promise<number>;
 }
@@ -127,6 +138,14 @@ export function parseClaudeHelpCatalog(help: string): ModelOption[] {
     efforts,
     inputTokens: CLAUDE_CLI_INPUT_TOKENS,
   }));
+}
+async function invocationTrace(
+  context: PromptTraceContext | undefined,
+  purpose: string
+): Promise<PromptTraceContext> {
+  const invocation = context ?? { executionId: randomUUID(), purpose };
+  if (!invocation.trace) invocation.trace = await createPromptTrace(purpose, invocation);
+  return invocation;
 }
 export class ProviderService implements Generator {
   private cache: Provider[] | null = null;
@@ -395,8 +414,11 @@ export class ProviderService implements Generator {
     settings: ProviderSettings,
     prompt: string,
     schema: unknown,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    trace?: PromptTraceContext
   ): Promise<unknown> {
+    trace = await invocationTrace(trace, 'generate');
+    await traceEvent(trace, 'request', { settings, prompt, schema }, true);
     await this.capacity(settings);
     const executable = this.locations.get(settings.provider)!;
     const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-cli-'));
@@ -431,10 +453,11 @@ export class ProviderService implements Generator {
               schema,
               dir,
               env,
-              signal
+              signal,
+              { trace }
             )
           : settings.provider === PROVIDER_ID.Codex
-            ? await generateCodex(executable, settings, prompt, schemaPath, dir, env, signal)
+            ? await generateCodex(executable, settings, prompt, schemaPath, dir, env, signal, trace)
             : await runProcess(
                 executable.binary,
                 [
@@ -444,7 +467,21 @@ export class ProviderService implements Generator {
                 prompt,
                 { cwd: dir, env, signal, timeoutMs: 0, maxOutputBytes: Infinity }
               );
-      return parseProviderOutput(settings.provider, output);
+      const parsed = parseProviderOutput(settings.provider, output);
+      await traceEvent(trace, 'final', { response: parsed });
+      for (const line of output.trim().split(/\r?\n/)) {
+        try {
+          const event = JSON.parse(line);
+          const usage = event.usage ?? event.result?.usage ?? event.modelUsage;
+          if (usage && typeof usage === 'object') await traceEvent(trace, 'usage', { usage });
+        } catch {
+          // The response parser already validated output; unstructured lines contain no usage metadata.
+        }
+      }
+      return parsed;
+    } catch (error) {
+      await traceEvent(trace, 'failure', safeTraceFailure(error));
+      throw error;
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -503,8 +540,10 @@ export class ProviderService implements Generator {
     prompt: string,
     _schema: unknown,
     tools: GameplayToolDispatch,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    trace?: PromptTraceContext
   ): Promise<unknown> {
+    trace = await invocationTrace(trace, 'book_gameplay');
     await this.bookGameplayCapacity(settings);
     const executable = this.locations.get(settings.provider)!;
     const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-rules-cli-'));
@@ -522,7 +561,8 @@ export class ProviderService implements Generator {
           process.env,
           roll,
           signal,
-          book
+          book,
+          trace
         );
       if (settings.provider === PROVIDER_ID.Claude)
         return await generateClaudeDice(
@@ -533,7 +573,8 @@ export class ProviderService implements Generator {
           process.env,
           roll,
           signal,
-          book
+          book,
+          trace
         );
       const model = (await this.list())
         .find((provider) => provider.id === settings.provider)!
@@ -546,7 +587,8 @@ export class ProviderService implements Generator {
         process.env,
         roll,
         signal,
-        book
+        book,
+        trace
       );
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -558,8 +600,10 @@ export class ProviderService implements Generator {
     schema: unknown,
     systemPrompt: string,
     tools: GameplayToolDispatch,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    trace?: PromptTraceContext
   ): Promise<unknown> {
+    trace = await invocationTrace(trace, 'gameplay');
     const book = tools.definitions?.some((tool) => tool.name === 'rules_get') ?? false;
     if (book) await this.bookGameplayCapacity(settings);
     else await this.gameplayCapacity(settings);
@@ -585,7 +629,8 @@ export class ProviderService implements Generator {
           process.env,
           roll,
           signal,
-          adapter
+          adapter,
+          trace
         );
       if (settings.provider === PROVIDER_ID.Claude)
         return await generateClaudeDice(
@@ -596,7 +641,8 @@ export class ProviderService implements Generator {
           process.env,
           roll,
           signal,
-          adapter
+          adapter,
+          trace
         );
       const model = (await this.list())
         .find((provider) => provider.id === settings.provider)!
@@ -609,7 +655,8 @@ export class ProviderService implements Generator {
         process.env,
         roll,
         signal,
-        adapter
+        adapter,
+        trace
       );
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -619,8 +666,10 @@ export class ProviderService implements Generator {
     settings: ProviderSettings,
     prompt: string,
     roll: RollCallback,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    trace?: PromptTraceContext
   ): Promise<unknown> {
+    trace = await invocationTrace(trace, 'gameplay');
     await this.gameplayCapacity(settings);
     const executable = this.locations.get(settings.provider)!;
     const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-dice-cli-'));
@@ -633,7 +682,9 @@ export class ProviderService implements Generator {
           dir,
           process.env,
           roll,
-          signal
+          signal,
+          undefined,
+          trace
         );
       if (settings.provider === PROVIDER_ID.Claude)
         return await generateClaudeDice(
@@ -643,7 +694,9 @@ export class ProviderService implements Generator {
           dir,
           process.env,
           roll,
-          signal
+          signal,
+          undefined,
+          trace
         );
       if (settings.provider === PROVIDER_ID.Antigravity) {
         const model = (await this.list())
@@ -656,7 +709,9 @@ export class ProviderService implements Generator {
           dir,
           process.env,
           roll,
-          signal
+          signal,
+          undefined,
+          trace
         );
       }
       throw new Problem(503, 'dice_provider', 'Trusted dice is unavailable for this CLI');

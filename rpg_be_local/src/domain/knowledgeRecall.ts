@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { Problem } from '../errors.js';
 import {
   knowledgeRecordSchema,
+  campaignKnowledgeSchema,
+  legacyKnowledge,
   KnowledgeKind,
   KnowledgeStatus,
   type CampaignKnowledge,
@@ -31,11 +33,14 @@ export const frozenKnowledgeSchema = z
       .optional(),
   })
   .strict();
-export type FrozenKnowledge = z.infer<typeof frozenKnowledgeSchema>;
-export function freezeKnowledge(c: Campaign): FrozenKnowledge {
+export const frozenKnowledgeV5Schema = frozenKnowledgeSchema
+  .extend({ records: z.array(campaignKnowledgeSchema) })
+  .strict();
+export type FrozenKnowledge = z.infer<typeof frozenKnowledgeV5Schema>;
+export function freezeKnowledge(c: Campaign, version = 4): FrozenKnowledge {
   return structuredClone({
     campaignId: c.id,
-    records: c.knowledge ?? [],
+    records: version === 5 ? (c.knowledge ?? []) : legacyKnowledge(c.knowledge ?? []),
     characters: c.characters.map(({ id, name }) => ({ id, name })),
     sourceIds: c.sources.map((s) => s.id),
     sourceVersions: c.sources.map(({ id, version }) => ({ id, version })),
@@ -110,7 +115,7 @@ export function selectRelevantKnowledge(
   return selected;
 }
 export function createKnowledgeRecall(raw: FrozenKnowledge) {
-  const frozen = structuredClone(frozenKnowledgeSchema.parse(raw));
+  const frozen = structuredClone(frozenKnowledgeV5Schema.parse(raw));
   const identity = createHash('sha256').update(JSON.stringify(frozen)).digest('hex');
   const annotate = (r: CampaignKnowledge) => ({
     ...r,
@@ -178,7 +183,7 @@ export function createKnowledgeRecall(raw: FrozenKnowledge) {
         );
       const page = records
         .slice(offset, offset + 20)
-        .map(({ id, title, kind, origin, certainty, status, revision }) => ({
+        .map(({ id, title, kind, origin, certainty, status, revision, visibility }) => ({
           id,
           title,
           kind,
@@ -186,6 +191,7 @@ export function createKnowledgeRecall(raw: FrozenKnowledge) {
           certainty,
           status,
           revision,
+          ...(visibility ? { visibility } : {}),
         }));
       return {
         campaignId: frozen.campaignId,

@@ -5,9 +5,19 @@ import { CharacterType, SourceStatus, TurnStatus } from './options.js';
 import { DICE_NARRATOR } from './dice.js';
 import { BOOK_GAMEPLAY_NARRATOR, gameplayInstructionEnvelope } from './gameplayNarrator.js';
 import { selectRelevantKnowledge } from './knowledgeRecall.js';
-import { KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from './versions.js';
+import {
+  KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+  AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+} from './versions.js';
 import { gameplayResponseContract } from './ruleResponse.js';
 import { RuleSystemKind, type RulePrompt } from './rules.js';
+import {
+  freezeCampaignSources,
+  campaignSourceCatalog,
+  bootstrapCampaignSources,
+  type SourceSelectionDiagnostics,
+} from './campaignSourceRecall.js';
+import { publicKnowledge } from './playerProjection.js';
 // UTF-8 bytes is a deliberately pessimistic upper estimate: no raw text is assumed to compress.
 export const estimateTokens = (text: string) => Buffer.byteLength(text, 'utf8');
 // Book prompts include verbose JSON schemas; this soft planning heuristic guides
@@ -60,12 +70,27 @@ export function buildContext(
   rulePrompt?: RulePrompt,
   responseVersion?: number
 ): ContextManifest {
-  const envelope = responseVersion === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
+  const sourceContext = responseVersion === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
+  const envelope = responseVersion === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION || sourceContext;
+  const frozenSources = sourceContext ? freezeCampaignSources(c) : undefined;
+  const bootstrap =
+    sourceContext && !turns.some((t) => t.status === TurnStatus.Completed && !t.undone);
+  const seed = bootstrap ? bootstrapCampaignSources(frozenSources!) : { spans: [], omitted: [] };
+  const sourceSelection: SourceSelectionDiagnostics = {
+    bootstrap,
+    reasons: frozenSources?.sources.length ? [] : ['no_source'],
+    included: [],
+    omitted: seed.omitted,
+  };
+  if (sourceContext && !bootstrap && !rules.length && frozenSources!.sources.length)
+    sourceSelection.reasons.push('no_match');
+  if (seed.omitted.length) sourceSelection.reasons.push('target_omission');
   const systemPrompt = envelope
     ? gameplayInstructionEnvelope(
         rulePrompt?.instructions ?? '',
         c.instructions,
-        rulePrompt?.context.kind === RuleSystemKind.Library
+        rulePrompt?.context.kind === RuleSystemKind.Library,
+        responseVersion
       )
     : undefined;
   let ceiling = Math.min(c.budgets.gameplay, capacity);
@@ -131,6 +156,9 @@ export function buildContext(
     description: c.description,
     pinnedFacts: c.pinnedFacts,
     pinnedRules: pinned,
+    ...(sourceContext
+      ? { campaignSources: campaignSourceCatalog(frozenSources!), campaignSourceSeeds: seed.spans }
+      : {}),
     characters: relevantCharacters.map((char) => ({
       id: char.id,
       name: char.name,
@@ -166,10 +194,23 @@ export function buildContext(
       continue;
     const candidate = { ...payload, rules: [...payload.rules, rule] };
     if (estimate(JSON.stringify(candidate)) <= ceiling) payload.rules.push(rule);
+    else if (sourceContext) {
+      sourceSelection.omitted.push({
+        id: rule.id,
+        version: rule.version,
+        sectionIndex: c.sources.find((s) => s.id === rule.id && s.version === rule.version)
+          ? (sourceSections(
+              c.sources.find((s) => s.id === rule.id && s.version === rule.version)!
+            ).find((s) => s.start === rule.start)?.index ?? 0)
+          : 0,
+      });
+      if (!sourceSelection.reasons.includes('target_omission'))
+        sourceSelection.reasons.push('target_omission');
+    }
   }
   const prompt = JSON.stringify(payload);
   const sourceSpans = envelope
-    ? [...pinned, ...payload.rules].flatMap((span) => {
+    ? [...pinned, ...payload.rules, ...seed.spans].flatMap((span) => {
         const source = c.sources.find((s) => s.id === span.id && s.version === span.version);
         const start = span.start ?? (source?.text === span.text ? 0 : undefined);
         if (start === undefined || !source) return [];
@@ -186,7 +227,25 @@ export function buildContext(
       })
     : undefined;
   return {
-    ...(envelope ? { systemPrompt, promptContractVersion: 4 as const } : {}),
+    ...(envelope
+      ? { systemPrompt, promptContractVersion: sourceContext ? (5 as const) : (4 as const) }
+      : {}),
+    ...(sourceContext
+      ? {
+          frozenSources,
+          sourceSelection: {
+            ...sourceSelection,
+            included: (sourceSpans ?? []).map((span) => ({
+              id: span.id,
+              version: span.version,
+              sectionIndex:
+                sourceSections(
+                  c.sources.find((s) => s.id === span.id && s.version === span.version)!
+                ).find((s) => s.start === span.start)?.index ?? 0,
+            })),
+          },
+        }
+      : {}),
     ...(sourceSpans ? { sourceSpans } : {}),
     ...(rulePrompt ? { ruleContext: rulePrompt.context } : {}),
     revision: c.revision,
@@ -195,7 +254,10 @@ export function buildContext(
     estimator: book
       ? 'UTF-8 bytes / 2 heuristic; native token limit enforced separately'
       : 'conservative UTF-8 byte upper estimate',
-    sourceVersions: [...pinned, ...payload.rules].map(({ id, version }) => ({ id, version })),
+    sourceVersions: [...pinned, ...payload.rules, ...seed.spans].map(({ id, version }) => ({
+      id,
+      version,
+    })),
     historyIds: history.map((x) => x.id),
     memoryId: c.memory?.valid ? c.memory.id : null,
   };
@@ -216,7 +278,7 @@ export function compactionBatch(
       priorMemory: c.memory?.valid ? c.memory.text : '',
       ...(c.knowledge
         ? {
-            knowledge: c.knowledge.filter((record) =>
+            knowledge: publicKnowledge(c.knowledge).filter((record) =>
               items.some(
                 (turn) =>
                   turn.id === record.createdTurnId ||

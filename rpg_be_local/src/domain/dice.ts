@@ -1,4 +1,5 @@
-import { frozenKnowledgeSchema } from './knowledgeRecall.js';
+import { frozenCampaignSourcesSchema } from './campaignSourceRecall.js';
+import { frozenKnowledgeSchema, frozenKnowledgeV5Schema } from './knowledgeRecall.js';
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
 import { DEFAULT_GAMEPLAY_NARRATOR } from './gameplayNarrator.js';
@@ -108,10 +109,11 @@ export const diceSessionSchema = z
     rootTurnId: z.uuid(),
     contextDigest: z.string().regex(/^[a-f0-9]{64}$/),
     frozenPrompt: z.string(),
-    promptContractVersion: z.literal(4).optional(),
-    digestVersion: z.literal(2).optional(),
+    promptContractVersion: z.union([z.literal(4), z.literal(5)]).optional(),
+    digestVersion: z.union([z.literal(2), z.literal(3)]).optional(),
     systemPrompt: z.string().optional(),
-    frozenKnowledge: frozenKnowledgeSchema.optional(),
+    frozenKnowledge: z.union([frozenKnowledgeSchema, frozenKnowledgeV5Schema]).optional(),
+    frozenSources: frozenCampaignSourcesSchema.optional(),
     toolDefinitions: z
       .array(
         z
@@ -129,7 +131,20 @@ export const diceSessionSchema = z
     createdAt: z.iso.datetime(),
     imported: z.boolean(),
   })
-  .strict();
+  .strict()
+  .superRefine((session, ctx) => {
+    if (
+      session.promptContractVersion === 4 &&
+      session.frozenKnowledge &&
+      !frozenKnowledgeSchema.safeParse(session.frozenKnowledge).success
+    )
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Legacy session requires its original knowledge contract',
+      });
+    if (session.promptContractVersion === 4 && session.frozenSources)
+      ctx.addIssue({ code: 'custom', message: 'Legacy session cannot contain v5 sources' });
+  });
 export type DiceSession = z.infer<typeof diceSessionSchema>;
 
 // This internal seam permits deterministic boundary tests; no request selects the RNG.

@@ -1,10 +1,10 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Store } from '../src/store.js';
-import { appRoot } from '../src/config.js';
+import { appRoot, databaseUrl } from '../src/config.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import { TurnService } from '../src/services/turns.js';
 import { LibraryService } from '../src/services/library.js';
@@ -15,21 +15,19 @@ import { SourceLibrary } from '../src/services/sourceLibrary.js';
 import { textSource } from '../src/services/sources.js';
 const enabled = !!process.env.RPG_TEST_DATABASE_URL && process.env.NODE_ENV === 'test';
 let store: Store;
+const fixtureSchema = `basic_fixture_${randomUUID().replaceAll('-', '')}`;
 before(async () => {
   if (!enabled) return;
-  store = new Store();
-  await store.transaction(async (client) => {
-    await client.query(
-      await readFile(path.join(appRoot, 'migrationssql', '0001_local.sql'), 'utf8')
-    );
-    const artifacts = await client.query(
-      "SELECT to_regclass('public.source_artifacts') AS table_name"
-    );
-    if (!artifacts.rows[0].table_name)
-      await client.query(
-        await readFile(path.join(appRoot, 'migrationssql', '0002_source_artifacts.sql'), 'utf8')
-      );
-  });
+  const bootstrap = new Store();
+  await bootstrap.pool.query(`CREATE SCHEMA ${fixtureSchema}`);
+  await bootstrap.close();
+  const url = new URL(databaseUrl());
+  url.searchParams.set('options', `-c search_path=${fixtureSchema}`);
+  store = new Store(url.toString());
+  for (const file of (await readdir(path.join(appRoot, 'migrationssql')))
+    .filter((name) => name.endsWith('.sql'))
+    .sort())
+    await store.pool.query(await readFile(path.join(appRoot, 'migrationssql', file), 'utf8'));
 });
 
 test(
@@ -148,7 +146,10 @@ test(
   }
 );
 after(async () => {
-  if (enabled) await store.close();
+  if (enabled) {
+    await store.pool.query(`DROP SCHEMA ${fixtureSchema} CASCADE`);
+    await store.close();
+  }
 });
 const settings = { provider: 'fixture', model: 'synthetic', effort: null };
 const immediate: Generator = {

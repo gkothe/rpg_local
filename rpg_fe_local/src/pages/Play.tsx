@@ -267,6 +267,7 @@ export default function PlayPage() {
                   (!t.undone &&
                     (isCompleted(t, settings.data) ||
                       t.diceRetry ||
+                      t.editingPending ||
                       ((t.rolls?.length ?? 0) > 0 &&
                         settings.data?.turnStatusOptions.find((option) => option.id === t.status)
                           ?.terminal)))
@@ -317,6 +318,38 @@ export default function PlayPage() {
                       }
                     />
                     {t.error && <ErrorNotice message={t.error} />}
+                    {t.traceWarning && <p className="notice">{t.traceWarning}</p>}
+                    {t.editingPending && (
+                      <div className="notice">
+                        <p>
+                          The GM turn is saved. Finish narrative editing before continuing. Resuming
+                          does not repeat gameplay or dice.
+                        </p>
+                        {t.editingResume?.available ? (
+                          <button
+                            disabled={game.busy || game.uncertainEditingResume}
+                            onClick={() => void game.resumeEditing(t)}
+                          >
+                            Resume narrative editing
+                          </button>
+                        ) : (
+                          <p className="muted">{t.editingResume?.reason}</p>
+                        )}
+                        <button disabled={game.busy} onClick={() => void game.cancel(t)}>
+                          Cancel pending turn
+                        </button>
+                      </div>
+                    )}
+                    {!!t.operationExplanations?.length && (
+                      <details className="changes">
+                        <summary>Reasons for state changes</summary>
+                        <ul>
+                          {t.operationExplanations.map((explanation) => (
+                            <li key={explanation.operationIndex}>{explanation.reason}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
                     {t.diceRetry && (
                       <div className="dice-retry">
                         {t.diceRetry.available ? (
@@ -344,6 +377,7 @@ export default function PlayPage() {
                       </div>
                     )}
                     {showAudit &&
+                      !t.editingPending &&
                       settings.data?.turnStatusOptions.find((o) => o.id === t.status)?.terminal &&
                       !isCompleted(t, settings.data) && (
                         <button
@@ -419,6 +453,17 @@ export default function PlayPage() {
         </div>
         <section className="composer panel">
           <ErrorNotice message={game.error} />
+          {game.uncertainEditingResume && (
+            <div className="notice">
+              <p>
+                The editing request may have reached the server. Check the same request before
+                continuing.
+              </p>
+              <button disabled={game.busy} onClick={() => void game.resumeEditing()}>
+                Check original editing request
+              </button>
+            </div>
+          )}
           {game.uncertainDiceRetry && (
             <div className="notice">
               <p>
@@ -452,7 +497,11 @@ export default function PlayPage() {
             <div className="row">
               <p role="status">
                 <LoaderCircle className="loading-spinner" aria-hidden="true" />{' '}
-                {game.submitting ? 'Submitting action…' : 'GM is preparing your turn…'}
+                {game.submitting
+                  ? 'Submitting action…'
+                  : game.turn?.editingPending
+                    ? 'Editing GM narrative…'
+                    : 'GM is preparing your turn…'}
               </p>
               {!game.submitting && <button onClick={() => void game.cancel()}>Cancel turn</button>}
             </div>
@@ -504,7 +553,7 @@ export default function PlayPage() {
               </div>
               <button
                 className="primary"
-                disabled={game.busy || saving || !draft.trim() || !playable}
+                disabled={game.busy || game.editingBlocked || saving || !draft.trim() || !playable}
               >
                 {game.busy ? (
                   <LoaderCircle size={16} className="loading-spinner" aria-hidden="true" />

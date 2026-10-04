@@ -12,6 +12,11 @@ export function useTurn(
   const [submitting, setSubmitting] = useState(false);
   const [uncertainAction, setUncertainAction] = useState<string | null>(null);
   const [uncertainDiceRetry, setUncertainDiceRetry] = useState(false);
+  const pendingEditingResume = useRef<{
+    turnId: string;
+    input: { revision: number; requestId: string };
+  } | null>(null);
+  const [uncertainEditingResume, setUncertainEditingResume] = useState(false);
   const pendingDiceRetry = useRef<{
     turnId: string;
     input: { revision: number; requestId: string; settings: ProviderSettings };
@@ -40,6 +45,8 @@ export function useTurn(
     pendingRequest.current = null;
     setUncertainAction(null);
     pendingDiceRetry.current = null;
+    pendingEditingResume.current = null;
+    setUncertainEditingResume(false);
     setUncertainDiceRetry(false);
     return invalidate;
   }, [campaignId, invalidate]);
@@ -77,7 +84,11 @@ export function useTurn(
   const send = useCallback(
     async (action: string, settings: ProviderSettings) => {
       if (!campaign || guard.current || (turn && activeTurn(turn, options))) return false;
-      if (pendingDiceRetry.current) {
+      if (
+        pendingDiceRetry.current ||
+        pendingEditingResume.current ||
+        campaign.turns.some((t) => t.editingPending)
+      ) {
         setError('Resolve the uncertain dice retry before sending a new action.');
         return false;
       }
@@ -134,23 +145,65 @@ export function useTurn(
     },
     [campaign, turn, options]
   );
-  async function cancel() {
-    if (!campaign || !turn || guard.current) return;
+  async function cancel(attempt?: Turn) {
+    const target = attempt ?? turn;
+    if (!campaign || !target || guard.current) return;
     guard.current = true;
     const captured = epoch.current;
     try {
       const value = await request<Turn>(
-        `/campaigns/${campaign.id}/turns/${turn.id}/cancel`,
+        `/campaigns/${campaign.id}/turns/${target.id}/cancel`,
         json('POST', {})
       );
       if (alive.current && captured === epoch.current) {
         setTurn(value);
+        pendingEditingResume.current = null;
+        setUncertainEditingResume(false);
         await refresh.current();
       }
     } catch (e) {
       if (alive.current && captured === epoch.current) setError(errorMessage(e));
     } finally {
       guard.current = false;
+    }
+  }
+  async function resumeEditing(attempt?: Turn) {
+    if (!campaign || guard.current || (turn && activeTurn(turn, options))) return false;
+    if (!pendingEditingResume.current) {
+      if (!attempt?.editingResume?.available) return false;
+      pendingEditingResume.current = {
+        turnId: attempt.id,
+        input: { revision: campaign.revision, requestId: crypto.randomUUID() },
+      };
+    }
+    const pending = pendingEditingResume.current;
+    const captured = epoch.current;
+    guard.current = true;
+    setSubmitting(true);
+    try {
+      const result = await request<Turn>(
+        `/campaigns/${campaign.id}/turns/${pending.turnId}/resume-editing`,
+        json('POST', pending.input)
+      );
+      if (!alive.current || captured !== epoch.current) return false;
+      setTurn(result);
+      setError('');
+      pendingEditingResume.current = null;
+      setUncertainEditingResume(false);
+      if (!activeTurn(result, options)) await refresh.current();
+      return true;
+    } catch (error) {
+      if (alive.current && captured === epoch.current) {
+        if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+          pendingEditingResume.current = null;
+          setUncertainEditingResume(false);
+        } else setUncertainEditingResume(true);
+        setError(errorMessage(error));
+      }
+      return false;
+    } finally {
+      guard.current = false;
+      if (alive.current && captured === epoch.current) setSubmitting(false);
     }
   }
   async function retryDice(attempt?: Turn) {
@@ -230,6 +283,9 @@ export function useTurn(
     uncertainAction,
     uncertainDiceRetry,
     retryDice,
+    resumeEditing,
+    uncertainEditingResume,
+    editingBlocked: campaign?.turns.some((t) => t.editingPending) ?? false,
     retryOriginal: () =>
       pendingRequest.current
         ? send(pendingRequest.current.action, pendingRequest.current.settings)

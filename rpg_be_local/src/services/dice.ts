@@ -1,3 +1,4 @@
+import type { FrozenCampaignSources } from '../domain/campaignSourceRecall.js';
 import { type FrozenKnowledge } from '../domain/knowledgeRecall.js';
 import type { GameplayToolDefinition } from '../providers/gameplayTools.js';
 import { randomUUID } from 'node:crypto';
@@ -28,6 +29,9 @@ export class DiceService {
     contextDigest: string,
     characterIds: string[],
     metadata?: {
+      promptContractVersion?: number;
+      digestVersion?: number;
+      frozenSources?: FrozenCampaignSources;
       systemPrompt: string;
       knowledge: FrozenKnowledge;
       toolDefinitions: GameplayToolDefinition[];
@@ -40,7 +44,7 @@ export class DiceService {
       try {
         await client.query(
           metadata
-            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,prompt_contract_version,digest_version,system_prompt,frozen_knowledge,tool_definitions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)'
+            ? `INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,prompt_contract_version,digest_version,system_prompt,frozen_knowledge,tool_definitions${metadata.frozenSources ? ',frozen_sources' : ''}) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12${metadata.frozenSources ? ',$13' : ''})`
             : 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids) VALUES($1,$2,$3,$4,$5,$6,$7)',
           [
             id,
@@ -52,11 +56,12 @@ export class DiceService {
             JSON.stringify(characterIds),
             ...(metadata
               ? [
-                  KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-                  KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
+                  metadata.promptContractVersion ?? KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+                  metadata.digestVersion ?? KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
                   metadata.systemPrompt,
                   metadata.knowledge,
                   JSON.stringify(metadata.toolDefinitions),
+                  ...(metadata.frozenSources ? [metadata.frozenSources] : []),
                 ]
               : []),
           ]

@@ -1,3 +1,10 @@
+import { randomUUID } from 'node:crypto';
+import {
+  createPromptTrace,
+  traceEvent,
+  safeTraceFailure,
+  type PromptTraceContext,
+} from '../providers/promptLog.js';
 import { z } from 'zod';
 import { Problem } from '../errors.js';
 import { draftSchema, draftJsonSchema } from '../domain/schemas.js';
@@ -54,11 +61,30 @@ export async function parseCharacterSource(
   generator: Generator,
   checkCurrent: () => Promise<void>
 ) {
+  const runId = randomUUID();
+  const root: PromptTraceContext = { runId, executionId: runId, purpose: 'character_parse' };
+  root.trace = await createPromptTrace('character_parse', root);
+  async function extract(input: string, schema: unknown, start: number, end: number) {
+    const child: PromptTraceContext = {
+      ...root,
+      executionId: randomUUID(),
+      purpose: 'character_parse_section',
+    };
+    await traceEvent(child, 'request', { start, end, prompt: input, schema }, true);
+    try {
+      const result = await generator.generate(settings, input, schema, undefined, child);
+      await traceEvent(child, 'result', { result });
+      return result;
+    } catch (error) {
+      await traceEvent(child, 'failure', safeTraceFailure(error));
+      throw error;
+    }
+  }
   const capacity = await generator.capacity(settings);
   const full = prompt(text, false);
   if (Buffer.byteLength(full, 'utf8') <= capacity) {
     await checkCurrent();
-    return draftSchema.parse(await generator.generate(settings, full, draftJsonSchema));
+    return draftSchema.parse(await extract(full, draftJsonSchema, 0, text.length));
   }
   let offset = 0;
   let combined: unknown = Object.create(null);
@@ -86,9 +112,7 @@ export async function parseCharacterSource(
     }
     await checkCurrent();
     const section = prompt(text.slice(offset, end), true);
-    const extracted = partialSchema.parse(
-      await generator.generate(settings, section, partialJsonSchema)
-    );
+    const extracted = partialSchema.parse(await extract(section, partialJsonSchema, offset, end));
     combined = merge(combined, extracted);
     offset = end;
   }

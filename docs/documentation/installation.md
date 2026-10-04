@@ -337,3 +337,24 @@ UAC, provider sign-in/MFA and browser microphone permission may require the pers
 | Disk/permission/logging error | Check free space and permissions on the app, runtime and log folders                                       |
 
 Ordinary npm tests do not install external tools or authenticate an account. These instructions were checked against project scripts and publisher documentation. A full install on a clean Windows machine remains a separate verification step.
+
+### Audited turns and narrative editing
+
+Run `setup-database.cmd` after updating the repository. It applies numbered migrations,
+including source audit storage (0009) and private narrative candidates (0010); restart
+an already running backend afterwards. Migrations preserve existing campaigns.
+
+If narrative editing fails because of quota or a CLI error, the GM candidate and dice
+remain saved privately. Use **Resume narrative editing** after fixing the provider.
+No gameplay or dice are repeated. **Cancel pending turn** abandons it instead. If the
+campaign or rule instructions changed, resume is unavailable; cancel before a new action.
+Do not delete database rows to clear a pending edit.
+
+Campaign documents and character sheets have separate purposes. An opening action
+receives initial campaign excerpts and can look up the rest. A source search with no
+match is a normal result, not a failed turn. Uploads are ready immediately; correction
+remains optional. GM-only continuity is hidden in normal views. Advanced context and
+full backups can contain spoilers.
+
+The ignored root `log` directory contains prompts, responses and correlated traces.
+Treat these files as private campaign data and do not add them to a public repository.

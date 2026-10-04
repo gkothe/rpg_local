@@ -26,6 +26,16 @@ export enum SourceKind {
   Pdf = 'pdf',
   GoogleDoc = 'google-doc',
 }
+export enum SourcePurpose {
+  Campaign = 'campaign',
+  Character = 'character',
+  Reference = 'reference',
+}
+export const SOURCE_PURPOSE_OPTIONS = [
+  { id: SourcePurpose.Campaign, label: 'Campaign preparation', default: false },
+  { id: SourcePurpose.Character, label: 'Character sheet', default: false },
+  { id: SourcePurpose.Reference, label: 'Reference material', default: true },
+] as const;
 export const OPERATION_KIND = { Create: 'create', Set: 'set', State: 'state' } as const;
 export const CHARACTER_FIELD = {
   Name: 'name',

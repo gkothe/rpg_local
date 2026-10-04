@@ -1,3 +1,4 @@
+import { type PromptTraceContext } from './promptLog.js';
 import { z } from 'zod';
 import { Problem } from '../errors.js';
 import { DICE_TOOL_NAME } from '../domain/dice.js';
@@ -106,7 +107,8 @@ export async function generateAntigravityDice(
   sourceEnv: NodeJS.ProcessEnv,
   roll: RollCallback,
   signal?: AbortSignal,
-  book?: BookGameplayAdapter
+  book?: BookGameplayAdapter,
+  trace?: PromptTraceContext
 ): Promise<unknown> {
   const protocol = new DiceProtocol(roll);
   return generateAntigravityMcpBook(
@@ -117,6 +119,7 @@ export async function generateAntigravityDice(
     sourceEnv,
     book ?? { dispatch: protocol.call.bind(protocol) },
     signal,
-    !!book
+    !!book,
+    trace
   );
 }

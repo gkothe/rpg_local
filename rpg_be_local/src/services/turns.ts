@@ -1,3 +1,16 @@
+import { sourceSpanSchema } from '../domain/knowledge.js';
+import { CampaignSourceLookup } from './campaignSourceLookup.js';
+import { NarrativeCandidateRepository, humanizeNarrative } from './narrativeHumanizer.js';
+import { createPromptTrace, traceEvent, type PromptTraceContext } from '../providers/promptLog.js';
+import {
+  AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+  AUDITED_GAMEPLAY_DIGEST_VERSION,
+} from '../domain/versions.js';
+import {
+  gameplayResponseV5Schema,
+  gameplayResponseV5JsonSchema,
+  type GameplayResponseV5,
+} from '../domain/gameplayResponse.js';
 import { operationalProblem, reportProcessingFailure } from '../processingErrors.js';
 import {
   KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
@@ -147,7 +160,15 @@ export class TurnService {
         ruleContext: ruleContext(system),
       };
       const history = await this.store.activeTurns(c.id, client);
-      const rules = await this.store.retrieve(c, t.action, client);
+      const rules = await this.store.retrieve(
+        c,
+        this.responseVersion >= AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+          ? [t.action, ...c.characters.map((x) => x.name), history.at(-1)?.narrative ?? ''].join(
+              ' '
+            )
+          : t.action,
+        client
+      );
       let context = null;
       try {
         context = buildContext(
@@ -309,12 +330,13 @@ export class TurnService {
           ...previous.context,
           prompt: saved.frozen_prompt,
           revision: campaign.revision,
-          ...(saved.prompt_contract_version === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+          ...((saved.prompt_contract_version ?? 0) >= KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
             ? {
                 diceSessionId: saved.id,
-                promptContractVersion: 4 as const,
+                promptContractVersion: saved.prompt_contract_version as 4 | 5,
                 systemPrompt: saved.system_prompt,
                 frozenKnowledge: saved.frozen_knowledge,
+                ...(saved.frozen_sources ? { frozenSources: saved.frozen_sources } : {}),
               }
             : {}),
         },
@@ -324,6 +346,8 @@ export class TurnService {
         ruleCitations: [],
       };
       delete turn.diceRetry;
+      delete turn.editingResume;
+      delete turn.editingPending;
       await client.query(
         "INSERT INTO turns(id,campaign_id,request_id,payload_hash,status,document,owner,lease_until) VALUES($1,$2,$3,$4,$5,$6,$7,now()+($8 * interval '1 second'))",
         [turn.id, campaignId, turn.requestId, hash, turn.status, turn, ownerId, TURN_LEASE_SECONDS]
@@ -343,9 +367,68 @@ export class TurnService {
       });
     return next;
   }
+  async resumeEditing(
+    campaignId: string,
+    turnId: string,
+    input: { revision: number; requestId: string }
+  ): Promise<Turn> {
+    let launch = false;
+    const turn = await this.store.transaction(async (client) => {
+      const campaign = await this.store.campaign(campaignId, client, true);
+      const t = await this.store.turn(campaignId, turnId, client, true);
+      const existing = await client.query(
+        'SELECT candidate_digest FROM narrative_edit_requests WHERE turn_id=$1 AND request_id=$2',
+        [turnId, input.requestId]
+      );
+      if (existing.rows.length) return t;
+      if (campaign.revision !== input.revision)
+        throw conflict('Campaign changed; refresh before resuming');
+      if (!t.editingPending || !t.editingResume?.available)
+        throw conflict(t.editingResume?.reason ?? 'No pending narrative editing is available');
+      const repository = new NarrativeCandidateRepository(this.store.pool);
+      const candidate = await repository.load(turnId, client);
+      if (!candidate || candidate.campaignRevision !== campaign.revision)
+        throw conflict('Saved narrative context changed');
+      if (t.ruleContext) await new RuleStore(this.store).guard(t.ruleContext, client);
+      t.status = TurnStatus.Running;
+      t.error = null;
+      t.completedAt = null;
+      const saved = await client.query(
+        'SELECT * FROM dice_sessions WHERE id=$1 AND campaign_id=$2',
+        [t.diceSessionId, campaignId]
+      );
+      const session = saved.rows[0];
+      if (!session || session.prompt_contract_version !== AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
+        throw conflict('Saved editing context is missing');
+      t.context = {
+        ...t.context!,
+        prompt: session.frozen_prompt,
+        revision: session.frozen_revision,
+        systemPrompt: session.system_prompt,
+        frozenKnowledge: session.frozen_knowledge,
+        frozenSources: session.frozen_sources,
+      };
+      await client.query(
+        "UPDATE turns SET owner=$2,lease_until=now()+($3*interval '1 second') WHERE id=$1",
+        [turnId, ownerId, TURN_LEASE_SECONDS]
+      );
+      await this.store.saveTurn(t, client);
+      await repository.claim(turnId, ownerId, candidate.candidateDigest, input.requestId, client);
+      launch = true;
+      return t;
+    });
+    if (launch)
+      queueMicrotask(() => {
+        void this.run(turn).catch((error) =>
+          reportProcessingFailure('narrative_resume', error, turn.id)
+        );
+      });
+    return turn;
+  }
   private async run(t: Turn): Promise<void> {
     const ctl = new AbortController();
     this.aborts.set(t.id, ctl);
+    let trace: PromptTraceContext | undefined;
     let heartbeatBusy = false;
     let heartbeatFailure: unknown;
     const heartbeat = setInterval(() => {
@@ -368,6 +451,20 @@ export class TurnService {
         });
     }, TURN_HEARTBEAT_INTERVAL_MS);
     try {
+      const executionId = randomUUID();
+      trace = {
+        executionId,
+        runId: t.id,
+        campaignId: t.campaignId,
+        turnId: t.id,
+        purpose: t.editingPending ? 'narrative_humanize' : 'gameplay',
+      };
+      trace.trace = await createPromptTrace('gameplay', trace);
+      t.traceId = executionId;
+      if (t.editingPending) {
+        await this.finishEditing(t, ctl.signal, trace);
+        return;
+      }
       await this.store.transaction(async (client) => {
         const { turn } = await this.lockedOwned(t, client);
         turn.status = TurnStatus.Running;
@@ -416,7 +513,17 @@ export class TurnService {
         await this.store.transaction(async (client) => {
           const { campaign, turn } = await this.lockedOwned(t, client);
           const h = await this.store.activeTurns(campaign.id, client);
-          const rules = await this.store.retrieve(campaign, t.action, client);
+          const rules = await this.store.retrieve(
+            campaign,
+            this.responseVersion >= AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+              ? [
+                  t.action,
+                  ...campaign.characters.map((x) => x.name),
+                  h.at(-1)?.narrative ?? '',
+                ].join(' ')
+              : t.action,
+            client
+          );
           turn.context = buildContext(
             campaign,
             h,
@@ -429,20 +536,26 @@ export class TurnService {
             t.ruleContext
               ? this.rulePrompt(await new RuleStore(this.store).guard(t.ruleContext, client))
               : undefined,
-            this.generator.generateOwnedGameplay
-              ? ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
-              : undefined
+            this.generator.generateOwnedGameplay ? this.responseVersion : undefined
           );
           t.context = turn.context;
           await this.store.saveTurn(turn, client);
         });
       await withResponseRetries(
         async (attempt, feedback) => {
+          if (trace) {
+            trace.correctionAttempt = attempt;
+            trace.runId ??= trace.executionId;
+            trace.executionId = randomUUID();
+          }
+          await traceEvent(trace, 'execution_attempt', { attempt });
           const dice = new DiceService(this.store);
-          let diceResponse: DiceResponse | RuleResponse | GameplayResponse | undefined;
-          let response: GMResponse | GameplayResponse;
+          let diceResponse:
+            DiceResponse | RuleResponse | GameplayResponse | GameplayResponseV5 | undefined;
+          let response: GMResponse | GameplayResponse | GameplayResponseV5;
+          const v5 = t.context?.promptContractVersion === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
           const v4 =
-            t.context?.promptContractVersion === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
+            v5 || t.context?.promptContractVersion === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
           let registry: GameplayTools | undefined;
           let frozenDefinitions:
             import('../providers/gameplayTools.js').GameplayToolDefinition[] | undefined;
@@ -454,12 +567,14 @@ export class TurnService {
             const root = saved.rows[0];
             if (
               !root ||
-              root.prompt_contract_version !== KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION ||
-              root.digest_version !== KNOWLEDGE_GAMEPLAY_DIGEST_VERSION
+              root.prompt_contract_version !== t.context!.promptContractVersion ||
+              root.digest_version !==
+                (v5 ? AUDITED_GAMEPLAY_DIGEST_VERSION : KNOWLEDGE_GAMEPLAY_DIGEST_VERSION)
             )
               throw new Problem(409, 'dice_context', 'Frozen v4 session metadata is missing');
             t.context!.systemPrompt = root.system_prompt;
             t.context!.frozenKnowledge = root.frozen_knowledge;
+            if (v5) t.context!.frozenSources = root.frozen_sources;
             frozenDefinitions = root.tool_definitions;
           }
           if (v4) {
@@ -470,12 +585,24 @@ export class TurnService {
                 'Owned knowledge gameplay is not available for this provider'
               );
             c = await this.store.campaign(t.campaignId);
-            const frozen = t.context!.frozenKnowledge ?? freezeKnowledge(c);
+            const frozen =
+              t.context!.frozenKnowledge ??
+              freezeKnowledge(
+                c,
+                v5
+                  ? AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+                  : KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+              );
             const rules = new RuleStore(this.store);
             const lookup = new RuleLookup();
+            const sourceLookup = new CampaignSourceLookup(this.store);
             registry = new GameplayTools({
               book: t.ruleContext?.kind === RuleSystemKind.Library,
               knowledge: frozen,
+              readCampaignSource: v5
+                ? (tool, input, requestId) =>
+                    sourceLookup.read(t, tool, input, `repair:${attempt}:${requestId}`, ctl.signal)
+                : undefined,
               signal: ctl.signal,
               roll: (input) => dice.roll(t.diceSessionId!, t, input),
               read: async (tool, input, requestId) =>
@@ -513,13 +640,29 @@ export class TurnService {
                   c,
                   history,
                   t.ruleContext,
-                  v4 ? KNOWLEDGE_GAMEPLAY_DIGEST_VERSION : LEGACY_GAMEPLAY_DIGEST_VERSION
+                  v5
+                    ? AUDITED_GAMEPLAY_DIGEST_VERSION
+                    : v4
+                      ? KNOWLEDGE_GAMEPLAY_DIGEST_VERSION
+                      : LEGACY_GAMEPLAY_DIGEST_VERSION
                 ),
                 characters.map((character) => character.id),
                 v4
                   ? {
+                      promptContractVersion: t.context!.promptContractVersion,
+                      digestVersion: v5
+                        ? AUDITED_GAMEPLAY_DIGEST_VERSION
+                        : KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
+                      frozenSources: t.context!.frozenSources,
                       systemPrompt: t.context!.systemPrompt!,
-                      knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c),
+                      knowledge:
+                        t.context!.frozenKnowledge ??
+                        freezeKnowledge(
+                          c,
+                          v5
+                            ? AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+                            : KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+                        ),
                       toolDefinitions: registry!.definitions,
                     }
                   : undefined
@@ -561,14 +704,15 @@ export class TurnService {
                   JSON.stringify(specifications)
                 : '');
             if (v4)
-              diceResponse = gameplayResponseSchema.parse(
+              diceResponse = (v5 ? gameplayResponseV5Schema : gameplayResponseSchema).parse(
                 await this.generator.generateOwnedGameplay!(
                   t.settings,
                   prompt,
-                  gameplayResponseJsonSchema,
+                  v5 ? gameplayResponseV5JsonSchema : gameplayResponseJsonSchema,
                   t.context!.systemPrompt!,
-                  registry!.call,
-                  ctl.signal
+                  this.tracedTools(registry!, trace),
+                  ctl.signal,
+                  trace
                 )
               );
             else if (t.ruleContext?.kind === RuleSystemKind.Library) {
@@ -615,7 +759,7 @@ export class TurnService {
                 )
               );
             response = v4
-              ? (diceResponse as GameplayResponse)
+              ? (diceResponse as GameplayResponse | GameplayResponseV5)
               : {
                   version: GM_RESPONSE_SCHEMA_VERSION,
                   narrative: diceResponse.narrative,
@@ -631,96 +775,13 @@ export class TurnService {
               )
             );
           }
-          await this.store.transaction(async (client) => {
-            const { campaign, turn } = await this.lockedOwned(t, client);
-            if (diceResponse && t.diceSessionId) {
-              const records = await dice.records(t.diceSessionId, client);
-              const attempt = await client.query(
-                'SELECT next_slot FROM dice_attempts WHERE turn_id=$1',
-                [t.id]
-              );
-              if (attempt.rows[0]?.next_slot !== records.length)
-                throw new Problem(
-                  409,
-                  'dice_replay',
-                  'Replay every original roll before completing the retry'
-                );
-              validateRollInterpretations(
-                diceResponse,
-                records.map((record) => record.id)
-              );
-              turn.rollInterpretations = diceResponse.rollInterpretations;
-              turn.rolls = records;
-              if (
-                'ruleCitations' in diceResponse &&
-                t.ruleContext?.kind === RuleSystemKind.Library
-              ) {
-                const rows = await client.query(
-                  'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
-                  [t.id]
-                );
-                const reads = rows.rows.map((row) => ({
-                  id: row.id,
-                  campaignId: row.campaign_id,
-                  turnId: row.turn_id,
-                  context: row.captured_context,
-                  tool: row.tool_name,
-                  transportRequestId: row.transport_request_id,
-                  argumentDigest: row.argument_digest,
-                  resultHash: row.result_hash,
-                  payload: row.payload,
-                  createdAt: new Date(row.created_at).toISOString(),
-                }));
-                validateRuleCitations(diceResponse, reads, t.campaignId, t.id, t.ruleContext);
-                turn.ruleCitations = diceResponse.ruleCitations;
-              }
-            }
-            if (
-              v4 &&
-              t.ruleContext?.kind !== RuleSystemKind.Library &&
-              (diceResponse as GameplayResponse).ruleCitations.length
-            )
-              throw new Problem(
-                502,
-                'rules_citations_invalid',
-                'No original-book citations are available without a library'
-              );
-            const knowledgeReads = v4
-              ? await client.query(
-                  'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
-                  [t.id]
-                )
-              : undefined;
-            const applied = applyResponse(campaign, response, t.id, {
-              campaignId: campaign.id,
-              turnId: t.id,
-              sourceSpans: t.context?.sourceSpans,
-              ruleContext: t.ruleContext,
-              ruleReads: knowledgeReads?.rows.map((row) => ({
-                id: row.id,
-                campaignId: row.campaign_id,
-                turnId: row.turn_id,
-                context: row.captured_context,
-                tool: row.tool_name,
-                transportRequestId: row.transport_request_id,
-                argumentDigest: row.argument_digest,
-                resultHash: row.result_hash,
-                payload: row.payload,
-                createdAt: new Date(row.created_at).toISOString(),
-              })),
-            });
-            applied.campaign.revision++;
-            turn.narrative = response.narrative;
-            turn.changes = applied.changes;
-            turn.status = TurnStatus.Completed;
-            turn.completedAt = new Date().toISOString();
-            await client.query(
-              'INSERT INTO snapshots(turn_id,campaign_id,document) VALUES($1,$2,$3)',
-              [t.id, campaign.id, applied.snapshot]
-            );
-            await this.store.save(applied.campaign, client);
-            await this.store.saveTurn(turn, client);
-          });
+          try {
+            await this.persistResponse(t, response, diceResponse, v5);
+            await traceEvent(trace, 'validated_candidate', { response, editingPending: v5 });
+          } catch (error) {
+            await traceEvent(trace, 'candidate_rejected', { code: operationalProblem(error).code });
+            throw error;
+          }
         },
         async () => {
           await this.store.transaction(async (client) => {
@@ -734,7 +795,13 @@ export class TurnService {
         },
         ctl.signal
       );
+      if (t.context?.promptContractVersion === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
+        await this.finishEditing(t, ctl.signal, trace);
     } catch (e) {
+      await traceEvent(trace, 'execution_failed', {
+        code: operationalProblem(heartbeatFailure ?? e).code,
+        editingPending: t.editingPending ?? false,
+      });
       reportProcessingFailure('turn_generation', heartbeatFailure ?? e, t.id);
       await this.store
         .transaction(async (client) => {
@@ -752,14 +819,212 @@ export class TurnService {
       this.aborts.delete(t.id);
     }
   }
+  private tracedTools(registry: GameplayTools, trace?: PromptTraceContext) {
+    const call: typeof registry.call = async (name, input, requestId) => {
+      await traceEvent(trace, 'owned_tool_request', { name, input, requestId });
+      try {
+        const result = await registry.call(name, input, requestId);
+        await traceEvent(trace, 'owned_tool_result', { name, requestId, result });
+        return result;
+      } catch (error) {
+        await traceEvent(trace, 'owned_tool_rejected', {
+          name,
+          requestId,
+          code: operationalProblem(error).code,
+        });
+        throw error;
+      }
+    };
+    call.definitions = registry.call.definitions;
+    return call;
+  }
+  private async finishEditing(
+    t: Turn,
+    signal: AbortSignal,
+    trace?: PromptTraceContext
+  ): Promise<void> {
+    const repository = new NarrativeCandidateRepository(this.store.pool);
+    const candidate = await repository.load(t.id);
+    if (!candidate || candidate.status === 'abandoned')
+      throw conflict('No saved narrative is available for editing');
+    const campaign = await this.store.campaign(t.campaignId);
+    const narrative =
+      candidate.editedNarrative ??
+      (await humanizeNarrative(this.generator, candidate.settings, candidate.rawNarrative, {
+        signal,
+        trace,
+        protectedNames: [
+          ...campaign.characters.map((character) => character.name),
+          ...gameplayResponseV5Schema
+            .parse(candidate.rawResponse)
+            .operations.flatMap((op) => (op.op === 'create' ? [op.character.name] : [])),
+        ],
+      }));
+    await this.store.transaction(async (client) => {
+      await this.lockedOwned(t, client);
+      await repository.complete(t.id, ownerId, candidate.candidateDigest, narrative, client);
+    });
+    const response = gameplayResponseV5Schema.parse(candidate.rawResponse);
+    await this.persistResponse(t, response, response, false, narrative);
+    await traceEvent(trace, 'committed', { narrative, turnId: t.id });
+    if (trace?.trace?.incomplete)
+      await this.store.pool.query(
+        `UPDATE turns SET document=jsonb_set(document,'{traceWarning}',to_jsonb($2::text)) WHERE id=$1 AND status=$3`,
+        [
+          t.id,
+          'Local audit logging is incomplete; saved gameplay was not repeated.',
+          TurnStatus.Completed,
+        ]
+      );
+  }
+  private async persistResponse(
+    t: Turn,
+    response: GMResponse | GameplayResponse | GameplayResponseV5,
+    diceResponse: DiceResponse | RuleResponse | GameplayResponse | GameplayResponseV5 | undefined,
+    prepare = false,
+    editedNarrative?: string
+  ): Promise<void> {
+    const dice = new DiceService(this.store);
+    await this.store.transaction(async (client) => {
+      const v4 = response.version >= KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
+      const { campaign, turn } = await this.lockedOwned(t, client);
+      if (diceResponse && t.diceSessionId) {
+        const records = await dice.records(t.diceSessionId, client);
+        const attempt = await client.query('SELECT next_slot FROM dice_attempts WHERE turn_id=$1', [
+          t.id,
+        ]);
+        if (attempt.rows[0]?.next_slot !== records.length)
+          throw new Problem(
+            409,
+            'dice_replay',
+            'Replay every original roll before completing the retry'
+          );
+        validateRollInterpretations(
+          diceResponse,
+          records.map((record) => record.id)
+        );
+        turn.rollInterpretations = diceResponse.rollInterpretations;
+        turn.rolls = records;
+        if ('ruleCitations' in diceResponse && t.ruleContext?.kind === RuleSystemKind.Library) {
+          const rows = await client.query(
+            'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
+            [t.id]
+          );
+          const reads = rows.rows.map((row) => ({
+            id: row.id,
+            campaignId: row.campaign_id,
+            turnId: row.turn_id,
+            context: row.captured_context,
+            tool: row.tool_name,
+            transportRequestId: row.transport_request_id,
+            argumentDigest: row.argument_digest,
+            resultHash: row.result_hash,
+            payload: row.payload,
+            createdAt: new Date(row.created_at).toISOString(),
+          }));
+          validateRuleCitations(diceResponse, reads, t.campaignId, t.id, t.ruleContext);
+          turn.ruleCitations = diceResponse.ruleCitations;
+        }
+      }
+      if (
+        v4 &&
+        t.ruleContext?.kind !== RuleSystemKind.Library &&
+        (diceResponse as GameplayResponse | GameplayResponseV5).ruleCitations.length
+      )
+        throw new Problem(
+          502,
+          'rules_citations_invalid',
+          'No original-book citations are available without a library'
+        );
+      const knowledgeReads = v4
+        ? await client.query(
+            'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
+            [t.id]
+          )
+        : undefined;
+      if (response.version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
+        turn.sourceReads = await new CampaignSourceLookup(this.store).records(
+          t.campaignId,
+          t.id,
+          client
+        );
+      const applied = applyResponse(campaign, response, t.id, {
+        campaignId: campaign.id,
+        turnId: t.id,
+        sourceSpans: [
+          ...(t.context?.sourceSpans ?? []),
+          ...(response.version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+            ? (turn.sourceReads ?? []).flatMap((read) =>
+                read.payload.sourceSpan ? [sourceSpanSchema.parse(read.payload.sourceSpan)] : []
+              )
+            : []),
+        ],
+        rolls: turn.rolls,
+        ruleContext: t.ruleContext,
+        ruleReads: knowledgeReads?.rows.map((row) => ({
+          id: row.id,
+          campaignId: row.campaign_id,
+          turnId: row.turn_id,
+          context: row.captured_context,
+          tool: row.tool_name,
+          transportRequestId: row.transport_request_id,
+          argumentDigest: row.argument_digest,
+          resultHash: row.result_hash,
+          payload: row.payload,
+          createdAt: new Date(row.created_at).toISOString(),
+        })),
+      });
+      if (prepare) {
+        await new NarrativeCandidateRepository(this.store.pool).save(
+          {
+            turnId: t.id,
+            campaignId: campaign.id,
+            campaignRevision: campaign.revision,
+            ruleContext: t.ruleContext ?? null,
+            settings: t.settings,
+            rawResponse: response,
+            rawNarrative: response.narrative,
+            owner: ownerId,
+          },
+          client
+        );
+        turn.editingPending = true;
+        t.editingPending = true;
+        turn.traceId = t.traceId;
+        await this.store.saveTurn(turn, client);
+        return;
+      }
+      applied.campaign.revision++;
+      turn.narrative = editedNarrative ?? response.narrative;
+      turn.editingPending = false;
+      if (response.version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
+        turn.operationExplanations = (response as GameplayResponseV5).operationExplanations;
+      turn.changes = applied.changes;
+      turn.status = TurnStatus.Completed;
+      turn.completedAt = new Date().toISOString();
+      await client.query('INSERT INTO snapshots(turn_id,campaign_id,document) VALUES($1,$2,$3)', [
+        t.id,
+        campaign.id,
+        applied.snapshot,
+      ]);
+      await this.store.save(applied.campaign, client);
+      await this.store.saveTurn(turn, client);
+    });
+  }
   async cancel(campaignId: string, id: string): Promise<Turn> {
     const turn = await this.store.transaction(async (client) => {
       await this.store.campaign(campaignId, client, true);
       const t = await this.store.turn(campaignId, id, client, true);
-      if ([TurnStatus.Pending, TurnStatus.Running].includes(t.status as TurnStatus)) {
+      if (
+        t.editingPending ||
+        [TurnStatus.Pending, TurnStatus.Running].includes(t.status as TurnStatus)
+      ) {
         t.status = TurnStatus.Cancelled;
         t.completedAt = new Date().toISOString();
         t.error = 'Cancelled by player';
+        if (t.editingPending)
+          await new NarrativeCandidateRepository(this.store.pool).abandon(id, client);
+        t.editingPending = false;
         await this.store.saveTurn(t, client);
       }
       return t;

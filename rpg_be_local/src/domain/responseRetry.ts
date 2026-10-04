@@ -11,6 +11,7 @@ const RETRYABLE_RESPONSE_CODES = new Set([
   'dice_references',
   'invalid_operation',
   'knowledge_invalid',
+  'operation_explanation_invalid',
   'gameplay_tool_unavailable',
   'gameplay_tool_arguments',
 ]);

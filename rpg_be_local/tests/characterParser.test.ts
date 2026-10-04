@@ -1,16 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseCharacterSource } from '../src/services/characterParser.js';
+import type { PromptTraceContext } from '../src/providers/promptLog.js';
 import type { Generator } from '../src/providers/service.js';
 
 const settings = { provider: 'codex', model: 'fixture', effort: 'low' };
 test('long character text is completely processed in bounded sequential sections without repeating context', async () => {
   const text = '# Sigurd\n\n' + 'Health 6; Strength 4. São Paulo 😀\n\n'.repeat(210);
   const seen: string[] = [];
+  const traces: PromptTraceContext[] = [];
   let inFlight = false;
   const generator: Generator = {
     capacity: async () => 4800,
-    generate: async (_settings, prompt) => {
+    generate: async (_settings, prompt, _schema, _signal, trace) => {
+      assert.ok(trace);
+      traces.push(trace);
       assert.equal(inFlight, false);
       inFlight = true;
       assert.ok(Buffer.byteLength(prompt, 'utf8') <= 4800);
@@ -30,6 +34,9 @@ test('long character text is completely processed in bounded sequential sections
   };
   const draft = await parseCharacterSource(text, settings, generator, async () => {});
   assert.ok(seen.length > 1);
+  assert.equal(new Set(traces.map((t) => t.runId)).size, 1);
+  assert.equal(new Set(traces.map((t) => t.executionId)).size, traces.length);
+  assert.ok(traces.every((t) => t.purpose === 'character_parse_section'));
   assert.equal(seen.join(''), text);
   assert.equal(draft.name, 'Sigurd');
   assert.deepEqual(draft.attributes, { health: 6, physical: { strength: 4, stamina: 3 } });

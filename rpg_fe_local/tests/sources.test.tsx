@@ -10,6 +10,56 @@ const success = (revision: number) =>
   new Response(JSON.stringify({ data: { ...fixtureCampaign(), revision } }), { status: 200 });
 
 describe('multiple source imports', () => {
+  it('sends source purpose as multipart metadata without forcing a content type', async () => {
+    const fetcher = vi.fn().mockResolvedValue(success(2));
+    vi.stubGlobal('fetch', fetcher);
+    await uploadSources(
+      fixtureCampaign(),
+      [files()[0]],
+      'eng',
+      100,
+      vi.fn(),
+      () => true,
+      'campaign'
+    );
+    expect((fetcher.mock.calls[0][1].body as FormData).get('purpose')).toBe('campaign');
+    expect((fetcher.mock.calls[0][1].headers as Headers).has('Content-Type')).toBe(false);
+  });
+  it('uses backend purpose options for pasted text and Google Docs imports', async () => {
+    const fetcher = vi.fn().mockResolvedValue(success(2));
+    vi.stubGlobal('fetch', fetcher);
+    render(
+      <SourceManager
+        campaign={fixtureCampaign()}
+        options={{
+          ...options,
+          sourcePurposeOptions: [
+            { id: 'campaign', label: 'Campaign preparation', default: false },
+            { id: 'reference', label: 'Reference material', default: true },
+          ],
+        }}
+        onSaved={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    fireEvent.change(screen.getByLabelText('Source purpose'), { target: { value: 'campaign' } });
+    fireEvent.change(screen.getByLabelText('Source name'), { target: { value: 'Preparation' } });
+    fireEvent.change(screen.getByLabelText('Paste rules or source text'), {
+      target: { value: 'An old gate' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add pasted text' }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(fetcher.mock.calls[0][1].body).purpose).toBe('campaign');
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Back to sources' })).not.toBeDisabled()
+    );
+    fireEvent.change(screen.getByLabelText('Public Google Docs URL'), {
+      target: { value: 'https://docs.google.com/document/d/public-document/edit' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Import Google Doc' }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetcher.mock.calls[1][1].body).purpose).toBe('campaign');
+  });
   it('waits for each upload and uses the revision returned by the previous upload', async () => {
     let completeFirst!: (response: Response) => void;
     const fetcher = vi

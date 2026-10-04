@@ -28,6 +28,8 @@ export default function SourceManager({
     [text, setText] = useState(''),
     [url, setUrl] = useState(''),
     [language, setLanguage] = useState(''),
+    [purpose, setPurpose] = useState(''),
+    [editPurpose, setEditPurpose] = useState(''),
     [files, setFiles] = useState<File[]>([]),
     [progress, setProgress] = useState(''),
     [selected, setSelected] = useState<Source | null>(null),
@@ -74,6 +76,11 @@ export default function SourceManager({
               disabled={busy}
               onClick={() => {
                 setSelected(s);
+                setEditPurpose(
+                  s.purpose ||
+                    options?.sourcePurposeOptions?.find((option) => option.default)?.id ||
+                    ''
+                );
                 previewRevision.current = campaign.revision;
                 setEdit(s.text);
               }}
@@ -132,6 +139,21 @@ export default function SourceManager({
             <Field label="Extracted text">
               <textarea rows={12} value={edit} onChange={(e) => setEdit(e.target.value)} />
             </Field>
+            {options?.sourcePurposeOptions && (
+              <Field label="Source purpose">
+                <select
+                  value={editPurpose}
+                  onChange={(event) => setEditPurpose(event.target.value)}
+                  disabled={busy}
+                >
+                  {options.sourcePurposeOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
             {currentSource && isConfirmed(currentSource, options) && (
               <SourceSections
                 key={`${currentSource.id}:${currentSource.version}`}
@@ -152,6 +174,10 @@ export default function SourceManager({
                         revision: previewRevision.current,
                         text: edit,
                         confirmed: true,
+                        purpose:
+                          editPurpose ||
+                          selected.purpose ||
+                          options?.sourcePurposeOptions?.find((option) => option.default)?.id,
                       })
                     );
                     setSelected(null);
@@ -186,6 +212,23 @@ export default function SourceManager({
         </button>
         <h2>Add source</h2>
         <div className="stack">
+          {options?.sourcePurposeOptions && (
+            <Field label="Source purpose">
+              <select
+                value={
+                  purpose || options.sourcePurposeOptions.find((option) => option.default)?.id || ''
+                }
+                onChange={(event) => setPurpose(event.target.value)}
+                disabled={busy}
+              >
+                {options.sourcePurposeOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="Source name">
             <input value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
@@ -198,7 +241,14 @@ export default function SourceManager({
               void run(async () => {
                 await request(
                   `/campaigns/${campaign.id}/sources`,
-                  json('POST', { revision: campaign.revision, name, text })
+                  json('POST', {
+                    revision: campaign.revision,
+                    name,
+                    text,
+                    purpose:
+                      purpose ||
+                      options?.sourcePurposeOptions?.find((option) => option.default)?.id,
+                  })
                 );
                 setText('');
               })
@@ -255,7 +305,8 @@ export default function SourceManager({
                   (message) => {
                     if (current.current) setProgress(message);
                   },
-                  () => current.current
+                  () => current.current,
+                  purpose || options.sourcePurposeOptions?.find((option) => option.default)?.id
                 );
                 if (!current.current) return;
                 setFiles(result.remaining);
@@ -282,7 +333,14 @@ export default function SourceManager({
               void run(async () => {
                 await request(
                   `/campaigns/${campaign.id}/sources/extract`,
-                  json('POST', { revision: campaign.revision, url, name: name || undefined })
+                  json('POST', {
+                    revision: campaign.revision,
+                    url,
+                    name: name || undefined,
+                    purpose:
+                      purpose ||
+                      options?.sourcePurposeOptions?.find((option) => option.default)?.id,
+                  })
                 );
                 setUrl('');
               })

@@ -326,3 +326,41 @@ test('pending GM response shows animated loading and keeps the next-action draft
   await page.getByLabel('Your action').fill('Keep my next action');
   await expect(page.getByLabel('Your action')).toHaveValue('Keep my next action');
 });
+
+test('pending narrative editing exposes resume and cancel without displaying the original or allowing new actions', async ({
+  page,
+}) => {
+  const campaign = fixtureCampaign();
+  campaign.turns = [
+    {
+      ...fixtureTurn(),
+      status: 'failed',
+      narrative: null,
+      editingPending: true,
+      editingResume: { available: true, reason: null },
+      error: 'Editor quota unavailable',
+    },
+  ];
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const data =
+      path === '/api/providers'
+        ? providers
+        : path === '/api/settings'
+          ? options
+          : path === `/api/campaigns/${campaign.id}`
+            ? campaign
+            : [];
+    await route.fulfill({ json: { data } });
+  });
+  await page.goto(`/campaigns/${campaign.id}`);
+  await expect(
+    page.getByRole('button', { name: 'Resume narrative editing', exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Cancel pending turn', exact: true })
+  ).toBeVisible();
+  await page.getByLabel('Your action').fill('Continue');
+  await expect(page.getByRole('button', { name: 'Send action' })).toBeDisabled();
+  await expect(page.locator('.gm-message .prose')).toHaveText('');
+});
