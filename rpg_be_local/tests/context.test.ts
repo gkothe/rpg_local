@@ -72,9 +72,10 @@ test('v4 context separates exact instructions from reference data and selects ex
   const context = buildContext(c, [], 'look', [], 100, true, rules, 4);
   assert.ok(context.systemPrompt?.includes(rules.instructions));
   assert.ok(context.systemPrompt?.includes(c.instructions));
+  assert.match(context.systemPrompt!, /Narrative writing guidance:/);
   assert.doesNotMatch(
     context.prompt,
-    /SELECTED_EXACT|CAMPAIGN_EXACT|Application integration contract/
+    /SELECTED_EXACT|CAMPAIGN_EXACT|Application integration contract|Narrative writing guidance/
   );
   const data = JSON.parse(context.prompt).mandatory;
   assert.equal(data.schema.properties.version.const, 4);

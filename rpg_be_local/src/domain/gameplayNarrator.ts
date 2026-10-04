@@ -3,7 +3,18 @@ const gameplayScope =
 export const DEFAULT_GAMEPLAY_NARRATOR = `${gameplayScope} Only the owned roll_dice tool is available. Use campaign memory and model knowledge for rules; clearly label provisional adjudication when no confirmed campaign reference covers the question.`;
 export const BOOK_GAMEPLAY_NARRATOR = `${gameplayScope} Exactly these owned tools are available: roll_dice, rules_map, rules_search, rules_get, rules_list. Published original book text is authoritative for covered mechanics. System instructions guide behavior and campaign instructions guide tone/language/preferences; neither silently changes book mechanics. Summaries, extracted fields and search snippets are navigation only. Retrieve original direct text with rules_get before citing a ruling. Explain and cite applicable contradictory books; no implicit priority or house rules. If books do not cover a rule, use campaign memory/model knowledge provisionally and explicitly label that adjudication. Event memory records consequences and does not override current book rules. Never request whole books, SQL, files or network. Cite persisted original-text receipts in ruleCitations. Citation start/end identify the exact quoted substring in the original node text, not the entire retrieved window; end must equal start plus quote.length. Copy source, system identity, hash and page provenance from the receipt.`;
 
-// Legacy prompts remain available only for frozen pre-envelope retries.
+// Adapted from humanizer for gameplay prose, not its editorial workflow.
+export const GAMEPLAY_WRITING_GUIDANCE =
+  'Narrative writing guidance: Apply this guidance only to newly written narration and dialogue. ' +
+  'Use concrete details, direct verbs and varied sentence lengths. Give NPCs distinct voices that fit the scene. ' +
+  'Avoid stock chatbot greetings, reflexive praise or agreement, inflated significance, filler, repetitive summaries, forced lists of three and formulaic contrasts. ' +
+  'Keep names and game terms consistent instead of cycling through synonyms. Use periods, commas or parentheses instead of em or en dashes. ' +
+  "Preserve atmosphere and uncertainty without inventing facts or deciding the player character's thoughts, feelings or actions. " +
+  'Follow the selected system and campaign instructions for language, tone and narrative style when they differ from these defaults. ' +
+  'Style never changes rules, established facts, dice faces, citations, exact source quotes, identifiers or the required JSON structure. ' +
+  'Return the game response only, without editorial drafts, writing audits or explanations of these guidelines.';
+
+// Legacy prompts above remain available only for frozen pre-envelope retries.
 export function gameplayInstructionEnvelope(
   systemInstructions: string,
   campaignInstructions: string,
@@ -19,5 +30,5 @@ export function gameplayInstructionEnvelope(
     (book
       ? 'Published original book text is authoritative for covered mechanics. Summaries, extracted fields and search snippets are navigation only. Retrieve original direct text using rules_get before citing a ruling. Cite persisted original-text receipts in ruleCitations; start/end identify the quoted substring and end equals start plus quote.length. Copy source, system identity, hash and page provenance from the receipt. Identify contradictory books and uncovered provisional adjudications; memory does not override current book rules.'
       : 'Identify provisional rule adjudications when no supplied confirmed reference supports them.');
-  return `Selected system instructions:\n${systemInstructions}\n\nCampaign instructions:\n${campaignInstructions}\n\n${technical}`;
+  return `${technical}\n\n${GAMEPLAY_WRITING_GUIDANCE}\n\nSelected system instructions:\n${systemInstructions}\n\nCampaign instructions:\n${campaignInstructions}\n\n`;
 }

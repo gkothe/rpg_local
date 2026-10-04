@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { gameplayInstructionEnvelope } from '../src/domain/gameplayNarrator.js';
+import {
+  GAMEPLAY_WRITING_GUIDANCE,
+  gameplayInstructionEnvelope,
+} from '../src/domain/gameplayNarrator.js';
 
 test('instruction envelope preserves complete selected and campaign columns once', () => {
   const selected = '  SYSTEM_CANARY\n\n\t' + 'unchanged selected text '.repeat(10000);
@@ -17,9 +20,33 @@ test('instruction envelope preserves complete selected and campaign columns once
   }
 });
 
-test('empty optional columns still produce the technical contract without invented behavior', () => {
+test('empty optional columns still produce the technical contract and default prose guidance', () => {
   const result = gameplayInstructionEnvelope('', '', false);
   assert.match(result, /Selected system instructions:\n\n\nCampaign instructions:\n\n/);
   assert.match(result, /campaign_knowledge_search/);
   assert.match(result, /roll_dice/);
+});
+
+test('book and model-knowledge prompts include one prose block before exact GM instructions', () => {
+  for (const book of [false, true]) {
+    const result = gameplayInstructionEnvelope(
+      'Use terse Portuguese dialogue.',
+      'Use gothic prose.',
+      book
+    );
+    assert.equal(result.split(GAMEPLAY_WRITING_GUIDANCE).length, 2);
+    assert.ok(
+      result.indexOf('Application integration contract:') <
+        result.indexOf(GAMEPLAY_WRITING_GUIDANCE)
+    );
+    assert.ok(
+      result.indexOf(GAMEPLAY_WRITING_GUIDANCE) < result.indexOf('Selected system instructions:')
+    );
+    assert.match(result, /instructions for language, tone and narrative style when they differ/);
+    assert.match(
+      result,
+      /Style never changes rules, established facts, dice faces, citations, exact source quotes, identifiers or the required JSON structure/
+    );
+    assert.doesNotMatch(GAMEPLAY_WRITING_GUIDANCE, /[\u2013\u2014]/);
+  }
 });
