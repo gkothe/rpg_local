@@ -1,11 +1,13 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, NavLink, useParams } from 'react-router-dom';
-import { BookOpen, Library, Settings as SettingsIcon } from 'lucide-react';
+import { BookOpen, Library, Workflow, Settings as SettingsIcon } from 'lucide-react';
 import LibraryPage from './pages/Library';
 import Setup from './pages/Setup';
 import PlayPage from './pages/Play';
 import SettingsPage from './pages/Settings';
 import Rules from './pages/Rules';
 import RuleSystemEditor from './features/rules/RuleSystemEditor';
+const Flow = lazy(() => import('./pages/Flow'));
 function RuleSystemRoute() {
   const { id } = useParams();
   return <RuleSystemEditor key={id} id={id!} />;
@@ -40,6 +42,10 @@ export default function App() {
             <BookOpen size={17} />
             Rules
           </NavLink>
+          <NavLink to="/flow">
+            <Workflow size={17} />
+            Flow
+          </NavLink>
         </nav>
       </header>
       <main id="main">
@@ -50,6 +56,14 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/rules" element={<Rules />} />
           <Route path="/rules/:id" element={<RuleSystemRoute />} />
+          <Route
+            path="/flow"
+            element={
+              <Suspense fallback={<p role="status">Loading architecture guide…</p>}>
+                <Flow />
+              </Suspense>
+            }
+          />
           <Route
             path="*"
             element={

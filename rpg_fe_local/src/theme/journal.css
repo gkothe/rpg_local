@@ -175,6 +175,7 @@ small {
 }
 .app-header nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 .app-header nav a {

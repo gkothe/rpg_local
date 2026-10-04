@@ -10,6 +10,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "test:flow-contract": "node --import tsx --test scripts/tests/flow-guide.test.mjs",
     "dev": "node scripts/dev.mjs",
     "build": "npm run build --workspaces",
     "lint": "eslint scripts eslint.config.mjs --max-warnings 0 && npm run lint --workspaces",

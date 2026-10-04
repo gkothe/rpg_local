@@ -1,6 +1,6 @@
 # Local RPG Backend (`rpg_be_local`) — Comprehensive Technical Architecture & Information Governance Guide
 
-This document describes the checked-in implementation of `rpg_be_local`, reviewed against source code and migrations on 2026-10-03. Source code remains authoritative; examples are illustrative unless marked exact. Static inspection does not establish live provider, device or database compatibility. Section 6 proposes a future visualizer.
+This document describes the checked-in implementation of `rpg_be_local`, reviewed against source code and migrations on 2026-10-03. Source code remains authoritative; examples are illustrative unless marked exact. Static inspection does not establish live provider, device or database compatibility. Section 6 describes the implemented educational Flow guide.
 
 ---
 
@@ -34,7 +34,7 @@ This document describes the checked-in implementation of `rpg_be_local`, reviewe
    - [5.4 Verifiable Rule Citations via Persisted DB Receipts](#54-verifiable-rule-citations-via-persisted-db-receipts)
    - [5.5 Snapshot-Driven Zero-AI Undo Engine](#55-snapshot-driven-zero-ai-undo-engine)
    - [5.6 Context Compaction & Transcript Retention](#56-context-compaction--transcript-retention)
-6. [Interactive Educational Blueprint (Future Visualizer Roadmap)](#6-interactive-educational-blueprint-future-visualizer-roadmap)
+6. [Interactive Educational Flow Guide](#6-interactive-educational-flow-guide)
 
 ---
 
@@ -1319,39 +1319,38 @@ Manual memory (`POST /api/campaigns/:id/memory`) is a separate reviewed path: it
 
 ---
 
-## 6. Interactive Educational Blueprint (Future Visualizer Roadmap)
+## 6. Interactive Educational Flow Guide
 
-This section is a proposal, not implemented backend functionality. A future visualizer should distinguish prompt instructions, application validation and database constraints. Simulating a stale `expected` value can demonstrate response repair; a real concurrent human edit may instead trigger revision conflict/cancellation and will not automatically be repaired.
+The frontend implements **Flow** in the global navigation at `/flow`. Its lazy-loaded,
+English journal interface teaches this architecture through four views:
 
-### Proposed Visualizer Modules
+- **Journey**: clickable actors and directed connections, an eight-step action walkthrough,
+  provider/mode differences and failure/repair/retry branches.
+- **Payload**: synthetic pin/NPC/book toggles, complete system/user prompt examples with the
+  v4 response schema, a final proposal and an expected-value acceptance/rejection comparison.
+- **Tools**: all seven named owned tools, example arguments/results and selectable request,
+  validation, service, return and final-proposal stages. It distinguishes frozen knowledge recall
+  from PostgreSQL rule lookup and persisted dice.
+- **Storage**: producing/consuming services, retained audit, success/failure/cancellation/undo
+  outcomes, touched-field conflicts and source/audio/archive/template/logging branches.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│             EDUCATIONAL INTERACTIVE APP MODULE BREAKDOWN               │
-├────────────────────────────────────────────────────────────────────────┤
-│ Module 1: The Interactive Prompt Assembler                             │
-│ - Interactive sliders for token budgets (gameplay, memory).            │
-│ - Live toggles to pin/unpin source text, facts, and characters.        │
-│ - Real-time color-coded token breakdown (Mandatory vs Pruned items).   │
-│                                                                        │
-│ Module 2: The In-Session Tool Simulator                                │
-│ - Simulated terminal showing CLI execution.                            │
-│ - Step-by-step visualizer for roll_dice:                               │
-│   [Slot 0 Request] -> [OS Crypto Draw] -> [DB Record] -> [Model Reply] │
-│ - Visual verification check: green checkmark when LLM cites receipt.   │
-│                                                                        │
-│ Module 3: Zero-Trust State Diff Inspector                              │
-│ - Side-by-side JSON tree diff (Expected vs Current vs Proposed).       │
-│ - "Tamper Button": lets the user intentionally change a character      │
-│   attribute to see how applyResponse() detects the mismatch and triggers│
-│   an auto-repair feedback loop.                                        │
-│                                                                        │
-│ Module 4: Time Travel & Undo Visualizer                                │
-│ - Interactive timeline of turns.                                       │
-│ - Shows how snapshots preserve exact entity state and rollback without │
-│   re-running AI inference.                                             │
-└────────────────────────────────────────────────────────────────────────┘
-```
+The shared inspector explains timing, inputs, outputs, read/write ownership and implementation
+evidence. A section selector exposes this bundled document as plain text. Node/view/step selections
+use URL parameters for refresh and browser history; mobile selection moves to the detail panel
+with a return control. Ordinary links and keyboard controls retain navigation accessibility.
+
+This is an authored educational illustration, not a live campaign/provider simulator. It does
+not call the turn/tool APIs, query campaign data, change PostgreSQL or consume AI quota. The outer
+application still performs its LAN status request and enforces pairing. The backend fixture test
+checks the illustrated prompt variants, instruction envelopes, proposal application, knowledge
+recall and citation evidence against real contracts; it does not establish live provider behavior.
+Simulating a stale `expected` value illustrates rejection. A real concurrent edit may instead
+cause revision conflict/cancellation and is not automatically repaired.
+
+**Implementation evidence:** [Flow route](../rpg_fe_local/src/pages/Flow.tsx),
+[educational content](../rpg_fe_local/src/features/flow/content.ts),
+[backend fixture checks](../scripts/tests/flow-guide.test.mjs),
+[browser checks](../rpg_fe_local/tests/e2e/flow.spec.ts).
 
 ---
 

@@ -1,5 +1,44 @@
 # Frontend implementation — 2026-10-01
 
+## Interactive Flow guide — 2026-10-03
+
+Global **Flow** navigation opens a lazy `/flow` architecture guide. Journey provides a clickable
+directed map and guided turn; Payload includes complete synthetic system/user prompts and the v4
+response schema/proposal; Tools covers all seven owned tools with call stages, actual example
+argument/result shapes and a checked quote receipt; Storage shows commit/failure/undo outcomes,
+retained audit, recovery and auxiliary import/audio/archive/template/log paths. Details expose
+timing, inputs/outputs, ownership and source evidence. The reviewed architecture document is
+bundled as an expandable section reader; section 6 now records this implementation.
+
+Teaching examples make no campaign/tool/provider calls or changes. The outer LAN-status request
+and pairing gate remain. URL selections support refresh and Back/Forward. Mobile selection
+focuses the detail panel and offers a return control; global navigation wrapping applies before
+the lazy Flow stylesheet loads. No new dependencies, endpoints or runtime provider mocks.
+
+Verification: root typecheck, zero-warning lint, formatting and production build passed. Four
+`test:flow-contract` checks validate prompt selections/envelopes against `buildContext`, v4
+proposal/state/undo behavior, frozen knowledge recall, tool arguments, citation evidence and
+source/diagram references. Root unit suites passed 118 backend and 59 frontend tests (55
+backend live-runtime checks explicitly skipped); seven Flow unit tests also passed after the
+final navigation changes. Installed Windows Chrome passed all 18 synthetic browser scenarios,
+including five Flow cases at 360/768/1440px, reduced motion, cold global navigation, keyboard and
+mobile focus/return, query history/refresh, document reader, no campaign/provider requests and
+LAN pairing. Six real-runtime browser checks remain opted in; no AI/database/device test was run.
+
+Playwright's downloaded default browser is absent. Use the existing installed Chrome for the
+focused test in PowerShell:
+
+```powershell
+$env:LOCAL_BROWSER_PATH = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+npm run test:e2e --workspace rpg-fe-local -- tests/e2e/flow.spec.ts
+```
+
+The production build emits Flow separately (182.83KB JS / 4.79KB CSS before gzip), with its
+architecture document/schema/examples excluded from the initial app chunk. Existing concurrent
+backend and Journal changes were preserved. No installation, deployment or commit performed.
+
+## Earlier implementation record
+
 Implemented campaign library/create/delete, metadata/instructions edit, readable player/NPC sheets with Advanced JSON/manual create/delete, confirmed-source character parsing preview, text/Markdown/PDF/Google Docs source review/correction, backend capability provider/model/effort controls, committed chat, visible change lists, cancellation/undo, personal notes, campaign memory, facts/source pins, context budgets/manifest inspection, explicit manual memory checkpoint, templates and versioned archive import/export.
 
 One deliberately dark earth journal theme: serif narrative, sage/ochre accents, folio turn margin, subtle grain and rounded panels. English interface; one-field rows and 44px controls on phones. Domain option sets/defaults/flags come from backend settings; client-only workflow states are separate. All requests are relative local API calls. Imported content is text. No shipped synthetic AI fallback.

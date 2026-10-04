@@ -20,6 +20,17 @@ Windows is the acceptance platform. Physical Android Chrome validation is on hol
 
 ## Product and architecture context
 
+### Interactive Flow guide
+
+Open **Flow** in the global navigation (`/flow`) for an interactive architecture guide.
+Journey follows an action through the backend and provider; Payload shows checked synthetic
+system/user prompts and v4 proposals; Tools explains all seven owned tools and app-controlled
+database access; Storage explores commit, failure, recovery, undo and auxiliary pipelines.
+Clickable actors/connections disclose ownership and source evidence, with the full architecture
+document available in the page. The guide makes no campaign/provider requests or changes;
+the existing LAN pairing boundary still applies. Run `npm run test:flow-contract` to verify
+its teaching fixtures against backend contracts without a database or AI call.
+
 ### Campaign knowledge and GM instructions
 
 The selected rule system's complete `instructions` text is the main GM guidance.

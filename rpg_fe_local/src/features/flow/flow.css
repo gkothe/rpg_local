@@ -1,0 +1,342 @@
+.flow-page {
+  --flow-blue: #aac4c3;
+}
+.flow-page h1 {
+  margin-bottom: 0.6rem;
+}
+.flow-kicker {
+  color: var(--sage);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font: 0.78rem system-ui;
+}
+.flow-lead {
+  max-width: 78ch;
+  font-size: 1.15rem;
+  line-height: 1.65;
+}
+.flow-notice {
+  border-left: 3px solid var(--ochre);
+  padding: 0.7rem 1rem;
+  background: var(--surface);
+  border-radius: 0 12px 12px 0;
+}
+.flow-tabs,
+.flow-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 1.2rem 0;
+  align-items: center;
+}
+.flow-tabs a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 1rem;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  text-decoration: none;
+}
+.flow-tabs a[aria-current],
+.flow-page button[aria-pressed='true'] {
+  border-color: var(--sage);
+  background: #414a36;
+  box-shadow: inset 0 0 0 1px var(--sage);
+}
+.flow-tabs a small {
+  color: var(--muted);
+}
+.flow-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 1fr);
+  gap: 1.3rem;
+  align-items: start;
+}
+.flow-card {
+  min-width: 0;
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+}
+.flow-card h2,
+.flow-card h3 {
+  margin-top: 0;
+}
+.flow-card p,
+.flow-card dd {
+  line-height: 1.6;
+}
+.flow-map {
+  position: relative;
+}
+.flow-canvas {
+  position: relative;
+  height: 480px;
+  margin: 1.5rem 0;
+}
+.flow-canvas svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 480px;
+  color: var(--sage);
+  pointer-events: none;
+}
+.flow-nodes {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, 120px);
+  column-gap: 5%;
+  row-gap: 40px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.flow-nodes [data-node='browser'] {
+  grid-area: 1 / 1;
+}
+.flow-nodes [data-node='api'] {
+  grid-area: 1 / 2;
+}
+.flow-nodes [data-node='turn'] {
+  grid-area: 1 / 3;
+}
+.flow-nodes [data-node='context'] {
+  grid-area: 2 / 3;
+}
+.flow-nodes [data-node='model'] {
+  grid-area: 2 / 2;
+}
+.flow-nodes [data-node='tools'] {
+  grid-area: 2 / 1;
+}
+.flow-nodes [data-node='validate'] {
+  grid-area: 3 / 2;
+}
+.flow-nodes [data-node='commit'] {
+  grid-area: 3 / 3;
+}
+.flow-nodes [data-node='database'] {
+  grid-area: 3 / 1;
+}
+.flow-nodes button {
+  width: 100%;
+  height: 120px;
+  text-align: left;
+  min-height: 105px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.65rem;
+}
+.flow-nodes strong {
+  font-size: 1rem;
+}
+.flow-nodes small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+.flow-node-number {
+  color: var(--sage);
+  font: 0.75rem system-ui;
+}
+.flow-edges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.flow-edges button {
+  font-size: 0.82rem;
+  padding: 0.55rem 0.7rem;
+}
+.flow-inspector {
+  position: sticky;
+  top: 1rem;
+}
+.flow-return {
+  display: none;
+  margin-bottom: 1rem;
+}
+.flow-inspector dt {
+  font: 600 0.8rem system-ui;
+  color: var(--sage);
+  margin: 1rem 0 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.flow-inspector dd {
+  margin: 0;
+}
+.flow-page details {
+  border-top: 1px solid var(--line);
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+}
+.flow-page summary {
+  min-height: 44px;
+  padding: 0.7rem 0;
+  cursor: pointer;
+}
+.flow-page pre {
+  font:
+    0.8rem/1.6 Consolas,
+    monospace;
+  background: #20241c;
+  border-radius: 12px;
+  padding: 1rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 34rem;
+  overflow: auto;
+}
+.flow-page code {
+  overflow-wrap: anywhere;
+}
+.flow-page select {
+  min-height: 44px;
+  max-width: 100%;
+}
+.flow-page label {
+  display: inline-flex;
+  gap: 0.6rem;
+  align-items: center;
+  min-height: 44px;
+}
+.flow-page input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+}
+.flow-step {
+  border-left: 3px solid var(--sage);
+  padding: 0.25rem 1rem;
+  margin: 1rem 0;
+}
+.flow-step p {
+  margin-top: 0.4rem;
+}
+.flow-progress {
+  display: flex;
+  gap: 0.3rem;
+  margin: 1rem 0;
+}
+.flow-progress span {
+  height: 4px;
+  background: var(--line);
+  flex: 1;
+  border-radius: 4px;
+}
+.flow-progress span[data-active='true'] {
+  background: var(--sage);
+}
+.flow-tool-list,
+.flow-storage-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+.flow-tool-list button,
+.flow-storage-list button {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.flow-tool-list small {
+  display: block;
+  margin-top: 0.4rem;
+  color: var(--muted);
+}
+.flow-diff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem;
+  border: 1px dashed var(--sage);
+  border-radius: 12px;
+}
+.flow-diff strong {
+  font-size: 1.5rem;
+}
+.flow-trace {
+  padding-left: 1.4rem;
+}
+.flow-trace li {
+  padding: 0.5rem 0;
+  line-height: 1.6;
+}
+.flow-doc {
+  margin-top: 2rem;
+}
+.flow-doc pre {
+  max-height: 42rem;
+}
+.flow-evidence {
+  padding-left: 1rem;
+  font:
+    0.8rem/1.7 Consolas,
+    monospace;
+  overflow-wrap: anywhere;
+}
+.flow-aux {
+  display: grid;
+  gap: 0.5rem;
+}
+@media (max-width: 900px) {
+  .flow-return {
+    display: inline-flex;
+  }
+  .flow-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .flow-inspector {
+    position: static;
+  }
+}
+@media (max-width: 620px) {
+  .flow-canvas {
+    height: auto;
+  }
+  .flow-canvas svg {
+    display: none;
+  }
+  .flow-nodes {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .flow-nodes button {
+    height: auto;
+    min-height: 90px;
+  }
+}
+@media (max-width: 520px) {
+  .flow-page.page {
+    padding: 1.4rem 0.8rem 3rem;
+  }
+  .flow-tool-list,
+  .flow-storage-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .flow-card {
+    padding: 1rem;
+  }
+  .flow-tabs a {
+    flex: 1 1 40%;
+  }
+  .flow-tabs a small {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flow-page *,
+  .flow-page *::before,
+  .flow-page *::after {
+    scroll-behavior: auto;
+    transition: none;
+    animation: none;
+  }
+}

@@ -1,0 +1,18 @@
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { expect, it } from 'vitest';
+import PayloadExplorer from '../src/features/flow/PayloadExplorer';
+it('shows how pins, scene mentions and book mode change the illustrated selection', async () => {
+  render(<PayloadExplorer />);
+  expect(screen.getByText('Ivo omitted')).toBeVisible();
+  await userEvent.click(screen.getByLabelText('Mention Ivo in the action'));
+  expect(screen.getByText('Ivo included')).toBeVisible();
+  await userEvent.click(screen.getByLabelText('Pin confirmed source'));
+  expect(screen.getByText('Pinned excerpt included')).toBeVisible();
+  await userEvent.click(screen.getByLabelText('Use book mode'));
+  expect(screen.getByText('Book overview included')).toBeVisible();
+  await userEvent.click(screen.getByText('Complete v4 final proposal'));
+  expect(screen.getByLabelText('Final proposal JSON')).toHaveTextContent('"expected": {');
+  await userEvent.click(screen.getByLabelText('Simulate stale prior value'));
+  expect(screen.getByRole('status')).toHaveTextContent('Rejected');
+});
