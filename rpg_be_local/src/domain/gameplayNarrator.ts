@@ -7,6 +7,7 @@ export const BOOK_GAMEPLAY_NARRATOR = `${gameplayScope} Exactly these owned tool
 export const GAMEPLAY_WRITING_GUIDANCE =
   'Narrative writing guidance: Apply this guidance only to newly written narration and dialogue. ' +
   'Use concrete details, direct verbs and varied sentence lengths. Give NPCs distinct voices that fit the scene. ' +
+  'Present the observable situation first. Use sensory details sparingly and avoid stacking metaphors. Each paragraph should advance the scene or provide information relevant to a decision. ' +
   'Avoid stock chatbot greetings, reflexive praise or agreement, inflated significance, filler, repetitive summaries, forced lists of three and formulaic contrasts. ' +
   'Keep names and game terms consistent instead of cycling through synonyms. Use periods, commas or parentheses instead of em or en dashes. ' +
   "Preserve atmosphere and uncertainty without inventing facts or deciding the player character's thoughts, feelings or actions. " +
