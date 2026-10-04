@@ -212,6 +212,7 @@ export function examplePayloadV5(pinned: boolean, mentioned: boolean, book: bool
           name: 'River town notes',
           purpose: 'reference',
           sectionCount: 1,
+          sections: [{ sectionIndex: 0, title: 'Section 1', headings: [], supplied: pinned }],
         },
       ],
       campaignSourceSeeds: [],

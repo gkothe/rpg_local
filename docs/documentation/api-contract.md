@@ -252,3 +252,7 @@ Private tool-failure traces retain `database.sqlState` and safe table/column/con
 identifiers. A PostgreSQL CHECK rejection is classified as `database_constraint`, rather
 than an unrelated local-service connection failure. SQL text, rejected row values and
 raw database messages are omitted.
+
+Current source navigation adds `sections: {sectionIndex,title,headings:string[],supplied:boolean}[]` to each v5 campaign source catalog item. Search entries add `title` and `alreadySupplied`; get receipts add the same fields alongside the unchanged original source span and receipt ID. These additive diagnostics preserve frozen historic payloads and immutable receipt replay. Supplied tracking is execution-local, covers only complete original sections and advances after successful persistence; repeated reads remain unrestricted.
+
+Narrative-only editing retains the GM provider/model but selects advertised `low`, then the lowest canonical advertised effort, then CLI default (`null`). GM settings are never modified. The selected editor effort is reused for its correction attempts. Field-only mechanical response repair continues to use the GM effort. Editor failure still withholds delivery until the stage succeeds.

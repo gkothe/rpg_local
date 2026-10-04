@@ -118,6 +118,10 @@ test(
     await store.insert(campaign);
     class FixtureProviders extends ProviderService {
       fail = true;
+      override async narrativeEditorSettings(settings: ProviderSettings) {
+        // This fixture simulates generation and must not discover real installed CLIs.
+        return { ...settings, effort: null };
+      }
       override async capacity() {
         return 16000;
       }

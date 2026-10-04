@@ -132,8 +132,9 @@ export default function PayloadExplorer() {
         <summary>Required narrative editing and private audit</summary>
         <p>
           The editor receives the final prose and focused writing guidance, using the same CLI,
-          model and effort. It cannot see or edit operations, dice, rules or hidden knowledge.
-          Editing failure blocks delivery and offers editing-only resume. Correlated private logs
+          model with low effort when available, otherwise its lowest advertised effort or CLI
+          default. It cannot see or edit operations, dice, rules or hidden knowledge. Editing
+          failure blocks delivery and offers editing-only resume. Correlated private logs
           distinguish a provider final from a committed result; logs and advanced context inspection
           may contain spoilers.
         </p>

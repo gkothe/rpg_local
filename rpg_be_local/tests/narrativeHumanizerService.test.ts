@@ -16,16 +16,33 @@ function generator(generate: Generator['generate']): Generator {
   };
 }
 
-test('editor retains provider/model/effort and repairs only narrative without gameplay tools', async () => {
+test('editor retains provider/model and uses CLI default without an effort resolver', async () => {
   let calls = 0;
   const g = generator(async (selected, prompt, schema) => {
-    assert.deepEqual(selected, settings);
+    assert.deepEqual(selected, { ...settings, effort: null });
     assert.ok(prompt.includes(original.replaceAll('\n', '\\n')));
     assert.equal((schema as { additionalProperties: boolean }).additionalProperties, false);
     calls++;
     return { narrative: calls === 1 ? original.replace('2', '9') : original };
   });
   assert.equal(await humanizeNarrative(g, settings, original), original);
+  assert.equal(calls, 2);
+});
+
+test('editor resolves low effort once, retains it for correction and never mutates GM settings', async () => {
+  let resolutions = 0;
+  let calls = 0;
+  const g = generator(async (selected) => {
+    assert.deepEqual(selected, { ...settings, effort: 'low' });
+    return { narrative: ++calls === 1 ? original.replace('2', '9') : original };
+  });
+  g.narrativeEditorSettings = async (selected) => {
+    resolutions++;
+    return { ...selected, effort: 'low' };
+  };
+  assert.equal(await humanizeNarrative(g, settings, original), original);
+  assert.equal(resolutions, 1);
+  assert.equal(settings.effort, 'high');
   assert.equal(calls, 2);
 });
 

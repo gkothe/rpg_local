@@ -157,7 +157,17 @@ export function buildContext(
     pinnedFacts: c.pinnedFacts,
     pinnedRules: pinned,
     ...(sourceContext
-      ? { campaignSources: campaignSourceCatalog(frozenSources!), campaignSourceSeeds: seed.spans }
+      ? {
+          campaignSources: campaignSourceCatalog(frozenSources!, [
+            ...seed.spans,
+            ...pinned.flatMap((span) =>
+              span.start !== undefined && span.end !== undefined && span.name !== undefined
+                ? [{ ...span, start: span.start, end: span.end, name: span.name }]
+                : []
+            ),
+          ]),
+          campaignSourceSeeds: seed.spans,
+        }
       : {}),
     characters: relevantCharacters.map((char) => ({
       id: char.id,

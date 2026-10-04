@@ -71,6 +71,7 @@ export type Provider = {
   rules?: RulesCapability;
 };
 export interface Generator {
+  narrativeEditorSettings?(settings: ProviderSettings): Promise<ProviderSettings>;
   generateOwnedGameplay?(
     settings: ProviderSettings,
     prompt: string,
@@ -394,6 +395,15 @@ export class ProviderService implements Generator {
     }
     this.cache = result;
     return result;
+  }
+  async narrativeEditorSettings(settings: ProviderSettings): Promise<ProviderSettings> {
+    const defaults = { ...settings, effort: null };
+    await this.capacity(defaults);
+    const model = (await this.list())
+      .find((provider) => provider.id === settings.provider)!
+      .models.find((model) => model.id === settings.model)!;
+    const effort = MODEL_EFFORTS.find((level) => model.efforts.includes(level)) ?? null;
+    return { ...settings, effort };
   }
   async capacity(settings: ProviderSettings, ceiling = MAX_PROVIDER_INPUT_TOKENS): Promise<number> {
     const provider = (await this.list()).find((p) => p.id === settings.provider);

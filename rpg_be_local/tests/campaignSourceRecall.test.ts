@@ -16,6 +16,67 @@ import {
 import { buildContext } from '../src/domain/context.js';
 import { GameplayTools } from '../src/providers/gameplayTools.js';
 
+test('meaningful whole tokens outrank common words and snippets locate the requested phrase', () => {
+  const c = newCampaign({ name: 'Relevance' });
+  c.sources = [
+    textSource('Noise', 'The night is here. An arena opening happens. A prologuesque aside.'),
+    textSource(
+      'Preparation',
+      'The night begins. ' + 'background '.repeat(40) + 'The arena prologue begins at noon.'
+    ),
+  ];
+  const lookup = createCampaignSourceRecall(freezeCampaignSources(c));
+  const hits = lookup.search({ query: 'the arena prologue' }).entries as {
+    sourceId: string;
+    text: string;
+    start: number;
+    end: number;
+  }[];
+  assert.equal(hits[0]!.sourceId, c.sources[1]!.id);
+  assert.match(hits[0]!.text, /arena prologue/);
+  assert.equal(hits[0]!.text, c.sources[1]!.text.slice(hits[0]!.start, hits[0]!.end));
+  assert.equal((lookup.search({ query: 'prologue' }).entries as unknown[]).length, 1);
+  assert.ok((lookup.search({ query: 'the' }).entries as unknown[]).length);
+  assert.equal((lookup.search({ query: '!!!' }).entries as unknown[]).length, 0);
+});
+
+test('catalog carries Markdown headings across chunks and supplied means the whole original section', () => {
+  const c = newCampaign({ name: 'Index' });
+  c.sources = [
+    textSource(
+      'Preparation',
+      '# Opening\n\n' + 'background '.repeat(700) + '\n\n## Arena prologue\n\nA gate at noon.'
+    ),
+  ];
+  const frozen = freezeCampaignSources(c);
+  const catalog = campaignSourceCatalog(frozen);
+  assert.equal(catalog[0]!.sections[0]!.title, 'Opening');
+  assert.ok(catalog[0]!.sections.some((s) => s.headings.includes('Arena prologue')));
+  const full = {
+    id: c.sources[0]!.id,
+    version: 1,
+    name: 'Preparation',
+    text: c.sources[0]!.text,
+    start: 0,
+    end: c.sources[0]!.text.length,
+  };
+  assert.ok(campaignSourceCatalog(frozen, [full])[0]!.sections.every((s) => s.supplied));
+  const lookup = createCampaignSourceRecall(frozen, [
+    { ...full, text: full.text.slice(0, 20), end: 20 },
+  ]);
+  const args = { sourceId: full.id, version: 1, sectionIndex: 0 };
+  const first = lookup.get(args, 'first');
+  assert.equal(first.alreadySupplied, false);
+  lookup.markSupplied(first.sourceSpan);
+  assert.equal(lookup.get(args, 'second').alreadySupplied, true);
+  assert.equal(
+    (lookup.search({ query: 'background' }).entries as { alreadySupplied: boolean }[])[0]!
+      .alreadySupplied,
+    true
+  );
+  assert.equal(createCampaignSourceRecall(frozen).get(args, 'fresh').alreadySupplied, false);
+});
+
 test('opening bootstrap includes campaign and legacy references but excludes character documents', () => {
   const c = newCampaign({ name: 'Source opening' });
   c.sources = [
@@ -37,6 +98,8 @@ test('opening bootstrap includes campaign and legacy references but excludes cha
   assert.equal(context.sourceSelection?.bootstrap, true);
   assert.equal(context.promptContractVersion, 5);
   assert.equal(context.frozenSources?.sources.length, 3);
+  assert.equal(data.campaignSources[0].sections[0].supplied, true);
+  assert.equal(data.campaignSources[2].sections[0].supplied, false);
   const legacy = buildContext(c, [], 'start', [], 1, true, undefined, 4);
   assert.equal(JSON.parse(legacy.prompt).mandatory.campaignSources, undefined);
   assert.equal(legacy.frozenSources, undefined);

@@ -9,6 +9,55 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+test('editor effort comes from selected model capabilities, with canonical fallback and explicit failures', async () => {
+  class EditorProviders extends ProviderService {
+    override async list(): Promise<Provider[]> {
+      return [
+        {
+          id: 'codex',
+          name: 'Fixture',
+          available: true,
+          supported: true,
+          reason: null,
+          version: 'fixture',
+          catalogProvenance: 'fixture',
+          models: [
+            { id: 'low', label: 'Low', efforts: ['high', 'low', 'medium'], inputTokens: 8000 },
+            {
+              id: 'fallback',
+              label: 'Fallback',
+              efforts: ['max', 'high', 'medium'],
+              inputTokens: 8000,
+            },
+            { id: 'default', label: 'Default', efforts: [], inputTokens: 8000 },
+          ],
+        },
+      ];
+    }
+  }
+  const service = new EditorProviders();
+  for (const [model, expected] of [
+    ['low', 'low'],
+    ['fallback', 'medium'],
+    ['default', null],
+  ] as const) {
+    const settings = { provider: 'codex', model, effort: 'high' };
+    assert.deepEqual(await service.narrativeEditorSettings(settings), {
+      ...settings,
+      effort: expected,
+    });
+    assert.equal(settings.effort, 'high');
+  }
+  await assert.rejects(
+    service.narrativeEditorSettings({ provider: 'codex', model: 'missing', effort: null }),
+    /model/
+  );
+  await assert.rejects(
+    service.narrativeEditorSettings({ provider: 'missing', model: 'low', effort: null }),
+    /CLI/
+  );
+});
+
 test('untested Codex version remains usable for dice and books and exposes a compatibility warning', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-cli-version-'));
   const before = { ...process.env };

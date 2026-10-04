@@ -289,7 +289,7 @@ export const steps: FlowStep[] = [
     id: 'edit',
     label: '8. Edit the final narrative',
     node: 'validate',
-    data: 'The same selected CLI, model and effort rewrites only the validated final prose. Numbers, names, quoted dialogue and the player decision are checked conservatively. The original candidate stays private if editing fails; Resume narrative editing continues this stage without new dice or a new GM turn.',
+    data: 'The selected CLI and model, using low effort when advertised (otherwise its lowest advertised effort or CLI default), rewrites only the validated final prose. Numbers, names, quoted dialogue and the player decision are checked conservatively. The original candidate stays private if editing fails; Resume narrative editing continues this stage without new dice or a new GM turn.',
   },
   {
     id: 'commit',
@@ -306,8 +306,8 @@ export const tools: FlowTool[] = [
       'Find relevant original campaign document sections.',
       'During the GM action.',
       'A query, optional source ID and cursor.',
-      'Original section matches with source version and offsets.',
-      'Searches the frozen confirmed-source snapshot. Every accepted request has a persisted read receipt.',
+      'Ranked original section matches with titles, source version, exact offsets and alreadySupplied status.',
+      'Searches meaningful whole tokens and phrases in the frozen confirmed-source snapshot. Snippets point at matching terms. Use the titled catalog and reuse complete supplied sections; repeated reads remain available. Every accepted request has a persisted read receipt.',
       '2.3',
       [
         'rpg_be_local/src/domain/campaignSourceRecall.ts',
@@ -322,7 +322,12 @@ export const tools: FlowTool[] = [
           sourceId: ids.source,
           version: 1,
           sectionIndex: 0,
-          excerpt: 'The ferryman offers a safe crossing.',
+          name: 'River town notes',
+          title: 'Section 1',
+          alreadySupplied: false,
+          start: 0,
+          end: 36,
+          text: 'The ferryman offers a safe crossing.',
         },
       ],
       nextCursor: null,
@@ -336,7 +341,7 @@ export const tools: FlowTool[] = [
       'Read the original section behind a campaign source match.',
       'After finding a section or using the catalog.',
       'Source ID, version and section index.',
-      'A persisted receipt ID and original UTF-16 source span.',
+      'A persisted receipt ID, original UTF-16 source span, section title and alreadySupplied status.',
       'The frozen text stays fixed through this logical action; it is distinct from published rulebook text.',
       '2.3',
       ['rpg_be_local/src/services/campaignSourceLookup.ts']
@@ -345,6 +350,8 @@ export const tools: FlowTool[] = [
     args: { sourceId: ids.source, version: 1, sectionIndex: 0 },
     result: {
       receiptId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      title: 'Section 1',
+      alreadySupplied: false,
       sectionIndex: 0,
       sourceSpan: {
         id: ids.source,

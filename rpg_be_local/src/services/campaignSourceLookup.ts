@@ -7,6 +7,7 @@ import type { Turn } from '../domain/types.js';
 import { canonicalRuleJson } from '../domain/rules.js';
 import {
   createCampaignSourceRecall,
+  CAMPAIGN_SOURCE_GET_TOOL_NAME,
   frozenCampaignSourcesSchema,
   type CampaignSourceTool,
   type CampaignSourceRead,
@@ -23,7 +24,7 @@ export class CampaignSourceLookup {
     transportRequestId: string,
     signal?: AbortSignal
   ): Promise<Record<string, unknown>> {
-    return this.store.transaction(async (client) => {
+    const payload = await this.store.transaction(async (client) => {
       const campaign = await this.store.campaign(turn.campaignId, client, true);
       const active = await client.query(
         'SELECT owner,status,lease_until,document FROM turns WHERE id=$1 AND campaign_id=$2 FOR UPDATE',
@@ -63,6 +64,11 @@ export class CampaignSourceLookup {
       const argumentDigest = createHash('sha256')
         .update(canonicalRuleJson({ tool, arguments: raw }))
         .digest('hex');
+      let lookup = this.lookups.get(turn.diceSessionId);
+      if (!lookup) {
+        lookup = createCampaignSourceRecall(frozen, turn.context?.sourceSpans);
+        this.lookups.set(turn.diceSessionId, lookup);
+      }
       const prior = await client.query(
         'SELECT argument_digest,payload FROM turn_campaign_source_reads WHERE turn_id=$1 AND transport_request_id=$2',
         [turn.id, transportRequestId]
@@ -72,13 +78,9 @@ export class CampaignSourceLookup {
           throw conflict('Source transport identity reused with changed arguments');
         return prior.rows[0].payload;
       }
-      let lookup = this.lookups.get(turn.diceSessionId);
-      if (!lookup) {
-        lookup = createCampaignSourceRecall(frozen);
-        this.lookups.set(turn.diceSessionId, lookup);
-      }
       const id = randomUUID();
-      const payload = tool === 'campaign_sources_get' ? lookup.get(raw, id) : lookup.search(raw);
+      const payload =
+        tool === CAMPAIGN_SOURCE_GET_TOOL_NAME ? lookup.get(raw, id) : lookup.search(raw);
       if (signal?.aborted)
         throw new Problem(409, 'campaign_source_inactive', 'Source attempt was cancelled');
       await client.query(
@@ -96,6 +98,10 @@ export class CampaignSourceLookup {
       );
       return payload;
     });
+    // Store.transaction resolves after COMMIT. A replay delivers its original payload too.
+    if (tool === CAMPAIGN_SOURCE_GET_TOOL_NAME && turn.diceSessionId)
+      this.lookups.get(turn.diceSessionId)?.markSupplied(payload.sourceSpan);
+    return payload;
   }
   async records(
     campaignId: string,

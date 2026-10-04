@@ -38,6 +38,26 @@ import {
   storageItems,
 } from '../../rpg_fe_local/src/features/flow/content.ts';
 import { existsSync, readFileSync } from 'node:fs';
+import { createCampaignSourceRecall } from '../../rpg_be_local/src/domain/campaignSourceRecall.ts';
+
+test('illustrated campaign source navigation matches real search and get payloads', () => {
+  const lookup = createCampaignSourceRecall({
+    campaignId: ids.campaign,
+    sources: [
+      {
+        id: ids.source,
+        version: 1,
+        name: 'River town notes',
+        purpose: 'reference',
+        text: 'The ferryman offers a safe crossing.',
+      },
+    ],
+  });
+  const search = tools.find((tool) => tool.id === 'campaign_sources_search');
+  const get = tools.find((tool) => tool.id === 'campaign_sources_get');
+  assert.deepEqual(lookup.search(search.args), search.result);
+  assert.deepEqual(lookup.get(get.args, get.result.receiptId), get.result);
+});
 
 test('educational v4 proposal applies its expected-value update without exposing notes', () => {
   const campaign = newCampaign({ name: 'Teaching example' });

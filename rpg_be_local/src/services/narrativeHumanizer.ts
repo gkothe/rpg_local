@@ -23,6 +23,10 @@ export async function humanizeNarrative(
     protectedNames?: readonly string[];
   } = {}
 ): Promise<string> {
+  if (options.signal?.aborted) throw new Problem(409, 'cancelled', 'Narrative editing cancelled');
+  const editorSettings = generator.narrativeEditorSettings
+    ? await generator.narrativeEditorSettings(settings)
+    : { ...settings, effort: null };
   let feedback = '';
   for (let attempt = 0; ; attempt++) {
     if (options.signal?.aborted) throw new Problem(409, 'cancelled', 'Narrative editing cancelled');
@@ -36,7 +40,7 @@ export async function humanizeNarrative(
       : undefined;
     try {
       const output = await generator.generate(
-        settings,
+        editorSettings,
         narrativeHumanizerPrompt(originalNarrative, feedback),
         narrativeHumanizerJsonSchema,
         options.signal,
