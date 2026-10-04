@@ -424,6 +424,27 @@ export const tools: FlowTool[] = [
     args: { id: '66666666-6666-4666-8666-666666666666' },
     result: knowledgeGetResult,
   },
+  {
+    ...item(
+      'rules_find',
+      'rules_find',
+      'Find relevant book rules and read original text in one request.',
+      'Preferred first lookup in new book turns.',
+      'A query, optional source/columns and search continuation cursor.',
+      'Search metadata, up to three eligible original-text receipts, and unread paths.',
+      'Saves ordinary rules_search/rules_get receipts, each guarded independently.',
+      '5.4',
+      ['rpg_be_local/src/providers/rulesFind.ts', 'rpg_be_local/src/services/ruleLookup.ts'],
+      'The first three reads are a retrieval page, not a call limit. Reuse returned originals; continue with rules_get cursors or unread paths. Historical frozen tool sets remain unchanged.'
+    ),
+    bookOnly: true,
+    args: { query: 'crossing', columns: ['core_rules'] },
+    result: {
+      search: { entries: [{ path: ruleResult.path, readableOriginal: true }], cursor: null },
+      reads: [ruleResult],
+      unreadPaths: [],
+    },
+  },
   ...(['rules_map', 'rules_search', 'rules_get', 'rules_list'] as const).map((name): FlowTool => ({
     ...item(
       name,
@@ -474,7 +495,14 @@ export const tools: FlowTool[] = [
                       source: 'teaching',
                       review: 'verified',
                       ...(name === 'rules_search'
-                        ? { derived: false, snippet: ruleResult.text, locator: 'synthetic-locator' }
+                        ? {
+                            derived: false,
+                            readableOriginal: true,
+                            matchedTerms: ['crossing'],
+                            exactTitle: true,
+                            snippet: ruleResult.text,
+                            locator: 'synthetic-locator',
+                          }
                         : {}),
                       pages: ruleResult.pages,
                     },

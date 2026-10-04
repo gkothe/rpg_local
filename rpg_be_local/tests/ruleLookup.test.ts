@@ -53,6 +53,52 @@ function fixture(): RuleSystem {
   return system;
 }
 
+test('book search matches relevant title/text terms without requiring every query word', () => {
+  const system = fixture();
+  const node = ruleNodeAt(system, 'core_rules.example.deep');
+  node.name = 'Maneuver';
+  node.text = 'Movement lets a combatant change position. Resolve contests and ties here.';
+  delete node.pageSpans;
+  const lookup = new RuleLookup();
+  for (const query of ['movement positioning maneuver', 'contest tie', 'find the maneuver rules']) {
+    const result = lookup.execute(system, 'rules_search', { query }, randomUUID());
+    const hit = (result.entries as Record<string, unknown>[])[0]!;
+    assert.equal(hit.path, 'core_rules.example.deep');
+    assert.equal(hit.readableOriginal, true);
+    assert.equal(hit.derived, false);
+  }
+  assert.deepEqual(
+    lookup.execute(system, 'rules_search', { query: 'move' }, randomUUID()).entries,
+    []
+  );
+  assert.deepEqual(
+    lookup.execute(system, 'rules_search', { query: 'movement', source: 'other' }, randomUUID())
+      .entries,
+    []
+  );
+});
+
+test('exact aliases lead partial matches and summaries remain navigation even with readable originals', () => {
+  const system = fixture();
+  const node = ruleNodeAt(system, 'core_rules.example.deep');
+  node.aliases = ['weapon damage chart'];
+  node.summary = 'Animal hyena guide';
+  const lookup = new RuleLookup();
+  const exact = (
+    lookup.execute(system, 'rules_search', { query: 'weapon damage chart' }, randomUUID())
+      .entries as Record<string, unknown>[]
+  )[0]!;
+  assert.equal(exact.exactTitle, true);
+  const summary = (
+    lookup.execute(system, 'rules_search', { query: 'dog wolf animal hyena' }, randomUUID())
+      .entries as Record<string, unknown>[]
+  )[0]!;
+  assert.equal(summary.derived, true);
+  assert.equal(summary.readableOriginal, true);
+  assert.equal(summary.locator, null);
+  assert.deepEqual(summary.matchedTerms, ['animal', 'hyena']);
+});
+
 test('case-folding expansion preserves original UTF-16 locator offsets and numeric filters reject string comparisons', () => {
   const system = fixture();
   const node = ruleNodeAt(system, 'core_rules.example.deep');

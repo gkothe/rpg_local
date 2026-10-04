@@ -177,8 +177,13 @@ test('desktop play preserves typed drafts, commits changes and undoes the turn',
   await page.getByLabel('Your action').fill('Keep this unsent draft');
   await expect(page.getByText(job.narrative!)).toBeVisible();
   await expect(page.getByLabel('Your action')).toHaveValue('Keep this unsent draft');
+  await expect(page.getByLabel('Show debug info')).not.toBeChecked();
+  await expect(page.getByText('1 state change', { exact: true })).toHaveCount(0);
+  await page.getByLabel('Show debug info').check();
   await page.getByText('1 state change', { exact: true }).click();
   await expect(page.getByText(job.changes[0])).toBeVisible();
+  await page.getByLabel('Show debug info').uncheck();
+  await expect(page.getByText('1 state change', { exact: true })).toHaveCount(0);
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Undo last turn' }).click();
   await expect(page.getByText(job.narrative!)).toHaveCount(0);
@@ -223,6 +228,44 @@ test('setup submits only explicit campaign fields', async ({ page }) => {
   await expect(page.getByLabel('Source name')).toHaveValue('Unfinished source');
   expect(created).toBe(true);
 });
+test('campaign sidebar scrolls independently at the same height as the chat', async ({ page }) => {
+  const campaign = fixtureCampaign();
+  campaign.memory = {
+    id: 'long-memory',
+    text: 'The campaign continues through the crowded arena. '.repeat(200),
+    valid: true,
+    coveredTurnIds: [],
+    createdAt: new Date().toISOString(),
+  };
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const data =
+      path === '/api/settings'
+        ? options
+        : path === '/api/providers'
+          ? providers
+          : path === `/api/campaigns/${campaign.id}`
+            ? campaign
+            : [];
+    await route.fulfill({ json: { data } });
+  });
+  await page.goto(`/campaigns/${campaign.id}`);
+  for (const height of [500, 900]) {
+    await page.setViewportSize({ width: 1280, height });
+    const transcript = await page.locator('.transcript').boundingBox();
+    const sidebar = await page.locator('.campaign-aside').boundingBox();
+    expect(sidebar!.height).toBe(transcript!.height);
+    expect(sidebar!.y).toBe(transcript!.y);
+    const scroll = await page.locator('.campaign-aside').evaluate((element) => {
+      element.scrollTop = 100;
+      return { top: element.scrollTop, height: element.clientHeight, total: element.scrollHeight };
+    });
+    expect(scroll.total).toBeGreaterThan(scroll.height);
+    expect(scroll.top).toBe(100);
+    expect(await page.locator('.transcript').evaluate((element) => element.scrollTop)).toBe(0);
+  }
+});
+
 test('journal layout has no horizontal overflow across standard widths', async ({ page }) => {
   const campaign = { ...fixtureCampaign(), turns: [fixtureTurn()] };
   await page.route('**/api/**', async (route) => {

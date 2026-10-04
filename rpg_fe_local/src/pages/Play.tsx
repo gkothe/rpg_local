@@ -37,6 +37,7 @@ export default function PlayPage() {
     [feedback, setFeedback] = useState(''),
     savingGuard = useRef(false);
   const [showAudit, setShowAudit] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
   const game = useTurn(resource.data, resource.reload, settings.data),
     campaign = resource.data;
   const transcript = useRef<HTMLElement | null>(null);
@@ -212,14 +213,24 @@ export default function PlayPage() {
         />
       </div>
       <div hidden={tab !== 'play'}>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={showAudit}
-            onChange={(e) => setShowAudit(e.target.checked)}
-          />
-          Show turn audit (including undone and failed attempts)
-        </label>
+        <div className="transcript-options">
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={showAudit}
+              onChange={(e) => setShowAudit(e.target.checked)}
+            />
+            Show turn audit (including undone and failed attempts)
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={showDebug}
+              onChange={(e) => setShowDebug(e.target.checked)}
+            />
+            Show debug info
+          </label>
+        </div>
         <button
           disabled={saving}
           onClick={async () => {
@@ -301,22 +312,28 @@ export default function PlayPage() {
                         <ReadAloud text={t.narrative} />
                       )}
                     </div>
-                    <DiceRolls
-                      turn={t}
-                      characters={campaign.characters}
-                      terminal={
-                        !!settings.data?.turnStatusOptions.find((option) => option.id === t.status)
-                          ?.terminal
-                      }
-                    />
-                    <RuleEvidence
-                      turn={t}
-                      current={ruleSystem.data ?? undefined}
-                      terminal={
-                        !!settings.data?.turnStatusOptions.find((option) => option.id === t.status)
-                          ?.terminal
-                      }
-                    />
+                    {showDebug && (
+                      <DiceRolls
+                        turn={t}
+                        characters={campaign.characters}
+                        terminal={
+                          !!settings.data?.turnStatusOptions.find(
+                            (option) => option.id === t.status
+                          )?.terminal
+                        }
+                      />
+                    )}
+                    {showDebug && (
+                      <RuleEvidence
+                        turn={t}
+                        current={ruleSystem.data ?? undefined}
+                        terminal={
+                          !!settings.data?.turnStatusOptions.find(
+                            (option) => option.id === t.status
+                          )?.terminal
+                        }
+                      />
+                    )}
                     {t.error && <ErrorNotice message={t.error} />}
                     {t.traceWarning && <p className="notice">{t.traceWarning}</p>}
                     {t.editingPending && (
@@ -340,7 +357,7 @@ export default function PlayPage() {
                         </button>
                       </div>
                     )}
-                    {!!t.operationExplanations?.length && (
+                    {showDebug && !!t.operationExplanations?.length && (
                       <details className="changes">
                         <summary>Reasons for state changes</summary>
                         <ul>
@@ -395,7 +412,7 @@ export default function PlayPage() {
                           Use as a new action (new dice)
                         </button>
                       )}
-                    {t.changes.length > 0 && (
+                    {showDebug && t.changes.length > 0 && (
                       <details className="changes">
                         <summary>
                           {t.changes.length} state change{t.changes.length === 1 ? '' : 's'}
@@ -493,19 +510,6 @@ export default function PlayPage() {
               </button>
             </div>
           )}
-          {game.busy && (
-            <div className="row">
-              <p role="status">
-                <LoaderCircle className="loading-spinner" aria-hidden="true" />{' '}
-                {game.submitting
-                  ? 'Submitting action…'
-                  : game.turn?.editingPending
-                    ? 'Editing GM narrative…'
-                    : 'GM is preparing your turn…'}
-              </p>
-              {!game.submitting && <button onClick={() => void game.cancel()}>Cancel turn</button>}
-            </div>
-          )}
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -551,6 +555,23 @@ export default function PlayPage() {
                   Undo last turn
                 </button>
               </div>
+              {game.busy && (
+                <div className="composer-progress row wrap">
+                  <p role="status">
+                    <LoaderCircle className="loading-spinner" aria-hidden="true" />{' '}
+                    {game.submitting
+                      ? 'Submitting action…'
+                      : game.turn?.editingPending
+                        ? 'Editing GM narrative…'
+                        : 'GM is preparing your turn…'}
+                  </p>
+                  {!game.submitting && (
+                    <button type="button" onClick={() => void game.cancel()}>
+                      Cancel turn
+                    </button>
+                  )}
+                </div>
+              )}
               <button
                 className="primary"
                 disabled={game.busy || game.editingBlocked || saving || !draft.trim() || !playable}

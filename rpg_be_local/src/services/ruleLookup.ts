@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { Problem } from '../errors.js';
+import { rankRuleNode } from '../domain/ruleSearch.js';
 import {
   RULE_COLUMNS,
   RULE_LIMITS,
@@ -66,7 +67,7 @@ type Position = {
   locator: boolean;
 };
 const MAX_LOOKUP_TOKENS = 4096;
-type SearchHit = { path: string; node: RuleNode; rank: number; match: number };
+type SearchHit = { path: string; node: RuleNode } & ReturnType<typeof rankRuleNode>;
 // Only immutable, bounded Store snapshots enter this cache. Cursor/receipt creation stays fresh.
 const searchCaches = new WeakMap<RuleSystem, Map<string, SearchHit[]>>();
 const MAX_SEARCH_CACHE_QUERIES = 8;
@@ -296,7 +297,6 @@ export class RuleLookup {
     } else {
       const args = ruleToolSchemas.rules_search.parse(input);
       cap = RULE_LIMITS.searchHits;
-      const terms = args.query.toLowerCase().split(/\s+/);
       let cache = Object.isFrozen(system) ? searchCaches.get(system) : undefined;
       if (Object.isFrozen(system) && !cache) {
         cache = new Map();
@@ -311,28 +311,8 @@ export class RuleLookup {
                 args.columns.includes(path.split('.')[0] as (typeof RULE_COLUMNS)[number])) &&
               (!args.source || node.source === args.source)
           )
-          .map(({ path, node }) => {
-            const names = [node.name, ...node.aliases].map((name) => name.toLowerCase());
-            const direct = node.text.toLowerCase();
-            const summary = (node.summary ?? '').toLowerCase();
-            const rank = names.includes(args.query.toLowerCase())
-              ? 0
-              : terms.every((term) => direct.includes(term))
-                ? 1
-                : terms.every((term) => summary.includes(term))
-                  ? 2
-                  : -1;
-            const foldedMatch = direct.indexOf(terms[0]!);
-            let foldedOffset = 0;
-            let originalOffset = 0;
-            for (const character of node.text) {
-              if (foldedOffset + character.toLowerCase().length > foldedMatch) break;
-              foldedOffset += character.toLowerCase().length;
-              originalOffset += character.length;
-            }
-            return { path, node, rank, match: foldedMatch < 0 ? 0 : originalOffset };
-          })
-          .filter((hit) => hit.rank >= 0)
+          .map(({ path, node }) => ({ path, node, ...rankRuleNode(node, args.query) }))
+          .filter((hit) => hit.found)
           .sort(
             (a, b) =>
               a.rank - b.rank ||
@@ -349,7 +329,7 @@ export class RuleLookup {
           cache.set(argumentHash, hits);
         }
       }
-      entries = hits.map(({ path, node, rank, match }) => {
+      entries = hits.map(({ path, node, derived, matchedTerms, exactTitle, match }) => {
         let start = Math.max(0, match - 80);
         if (start && /[\uDC00-\uDFFF]/.test(node.text[start]!)) start--;
         locatorOffsets.set(path, start);
@@ -360,9 +340,12 @@ export class RuleLookup {
           name: node.name,
           source: node.source,
           review: node.review,
-          derived: rank === 2,
-          snippet: rank === 2 ? (node.summary ?? '').slice(0, 120) : node.text.slice(start, end),
-          locator: rank !== 2 && node.text.length ? 'x'.repeat(32) : null,
+          derived,
+          matchedTerms,
+          exactTitle,
+          readableOriginal: !node.structural && node.text.length > 0,
+          snippet: derived ? (node.summary ?? '').slice(0, 120) : node.text.slice(start, end),
+          locator: !derived && node.text.length ? 'x'.repeat(32) : null,
           pages: ruleWindowPages(node, start, end),
         };
       });

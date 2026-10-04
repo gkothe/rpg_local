@@ -3,6 +3,7 @@ import { DICE_TOOL_NAME, diceInputSchema, type DiceResult } from '../domain/dice
 import { RULE_TOOLS, serializedBytes, type RuleTool } from '../domain/rules.js';
 import { ruleToolSchemas } from '../services/ruleLookup.js';
 import { Problem } from '../errors.js';
+import { findRules, RULE_FIND_TOOL_NAME } from './rulesFind.js';
 import {
   CAMPAIGN_SOURCE_GET_TOOL_NAME,
   CAMPAIGN_SOURCE_SEARCH_TOOL_NAME,
@@ -67,7 +68,9 @@ function ownedRegistrations(
   roll: GameplayToolRegistration['handler'],
   read: GameplayTools['options']['read'],
   knowledge?: FrozenKnowledge,
-  sourceRead?: GameplayTools['options']['readCampaignSource']
+  sourceRead?: GameplayTools['options']['readCampaignSource'],
+  ruleFind = false,
+  assertActive: () => Promise<void> = async () => {}
 ): GameplayToolRegistration[] {
   const recall = knowledge ? createKnowledgeRecall(knowledge) : undefined;
   return [
@@ -117,6 +120,20 @@ function ownedRegistrations(
       handler: (input, id) => read!(name, input, JSON.stringify(id)),
       invalid: (input, id) => read!(name, input, JSON.stringify(id)),
     })),
+    ...(ruleFind
+      ? [
+          {
+            name: RULE_FIND_TOOL_NAME,
+            description:
+              'Find relevant book rules and read up to three eligible originals in one call. Each read contains its own citable receipt; reuse these originals before further reads. Follow search/read cursors or unreadPaths for more text. Search metadata alone is not authority.',
+            schema: ruleToolSchemas.rules_search,
+            purpose: 'book' as const,
+            capability: 'rules' as const,
+            handler: (input: unknown, id: string | number) =>
+              findRules(read!, input, id, assertActive),
+          },
+        ]
+      : []),
     ...(recall
       ? [
           {
@@ -170,6 +187,7 @@ export class GameplayTools {
   constructor(
     readonly options: {
       book: boolean;
+      ruleFind?: boolean;
       roll: (input: unknown, requestId: string | number) => Promise<DiceResult>;
       read?: (
         tool: RuleTool,
@@ -192,7 +210,18 @@ export class GameplayTools {
       throw new Error('Book gameplay requires persisted rule reads');
     this.registrations = (
       options.registrations ??
-      ownedRegistrations(options.roll, options.read, options.knowledge, options.readCampaignSource)
+      ownedRegistrations(
+        options.roll,
+        options.read,
+        options.knowledge,
+        options.readCampaignSource,
+        options.ruleFind,
+        async () => {
+          if (options.signal?.aborted)
+            throw new Problem(409, 'cancelled', 'Gameplay attempt cancelled');
+          await options.assertActive();
+        }
+      )
     ).filter((tool) => options.book || tool.purpose === 'default');
     if (new Set(this.registrations.map((tool) => tool.name)).size !== this.registrations.length)
       throw new Error('Duplicate gameplay tool registration');

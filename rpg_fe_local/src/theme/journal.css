@@ -454,6 +454,12 @@ small {
   margin-top: 1rem;
   flex-wrap: wrap;
 }
+.composer-progress {
+  margin-left: auto;
+}
+.composer-progress p {
+  margin: 0;
+}
 .dictation {
   display: flex;
   gap: 0.6rem;
@@ -536,6 +542,12 @@ details > .stack {
   display: flex;
   gap: 0.6rem;
   align-items: center;
+}
+.transcript-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  margin-bottom: 0.5rem;
 }
 .check input {
   width: 20px;
@@ -752,11 +764,14 @@ hr {
 .character-section textarea {
   width: 100%;
 }
-.transcript {
+.transcript,
+.campaign-aside {
   height: 60vh;
   min-height: 20rem;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+.transcript {
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 1rem;

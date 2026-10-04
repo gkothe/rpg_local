@@ -72,6 +72,9 @@ it('shows automatic knowledge changes as text in the existing chat and preserves
   );
   const action = await screen.findByLabelText('Your action');
   fireEvent.change(action, { target: { value: 'Ask about the rumor' } });
+  expect(screen.getByLabelText('Show debug info')).not.toBeChecked();
+  expect(screen.queryByText(change)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText('Show debug info'));
   expect(await screen.findByText(change)).toBeInTheDocument();
   expect(container.querySelector('img')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Game master' }));

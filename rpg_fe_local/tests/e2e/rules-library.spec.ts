@@ -52,6 +52,7 @@ test('saved literal citations and outdated audit remain visible after the curren
     await route.fulfill({ json: { data } });
   });
   await page.goto(`/campaigns/${campaign.id}`);
+  await page.getByLabel('Show debug info').check();
   await page.getByLabel('Your action').fill('Keep citation composer draft');
   await page.getByText('Rule evidence · 1 citations').click();
   await expect(

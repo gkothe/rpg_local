@@ -1,3 +1,6 @@
+import { GameplayTools } from '../src/providers/gameplayTools.js';
+import { validateRuleCitations, citationPages } from '../src/domain/ruleCitationValidation.js';
+import { ruleCitationSchema, RuleReview } from '../src/domain/rules.js';
 import { ARCHIVE_FORMAT_VERSION } from '../src/domain/versions.js';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -1063,5 +1066,160 @@ test(
       .attach('files', Buffer.from('{}'), 'manifest.json')
       .expect(413);
     assert.equal(response.body.code, 'rules_upload_size');
+  }
+);
+
+test(
+  'combined book reads remain citable, replay across lookup restarts and survive archive export',
+  { skip: !enabled },
+  async () => {
+    const rules = new RuleStore(store);
+    const created = await rules.create(`combined-${randomUUID()}`, 'Combined fixture');
+    const columns = emptyRuleColumns();
+    const quote = 'Movement lets a combatant change position.';
+    columns.core_rules.example = {
+      name: 'Movement',
+      aliases: [],
+      text: quote,
+      source: 'example',
+      review: RuleReview.Extracted,
+      pdfPages: [1],
+      printedPages: ['1'],
+      children: {},
+    };
+    columns.core_rules.example.children.second = {
+      ...columns.core_rules.example!,
+      name: 'Position',
+      children: {},
+      text: 'Movement also changes the second position.',
+    };
+    columns.core_rules.example.children.third = {
+      ...columns.core_rules.example!,
+      name: 'Other movement',
+      children: {},
+      text: 'Movement changes the third position.',
+    };
+    const expected = await rules.publish(created.systemId, created.revision, () => ({
+      ...columns,
+      instructions: 'Read originals',
+      sources: [{ slug: 'example', title: 'Synthetic', pageCount: 1, pdfHash: null }],
+      mapping: {},
+    }));
+    const campaign = newCampaign({ name: 'Combined receipts', systemId: expected.systemId });
+    await store.insert(campaign);
+    const turn: Turn = {
+      id: randomUUID(),
+      campaignId: campaign.id,
+      requestId: randomUUID(),
+      status: TurnStatus.Running,
+      action: 'Read',
+      narrative: null,
+      changes: [],
+      error: null,
+      undone: false,
+      settings: campaign.settings,
+      ruleContext: expected,
+      context: {
+        revision: campaign.revision,
+        prompt: '{}',
+        estimatedTokens: 2,
+        estimator: 'fixture',
+        sourceVersions: [],
+        historyIds: [],
+        memoryId: null,
+        ruleContext: expected,
+      },
+      createdAt: new Date().toISOString(),
+      completedAt: null,
+    };
+    await store.pool.query(
+      "INSERT INTO turns(id,campaign_id,request_id,payload_hash,status,document,owner,lease_until) VALUES($1,$2,$3,$4,$5,$6,$7,now()+interval '1 minute')",
+      [turn.id, campaign.id, turn.requestId, 'a'.repeat(64), turn.status, turn, ownerId]
+    );
+
+    const registry = (lookup: RuleLookup, signal?: AbortSignal, interrupt?: () => void) =>
+      new GameplayTools({
+        book: true,
+        ruleFind: true,
+        signal,
+        assertActive: async () => {},
+        roll: async () => {
+          throw Error('Unexpected dice');
+        },
+        read: async (tool, input, id) => {
+          const read = await rules.read(turn, tool, input, id, lookup, signal);
+          if (tool === 'rules_get') interrupt?.();
+          return read.payload;
+        },
+      });
+    const interrupted = new AbortController();
+    await assert.rejects(
+      registry(new RuleLookup(), interrupted.signal, () => interrupted.abort()).call(
+        'rules_find',
+        { query: 'movement position' },
+        'native-find'
+      ),
+      /cancelled/
+    );
+    assert.equal(
+      (
+        await store.pool.query(
+          'SELECT count(*)::int AS total FROM turn_rule_reads WHERE turn_id=$1',
+          [turn.id]
+        )
+      ).rows[0].total,
+      2
+    );
+    const first = (await registry(new RuleLookup()).call(
+      'rules_find',
+      { query: 'movement position' },
+      'native-find'
+    )) as Record<string, unknown>;
+    const second = await registry(new RuleLookup()).call(
+      'rules_find',
+      { query: 'movement position' },
+      'native-find'
+    );
+    assert.deepEqual(second, first);
+    const saved = (
+      await store.pool.query('SELECT * FROM turn_rule_reads WHERE turn_id=$1', [turn.id])
+    ).rows.map((row) => rules.readFromRow(row));
+    assert.equal(saved.length, 4);
+    const original = saved.find(
+      (read) => read.tool === 'rules_get' && read.payload.path === 'core_rules.example'
+    )!;
+    validateRuleCitations(
+      {
+        ruleCitations: [
+          ruleCitationSchema.parse({
+            receiptId: original.id,
+            path: original.payload.path as string,
+            source: 'example',
+            systemId: expected.systemId,
+            revision: expected.revision,
+            contentHash: expected.contentHash,
+            quote,
+            start: 0,
+            end: quote.length,
+            ...citationPages(original.payload, 0, quote.length),
+          }),
+        ],
+      },
+      saved,
+      campaign.id,
+      turn.id,
+      expected
+    );
+    await assert.rejects(
+      registry(new RuleLookup()).call('rules_find', { query: 'different' }, 'native-find'),
+      /changed arguments/
+    );
+    await store.pool.query(
+      "UPDATE turns SET status=$2, document=jsonb_set(document,'{status}',to_jsonb($2::text)) WHERE id=$1",
+      [turn.id, TurnStatus.Cancelled]
+    );
+    const archive = await new LibraryService(store).export(campaign.id);
+    assert.equal(remapArchive(archive).turns[0]!.ruleReads!.length, 4);
+    await store.pool.query('DELETE FROM campaigns WHERE id=$1', [campaign.id]);
   }
 );

@@ -176,7 +176,7 @@ test('educational graph, document sections and source references remain navigabl
 test('tool arguments, frozen recall results and exact book citation match backend contracts', () => {
   diceInputSchema.parse(tools.find((tool) => tool.id === 'roll_dice').args);
   for (const tool of tools.filter((tool) => tool.bookOnly))
-    ruleToolSchemas[tool.id].parse(tool.args);
+    ruleToolSchemas[tool.id === 'rules_find' ? 'rules_search' : tool.id].parse(tool.args);
   const recall = createKnowledgeRecall({
     campaignId: ids.campaign,
     records: [knowledgeRecord],

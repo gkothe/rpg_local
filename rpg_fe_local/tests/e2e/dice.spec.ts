@@ -120,6 +120,7 @@ test('terminal dice stay visible, retry preserves drafts and undo retains the au
     await route.fulfill({ json: { data } });
   });
   await page.goto(`/campaigns/${campaign.id}`);
+  await page.getByLabel('Show debug info').check();
   await expect(page.getByText('Declared before rolling: +2 agility; target 12')).toBeVisible();
   await expect(page.getByLabel('AI CLI').locator('option[value="agy"]')).toHaveAttribute(
     'disabled',
@@ -154,6 +155,7 @@ test('terminal dice stay visible, retry preserves drafts and undo retains the au
     buffer: archiveBuffer,
   });
   await expect(page).toHaveURL(/88888888-8888-4888-8888-888888888888/);
+  await page.getByLabel('Show debug info').check();
   await page.getByLabel('Show turn audit (including undone and failed attempts)').check();
   await expect(
     page.getByText('Correction: Rope bonus brings the total to 13; success')

@@ -1,3 +1,4 @@
+import { RULE_FIND_TOOL_NAME } from '../providers/rulesFind.js';
 import { bindResponseCitations } from '../domain/citationBinding.js';
 import { atResponseField } from '../domain/responseFields.js';
 import { validateWithFieldRepair } from './responseRepair.js';
@@ -605,6 +606,10 @@ export class TurnService {
             const lookup = new RuleLookup();
             const sourceLookup = new CampaignSourceLookup(this.store);
             registry = new GameplayTools({
+              ruleFind:
+                v5 &&
+                (!frozenDefinitions ||
+                  frozenDefinitions.some((tool) => tool.name === RULE_FIND_TOOL_NAME)),
               book: t.ruleContext?.kind === RuleSystemKind.Library,
               knowledge: frozen,
               readCampaignSource: v5
