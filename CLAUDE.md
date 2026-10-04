@@ -1,12 +1,12 @@
 # Local RPG shared project rules
 
-Read this file and the target app's `CLAUDE.md` before changing its code. Read both app files for changes crossing the API boundary. The reviewed scope lives in `docs/plans/local-rpg.md`; tooling decisions live in `docs/development-standards.md`.
+Read this file and the target app's `CLAUDE.md` before changing its code. Read both app files for changes crossing the API boundary. Maintained technical and setup documentation lives in `docs/documentation/`. Read `docs/documentation/rpg-backend-architecture.md` for the current architecture.
 
 ## Working conventions
 
 - Use the coding skill and relevant specialists when available. Skills are shared across harnesses; never install, edit or delete them without the user's explicit confirmation. A public checkout must work without machine-specific skill paths.
-- Keep common rules here, app gotchas in each app's `CLAUDE.md`, and topic details in `docs/`. Record non-obvious verified findings concisely; correct stale entries. Investigations and reviews produce a Markdown report in `docs/reviews/`.
-- Old RPG, Gylden Rune and MarkItDown checkouts are read-only references. Never copy credentials, `.env`, private data, logs, dumps or old Git histories. Use placeholders in committed examples. Never use a production database for development or tests.
+- Keep common rules here, app gotchas in each app's `CLAUDE.md`, and topic details in `docs/`. Record non-obvious verified findings concisely; correct stale entries. Keep temporary plans, investigation journals and review reports outside the repository. Update maintained documentation with verified behavior rather than retaining implementation history.
+- Never copy credentials, `.env`, private data, logs, dumps or unrelated Git histories into this repository. Use placeholders in committed examples. Never use a production database for development or tests.
 - Keep scratch files, temporary scripts and diff dumps outside the repository. Permanent tests and maintained tooling belong in the repository.
 - Root npm workspaces own installation and `package-lock.json`. Coordinate installs between agents. Use normal `npm install`; do not inherit another project's dependency workarounds.
 
@@ -33,9 +33,9 @@ Read this file and the target app's `CLAUDE.md` before changing its code. Read b
 - Run meaningful behavior tests for new features and affected regressions. Tests use an explicitly isolated database and mock external boundaries; live checks are reported separately.
 - ESLint, TypeScript and Prettier are separate checks. `npm run lint` runs real ESLint, not a renamed typecheck. Keep checks free of warnings and fix problems rather than broadly disabling rules.
 - Root commands: `npm run typecheck`, `npm run lint`, `npm run lint:fix`, `npm run format`, `npm run format:check`, `npm test`, `npm run build`. Frontend browser tests use `npm run test:e2e --workspace rpg-fe-local`.
-- Prettier matches Gylden Rune: semicolons, single quotes, 100-column width, two-space indentation and ES5 trailing commas. It formats; ESLint checks correctness. Keep `eslint-config-prettier` last to avoid conflicting formatting rules.
+- Prettier uses semicolons, single quotes, 100-column width, two-space indentation and ES5 trailing commas. It formats; ESLint checks correctness. Keep `eslint-config-prettier` last to avoid conflicting formatting rules.
 - A typecheck must include actual source files. This frontend's current tsconfig directly includes `src`, tests and config files, so `tsc --noEmit` is valid. If converted to project references, use `tsc -b`; do not leave a successful no-op check.
-- Report actual commands/results and remaining setup gates in each app's `IMPLEMENTATION.md`. Mocked checks do not establish live provider, OCR or phone compatibility.
+- Report actual commands/results and remaining setup gates in the task response. Update maintained docs when user-facing setup or behavior changes. Mocked checks do not establish live provider, OCR or phone compatibility.
 
 ## Review and defect prevention
 

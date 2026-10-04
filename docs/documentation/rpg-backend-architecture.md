@@ -40,7 +40,7 @@ This document describes the implementation of `rpg_be_local`, reviewed against s
 
 ## 1. Executive Overview & Architectural Philosophy
 
-Implementation evidence: [package.json](../rpg_be_local/package.json), [app.ts](../rpg_be_local/src/app.ts), [service.ts](../rpg_be_local/src/providers/service.ts).
+Implementation evidence: [package.json](../../rpg_be_local/package.json), [app.ts](../../rpg_be_local/src/app.ts), [service.ts](../../rpg_be_local/src/providers/service.ts).
 
 The `rpg_be_local` application is a local-first, privacy-respecting Tabletop RPG Game Master (GM) backend built on **Node.js (ESM)**, **Express 5**, and **PostgreSQL**.
 
@@ -118,7 +118,7 @@ flowchart TB
 
 ### 2.1 High-Level Request Pipeline & Access Boundary
 
-Implementation evidence: [app.ts](../rpg_be_local/src/app.ts), [security.ts](../rpg_be_local/src/security.ts), [server.ts](../rpg_be_local/src/server.ts).
+Implementation evidence: [app.ts](../../rpg_be_local/src/app.ts), [security.ts](../../rpg_be_local/src/security.ts), [server.ts](../../rpg_be_local/src/server.ts).
 
 `app.ts` installs Host/Origin validation before JSON parsing, API routes and static frontend serving. LAN pairing middleware applies to `/api` only:
 
@@ -228,7 +228,7 @@ Statuses below are representative, not exhaustive: shared boundary denials, `422
 
 ### 2.2 The Game Turn Lifecycle (Action to Committed State)
 
-Implementation evidence: [turns.ts](../rpg_be_local/src/services/turns.ts), [store.ts](../rpg_be_local/src/store.ts), [app.ts](../rpg_be_local/src/app.ts).
+Implementation evidence: [turns.ts](../../rpg_be_local/src/services/turns.ts), [store.ts](../../rpg_be_local/src/store.ts), [app.ts](../../rpg_be_local/src/app.ts).
 
 `TurnService.submit` hashes the exact parsed input with SHA-256. The same request ID and input return the existing turn, even if provider availability changed; changed input conflicts. Campaign locks and the active-turn index protect submission and commit. Generation runs outside transactions. Recovery marks expired work interrupted; it does not automatically restart inference.
 
@@ -305,7 +305,7 @@ sequenceDiagram
 
 ### 2.3 In-Session Tool Calling Architecture & Provider Transports
 
-Implementation evidence: [gameplayTools.ts](../rpg_be_local/src/providers/gameplayTools.ts), [claudeDice.ts](../rpg_be_local/src/providers/claudeDice.ts), [codexDice.ts](../rpg_be_local/src/providers/codexDice.ts), [antigravityMcpBook.ts](../rpg_be_local/src/providers/antigravityMcpBook.ts), [discovery.ts](../rpg_be_local/src/providers/discovery.ts).
+Implementation evidence: [gameplayTools.ts](../../rpg_be_local/src/providers/gameplayTools.ts), [claudeDice.ts](../../rpg_be_local/src/providers/claudeDice.ts), [codexDice.ts](../../rpg_be_local/src/providers/codexDice.ts), [antigravityMcpBook.ts](../../rpg_be_local/src/providers/antigravityMcpBook.ts), [discovery.ts](../../rpg_be_local/src/providers/discovery.ts).
 
 During a game turn, the model has access to application-owned tools exposed through authenticated private loopback HTTP MCP (Claude/Antigravity) or stdio JSON-RPC dynamic tools (Codex). Default v4 gameplay exposes dice and knowledge recall; book mode adds rule lookup tools:
 
@@ -387,7 +387,7 @@ To prevent injection attacks, path traversal, or unpredictable Windows command-l
 
 ### 2.4 Automatic Response Repair & Self-Correction Loop
 
-Implementation evidence: [responseRetry.ts](../rpg_be_local/src/domain/responseRetry.ts), [turns.ts](../rpg_be_local/src/services/turns.ts).
+Implementation evidence: [responseRetry.ts](../../rpg_be_local/src/domain/responseRetry.ts), [turns.ts](../../rpg_be_local/src/services/turns.ts).
 
 When the LLM finishes generation, its response undergoes strict validation via Zod schemas. If the model fails (e.g., outputs markdown instead of JSON, violates schema, forgets to explain a dice roll, or invents a fake receipt ID), the backend executes **automatic response repair** (`responseRetry.ts: withResponseRetries`):
 
@@ -432,7 +432,7 @@ Account quota (`provider_quota`) and authentication (`provider_auth`) failures a
 
 ### 2.5 Turn Recovery, Leases & Heartbeats
 
-Implementation evidence: [turns.ts](../rpg_be_local/src/services/turns.ts), [store.ts](../rpg_be_local/src/store.ts), [server.ts](../rpg_be_local/src/server.ts), [processingErrors.ts](../rpg_be_local/src/processingErrors.ts).
+Implementation evidence: [turns.ts](../../rpg_be_local/src/services/turns.ts), [store.ts](../../rpg_be_local/src/store.ts), [server.ts](../../rpg_be_local/src/server.ts), [processingErrors.ts](../../rpg_be_local/src/processingErrors.ts).
 
 Expired leases enable recovery while the server and PostgreSQL are available. This is eventual interruption marking, not a guarantee of progress during database outage:
 
@@ -475,7 +475,7 @@ Expired leases enable recovery while the server and PostgreSQL are available. Th
 
 ### 2.6 Source Extraction, Audio Pipelines & Character Parsing
 
-Implementation evidence: [sources.ts](../rpg_be_local/src/services/sources.ts), [sourceLibrary.ts](../rpg_be_local/src/services/sourceLibrary.ts), [characterParser.ts](../rpg_be_local/src/services/characterParser.ts), [sourceSections.ts](../rpg_be_local/src/domain/sourceSections.ts), [extract.py](../rpg_be_local/python/extract.py), [transcribe.py](../rpg_be_local/python/transcribe.py).
+Implementation evidence: [sources.ts](../../rpg_be_local/src/services/sources.ts), [sourceLibrary.ts](../../rpg_be_local/src/services/sourceLibrary.ts), [characterParser.ts](../../rpg_be_local/src/services/characterParser.ts), [sourceSections.ts](../../rpg_be_local/src/domain/sourceSections.ts), [extract.py](../../rpg_be_local/python/extract.py), [transcribe.py](../../rpg_be_local/python/transcribe.py).
 
 #### Source Import & Immediate Confirmation Policy
 
@@ -546,7 +546,7 @@ When generating a player character from a confirmed source document (`POST /api/
 
 ### 2.7 Rulebook Imports, Previews & Private Backups
 
-Implementation evidence: [ruleUpload.ts](../rpg_be_local/src/services/ruleUpload.ts), [ruleLibrary.ts](../rpg_be_local/src/services/ruleLibrary.ts), [ruleImport.ts](../rpg_be_local/src/domain/ruleImport.ts), [rulePreview.ts](../rpg_be_local/src/services/rulePreview.ts), [ruleBackup.ts](../rpg_be_local/src/services/ruleBackup.ts), [ruleMapping.ts](../rpg_be_local/src/domain/ruleMapping.ts).
+Implementation evidence: [ruleUpload.ts](../../rpg_be_local/src/services/ruleUpload.ts), [ruleLibrary.ts](../../rpg_be_local/src/services/ruleLibrary.ts), [ruleImport.ts](../../rpg_be_local/src/domain/ruleImport.ts), [rulePreview.ts](../../rpg_be_local/src/services/rulePreview.ts), [ruleBackup.ts](../../rpg_be_local/src/services/ruleBackup.ts), [ruleMapping.ts](../../rpg_be_local/src/domain/ruleMapping.ts).
 
 Game rulebooks (e.g., core manuals, bestiaries) operate as standalone shared libraries partitioned into **11 canonical columns**:
 
@@ -594,7 +594,7 @@ To allow models to navigate massive rulebooks without context exhaustion, `gener
 
 ### 2.8 Campaign Archiving, Normalization & Templates
 
-Implementation evidence: [library.ts](../rpg_be_local/src/services/library.ts), [versions.ts](../rpg_be_local/src/domain/versions.ts).
+Implementation evidence: [library.ts](../../rpg_be_local/src/services/library.ts), [versions.ts](../../rpg_be_local/src/domain/versions.ts).
 
 - **Campaign Export (`GET /api/campaigns/:id/export`)**: Generates a standalone JSON archive (`format: 'local-rpg'`, `version: 4`). Permitted only when the campaign is idle. Excludes original raw binary documents (`source_artifacts`) and active authentication tokens.
 - **Campaign Import & Upward Version Migration (`services/library.ts: remapArchive`)**:
@@ -625,7 +625,7 @@ Implementation evidence: [library.ts](../rpg_be_local/src/services/library.ts), 
 
 ### 3.1 PostgreSQL Relational & JSONB Schema
 
-Implementation evidence: [0001_local.sql](../rpg_be_local/migrationssql/0001_local.sql), [0004_dice_rolls.sql](../rpg_be_local/migrationssql/0004_dice_rolls.sql), [0005_rule_systems.sql](../rpg_be_local/migrationssql/0005_rule_systems.sql), [0008_campaign_knowledge.sql](../rpg_be_local/migrationssql/0008_campaign_knowledge.sql), [config.ts](../rpg_be_local/src/config.ts).
+Implementation evidence: [0001_local.sql](../../rpg_be_local/migrationssql/0001_local.sql), [0004_dice_rolls.sql](../../rpg_be_local/migrationssql/0004_dice_rolls.sql), [0005_rule_systems.sql](../../rpg_be_local/migrationssql/0005_rule_systems.sql), [0008_campaign_knowledge.sql](../../rpg_be_local/migrationssql/0008_campaign_knowledge.sql), [config.ts](../../rpg_be_local/src/config.ts).
 
 This is a field summary, not complete DDL; the eight migration files define defaults, composite foreign keys, indexes and triggers. Characters, sources, knowledge and current memory live inside `campaigns.document`, not separate entity tables. Source IDs and nested JSON links generally require application validation. The database name is configured rather than hardcoded; `databaseUrl` restricts it to loopback PostgreSQL and requires a distinct `_test` database in test mode.
 
@@ -764,7 +764,7 @@ PostgreSQL Database: configured loopback DB (commonly rpg_local)
 
 ### 3.2 Database Integrity Invariants, Constraints & Immutable Triggers
 
-Implementation evidence: [0004_dice_rolls.sql](../rpg_be_local/migrationssql/0004_dice_rolls.sql), [0005_rule_systems.sql](../rpg_be_local/migrationssql/0005_rule_systems.sql), [0007_rule_selection_metadata.sql](../rpg_be_local/migrationssql/0007_rule_selection_metadata.sql), [0008_campaign_knowledge.sql](../rpg_be_local/migrationssql/0008_campaign_knowledge.sql), [ruleStore.ts](../rpg_be_local/src/services/ruleStore.ts).
+Implementation evidence: [0004_dice_rolls.sql](../../rpg_be_local/migrationssql/0004_dice_rolls.sql), [0005_rule_systems.sql](../../rpg_be_local/migrationssql/0005_rule_systems.sql), [0007_rule_selection_metadata.sql](../../rpg_be_local/migrationssql/0007_rule_selection_metadata.sql), [0008_campaign_knowledge.sql](../../rpg_be_local/migrationssql/0008_campaign_knowledge.sql), [ruleStore.ts](../../rpg_be_local/src/services/ruleStore.ts).
 
 The database schema evolves through 8 deterministic SQL migrations (`migrationssql/`):
 
@@ -808,7 +808,7 @@ The database schema evolves through 8 deterministic SQL migrations (`migrationss
 
 ### 3.3 The File System & Transient Directories
 
-Implementation evidence: [service.ts](../rpg_be_local/src/providers/service.ts), [antigravity.ts](../rpg_be_local/src/providers/antigravity.ts), [promptLog.ts](../rpg_be_local/src/providers/promptLog.ts), [rulePreview.ts](../rpg_be_local/src/services/rulePreview.ts).
+Implementation evidence: [service.ts](../../rpg_be_local/src/providers/service.ts), [antigravity.ts](../../rpg_be_local/src/providers/antigravity.ts), [promptLog.ts](../../rpg_be_local/src/providers/promptLog.ts), [rulePreview.ts](../../rpg_be_local/src/services/rulePreview.ts).
 
 Most subprocess scratch files use `os.tmpdir()` or an isolated Codex home. Prompt logs intentionally persist in repository-root `log/` (git-ignored); private content is not confined exclusively to temporary storage. `finally` cleanup handles normal exits/errors, but abrupt process termination can leave files:
 
@@ -834,7 +834,7 @@ Basic Antigravity generation also writes a uniquely named agent definition under
 
 ### 3.4 In-Memory State & Caches
 
-Implementation evidence: [ruleStore.ts](../rpg_be_local/src/services/ruleStore.ts), [ruleLookup.ts](../rpg_be_local/src/services/ruleLookup.ts), [service.ts](../rpg_be_local/src/providers/service.ts), [security.ts](../rpg_be_local/src/security.ts), [server.ts](../rpg_be_local/src/server.ts).
+Implementation evidence: [ruleStore.ts](../../rpg_be_local/src/services/ruleStore.ts), [ruleLookup.ts](../../rpg_be_local/src/services/ruleLookup.ts), [service.ts](../../rpg_be_local/src/providers/service.ts), [security.ts](../../rpg_be_local/src/security.ts), [server.ts](../../rpg_be_local/src/server.ts).
 
 - **Periodic Store Recovery Timer** (`server.ts`):
   - Runs `store.recover()` every **15,000ms (15 seconds)** to automatically sweep and mark any abandoned turns whose 45-second lease expired as `interrupted`.
@@ -858,7 +858,7 @@ Implementation evidence: [ruleStore.ts](../rpg_be_local/src/services/ruleStore.t
 
 ### 4.1 The Context Manifest & Budgeting Heuristics
 
-Implementation evidence: [context.ts](../rpg_be_local/src/domain/context.ts), [options.ts](../rpg_be_local/src/domain/options.ts), [service.ts](../rpg_be_local/src/providers/service.ts).
+Implementation evidence: [context.ts](../../rpg_be_local/src/domain/context.ts), [options.ts](../../rpg_be_local/src/domain/options.ts), [service.ts](../../rpg_be_local/src/providers/service.ts).
 
 `buildContext()` returns a **ContextManifest** containing serialized JSON `prompt`, revision, estimates, source/history IDs and optional system prompt/frozen metadata. The manifest itself is not the user payload sent to inference.
 
@@ -899,7 +899,7 @@ for (const rule of rules) {
 
 ### 4.2 Relevant Entity Selection & Lexical Retrieval Algorithms
 
-Implementation evidence: [context.ts](../rpg_be_local/src/domain/context.ts), [knowledgeRecall.ts](../rpg_be_local/src/domain/knowledgeRecall.ts), [diceContext.ts](../rpg_be_local/src/domain/diceContext.ts), [store.ts](../rpg_be_local/src/store.ts).
+Implementation evidence: [context.ts](../../rpg_be_local/src/domain/context.ts), [knowledgeRecall.ts](../../rpg_be_local/src/domain/knowledgeRecall.ts), [diceContext.ts](../../rpg_be_local/src/domain/diceContext.ts), [store.ts](../../rpg_be_local/src/store.ts).
 
 To avoid flooding the model context, dynamic filtering occurs before prompt compilation:
 
@@ -935,7 +935,7 @@ To avoid flooding the model context, dynamic filtering occurs before prompt comp
 
 ### 4.3 Anatomical Breakdown of a Gameplay Prompt
 
-Implementation evidence: [context.ts](../rpg_be_local/src/domain/context.ts), [gameplayResponse.ts](../rpg_be_local/src/domain/gameplayResponse.ts), [knowledge.ts](../rpg_be_local/src/domain/knowledge.ts).
+Implementation evidence: [context.ts](../../rpg_be_local/src/domain/context.ts), [gameplayResponse.ts](../../rpg_be_local/src/domain/gameplayResponse.ts), [knowledge.ts](../../rpg_be_local/src/domain/knowledge.ts).
 
 In Schema Version 4 (`responseVersion === 4`), natural language directives (`instructions`, `systemInstructions`, `campaignInstructions`) are decoupled from data payloads and formatted into the top-level `systemPrompt` technical envelope (`gameplayInstructionEnvelope`). The JSON user payload contains `mandatory`, `memory`, `history` and `rules`. This schematic example abbreviates the real schema/knowledge record and uses symbolic IDs; it is not a copyable validated response or a complete wire fixture. The actual schema is generated from Zod. `dice`/`interpretations` history fields are omitted when a turn has no rolls; book mode also includes `rulesOverview`.
 
@@ -1045,7 +1045,7 @@ In Schema Version 4 (`responseVersion === 4`), natural language directives (`ins
 
 ### 4.4 System Prompts & Technical Envelopes
 
-Implementation evidence: [gameplayNarrator.ts](../rpg_be_local/src/domain/gameplayNarrator.ts).
+Implementation evidence: [gameplayNarrator.ts](../../rpg_be_local/src/domain/gameplayNarrator.ts).
 
 V4 gameplay receives `gameplayInstructionEnvelope` (`domain/gameplayNarrator.ts`) separately from the JSON user payload. Earlier contracts embed instruction fields in the payload. The excerpt below describes behavioral instructions; instructions alone do not enforce model semantics:
 
@@ -1071,7 +1071,7 @@ Read older campaign knowledge using campaign_knowledge_search and campaign_knowl
 
 ### 4.5 Privacy Boundaries: What is Explicitly Filtered Out / Kept Secret
 
-Implementation evidence: [context.ts](../rpg_be_local/src/domain/context.ts), [knowledgeRecall.ts](../rpg_be_local/src/domain/knowledgeRecall.ts), [service.ts](../rpg_be_local/src/providers/service.ts), [codex.ts](../rpg_be_local/src/providers/codex.ts), [claudeDice.ts](../rpg_be_local/src/providers/claudeDice.ts), [antigravityDice.ts](../rpg_be_local/src/providers/antigravityDice.ts), [promptLog.ts](../rpg_be_local/src/providers/promptLog.ts), [library.ts](../rpg_be_local/src/services/library.ts).
+Implementation evidence: [context.ts](../../rpg_be_local/src/domain/context.ts), [knowledgeRecall.ts](../../rpg_be_local/src/domain/knowledgeRecall.ts), [service.ts](../../rpg_be_local/src/providers/service.ts), [codex.ts](../../rpg_be_local/src/providers/codex.ts), [claudeDice.ts](../../rpg_be_local/src/providers/claudeDice.ts), [antigravityDice.ts](../../rpg_be_local/src/providers/antigravityDice.ts), [promptLog.ts](../../rpg_be_local/src/providers/promptLog.ts), [library.ts](../../rpg_be_local/src/services/library.ts).
 
 `buildContext` omits campaign and character `notes`, non-completed/undone turns, and unconfirmed source text. It includes all player characters and only name/ID-matched NPC sheets. These are field-selection guarantees: notes pasted into an action, source, description or instruction field are still ordinary model input.
 
@@ -1094,7 +1094,7 @@ Basic generation in `service.ts` removes named API-key/token/base-URL variables 
 
 ### 5.1 Zero-Trust Output Validation & Epistemic Knowledge Governance
 
-Implementation evidence: [gameplayResponse.ts](../rpg_be_local/src/domain/gameplayResponse.ts), [schemas.ts](../rpg_be_local/src/domain/schemas.ts), [knowledge.ts](../rpg_be_local/src/domain/knowledge.ts).
+Implementation evidence: [gameplayResponse.ts](../../rpg_be_local/src/domain/gameplayResponse.ts), [schemas.ts](../../rpg_be_local/src/domain/schemas.ts), [knowledge.ts](../../rpg_be_local/src/domain/knowledge.ts).
 
 The application operates under the fundamental assumption that **the LLM will hallucinate, invent fields, miscalculate arithmetic, or fail to follow rules**.
 
@@ -1147,7 +1147,7 @@ Knowledge records do not exist as isolated strings; they form a rich semantic en
 
 ### 5.2 Atomic State Transitions with Expected Prior Values
 
-Implementation evidence: [state.ts](../rpg_be_local/src/domain/state.ts), [knowledge.ts](../rpg_be_local/src/domain/knowledge.ts), [turns.ts](../rpg_be_local/src/services/turns.ts).
+Implementation evidence: [state.ts](../../rpg_be_local/src/domain/state.ts), [knowledge.ts](../../rpg_be_local/src/domain/knowledge.ts), [turns.ts](../../rpg_be_local/src/services/turns.ts).
 
 State updates use an **Optimistic Concurrency & Expected-Value Pattern** (`domain/state.ts: applyResponse`).
 
@@ -1197,7 +1197,7 @@ When validating an undo request, `undoSnapshot()` checks for manual human edits 
 
 ### 5.3 Cryptographic Trusted Dice Mechanics & Replay Verification
 
-Implementation evidence: [dice.ts](../rpg_be_local/src/domain/dice.ts), [dice.ts](../rpg_be_local/src/services/dice.ts), [diceResponse.ts](../rpg_be_local/src/domain/diceResponse.ts), [diceContext.ts](../rpg_be_local/src/domain/diceContext.ts), [gameplayMcp.ts](../rpg_be_local/src/providers/gameplayMcp.ts).
+Implementation evidence: [dice.ts](../../rpg_be_local/src/domain/dice.ts), [dice.ts](../../rpg_be_local/src/services/dice.ts), [diceResponse.ts](../../rpg_be_local/src/domain/diceResponse.ts), [diceContext.ts](../../rpg_be_local/src/domain/diceContext.ts), [gameplayMcp.ts](../../rpg_be_local/src/providers/gameplayMcp.ts).
 
 - **Trusted Structured Roll Audit**: `roll_dice` supplies persisted faces; final roll IDs must match saved records. The prompt forbids invented randomness, but the backend does not parse narrative prose or verify arithmetic, required roll coverage or rules interpretation. A fabricated roll stated only in prose is not necessarily rejected.
 - **Pre-Declaration & Blind Draw**: The model must declare its `reason` (e.g. "Attack roll vs Goblin AC 15") and `declaration` before receiving the random numbers.
@@ -1248,7 +1248,7 @@ During an auto-repair attempt or retry:
 
 ### 5.4 Verifiable Rule Citations via Persisted DB Receipts
 
-Implementation evidence: [ruleCitationValidation.ts](../rpg_be_local/src/domain/ruleCitationValidation.ts), [rules.ts](../rpg_be_local/src/domain/rules.ts), [ruleStore.ts](../rpg_be_local/src/services/ruleStore.ts).
+Implementation evidence: [ruleCitationValidation.ts](../../rpg_be_local/src/domain/ruleCitationValidation.ts), [rules.ts](../../rpg_be_local/src/domain/rules.ts), [ruleStore.ts](../../rpg_be_local/src/services/ruleStore.ts).
 
 In **Library Rulebook Mode**, supplied structured citations must match retrieved original text. The prompt asks for book-backed rulings, but empty citation arrays are allowed; the backend does not prove that every narrative ruling follows the book:
 
@@ -1272,7 +1272,7 @@ In **Library Rulebook Mode**, supplied structured citations must match retrieved
 
 ### 5.5 Snapshot-Driven Zero-AI Undo Engine
 
-Implementation evidence: [state.ts](../rpg_be_local/src/domain/state.ts), [turns.ts](../rpg_be_local/src/services/turns.ts).
+Implementation evidence: [state.ts](../../rpg_be_local/src/domain/state.ts), [turns.ts](../../rpg_be_local/src/services/turns.ts).
 
 When a player clicks **Undo** (`POST /api/campaigns/:id/undo`):
 
@@ -1304,7 +1304,7 @@ When a player clicks **Undo** (`POST /api/campaigns/:id/undo`):
 
 ### 5.6 Context Compaction & Transcript Retention
 
-Implementation evidence: [context.ts](../rpg_be_local/src/domain/context.ts), [schemas.ts](../rpg_be_local/src/domain/schemas.ts), [turns.ts](../rpg_be_local/src/services/turns.ts).
+Implementation evidence: [context.ts](../../rpg_be_local/src/domain/context.ts), [schemas.ts](../../rpg_be_local/src/domain/schemas.ts), [turns.ts](../../rpg_be_local/src/services/turns.ts).
 
 Compaction is lossy model-authored summarization. Original turns remain in PostgreSQL, but covered turn text is replaced by memory in subsequent gameplay prompts. Schema validation establishes a non-empty text field, not completeness or factual fidelity.
 
@@ -1356,10 +1356,10 @@ recall and citation evidence against real contracts; it does not establish live 
 Simulating a stale `expected` value illustrates rejection. A real concurrent edit may instead
 cause revision conflict/cancellation and is not automatically repaired.
 
-**Implementation evidence:** [Flow route](../rpg_fe_local/src/pages/Flow.tsx),
-[educational content](../rpg_fe_local/src/features/flow/content.ts),
-[backend fixture checks](../scripts/tests/flow-guide.test.mjs),
-[browser checks](../rpg_fe_local/tests/e2e/flow.spec.ts).
+**Implementation evidence:** [Flow route](../../rpg_fe_local/src/pages/Flow.tsx),
+[educational content](../../rpg_fe_local/src/features/flow/content.ts),
+[backend fixture checks](../../scripts/tests/flow-guide.test.mjs),
+[browser checks](../../rpg_fe_local/tests/e2e/flow.spec.ts).
 
 ---
 

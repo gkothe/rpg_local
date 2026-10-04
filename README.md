@@ -22,7 +22,7 @@ Story generation and map generation are outside this app's current scope. There 
 
 You need Git, Node.js **22.13 or newer**, PostgreSQL and at least one authenticated AI CLI for gameplay. PDF processing and dictation need extra local tools.
 
-Start with the [installation guide](docs/installation.md). It covers external dependencies, database creation, migrations, CLI sign-in, OCR, voice setup and verification. It also includes a [setup procedure for coding agents](docs/installation.md#installation-by-a-coding-agent).
+Start with the [installation guide](docs/documentation/installation.md). It covers external dependencies, database creation, migrations, CLI sign-in, OCR, voice setup and verification. It also includes a [setup procedure for coding agents](docs/documentation/installation.md#installation-by-a-coding-agent).
 
 If those prerequisites are already installed, open PowerShell and run:
 
@@ -34,7 +34,7 @@ npm.cmd install
 .\start.cmd
 ```
 
-Database setup asks for a local PostgreSQL administrator login, creates a dedicated game database and role, applies migrations and saves the game connection encrypted under your Windows account. The [agent procedure](docs/installation.md#installation-by-a-coding-agent) can create a separate local PostgreSQL instance when an existing administrator password is unavailable.
+Database setup asks for a local PostgreSQL administrator login, creates a dedicated game database and role, applies migrations and saves the game connection encrypted under your Windows account. The [agent procedure](docs/documentation/installation.md#installation-by-a-coding-agent) can create a separate local PostgreSQL instance when an existing administrator password is unavailable.
 
 Open **http://127.0.0.1:5174**. Keep the terminal open; Ctrl+C stops the app. This mode reloads frontend and backend source changes automatically.
 
@@ -69,9 +69,9 @@ Gameplay exposes the app's dice, rules and campaign-recall tools to the GM. Shel
 
 ## Voice and phone access
 
-[PDF/OCR and voice setup](docs/installation.md#pdfs-ocr-and-dictation) explains the optional dependencies. Transcription runs on your PC without an API key. The text you send afterward uses the selected GM provider as usual. Read-aloud speaks an existing reply and does not make another GM request.
+[PDF/OCR and voice setup](docs/documentation/installation.md#pdfs-ocr-and-dictation) explains the optional dependencies. Transcription runs on your PC without an API key. The text you send afterward uses the selected GM provider as usual. Read-aloud speaks an existing reply and does not make another GM request.
 
-The app opens on the same computer by default. Optional phone access needs explicit LAN configuration and device pairing. A phone microphone also needs trusted HTTPS. See [LAN setup](docs/lan-setup.md); physical Android testing remains pending.
+The app opens on the same computer by default. Optional phone access needs explicit LAN configuration and device pairing. A phone microphone also needs trusted HTTPS. See [LAN setup](docs/documentation/lan-setup.md); physical Android testing remains pending.
 
 ## Development
 
@@ -81,7 +81,7 @@ This repository contains two npm workspaces:
 rpg_be_local/   Express + TypeScript API, PostgreSQL migrations, CLI adapters
 rpg_fe_local/   React + Vite interface
 scripts/       Shared launch, database and maintenance tooling
-docs/          Installation, architecture, contracts and review notes
+docs/          Maintained public documentation under documentation/
 ```
 
 Install dependencies from the root. The backend listens on port 4100; Vite uses 5174 and proxies `/api` to the backend.
@@ -103,16 +103,15 @@ npm.cmd run test:e2e --workspace rpg-fe-local
 
 Default tests use synthetic provider boundaries. Database integration tests need a separate local database whose name ends in `_test`, with `NODE_ENV=test` and `RPG_TEST_DATABASE_URL`; live CLI checks are opt-in and consume your account's allowance. Read the test files before enabling them. Never run tests against your actual campaign database.
 
-Before changing code, read [CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md) and the target workspace's rules. [Development standards](docs/development-standards.md) describe the project conventions.
+Before changing code, read [CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md) and the target workspace's rules.
 
 ## Documentation
 
-- [Installation guide](docs/installation.md): a fresh Windows setup, including an agent procedure.
-- [Backend architecture](docs/rpg-backend-architecture.md): turns, prompts, tools, persistence and information handling.
-- [API contract](rpg_be_local/docs/api-contract.md): endpoints and request/response formats.
-- [Rule-library handoff](docs/reviews/rules-library-handoff.md): preparing compatible book packages.
-- [Runtime reference](docs/local-runtime.md): detailed Python/OCR/speech configuration.
-- [Processing failure review](docs/reviews/processing-failure-inventory.md): confirmed failure paths and fixes.
+- [Installation guide](docs/documentation/installation.md): a fresh Windows setup, including an agent procedure.
+- [Backend architecture](docs/documentation/rpg-backend-architecture.md): turns, prompts, tools, persistence and information handling.
+- [API contract](docs/documentation/api-contract.md): endpoints and request/response formats.
+- [Rulebook imports](docs/documentation/rulebook-imports.md): preparing compatible book packages.
+- [Runtime reference](docs/documentation/local-runtime.md): detailed Python/OCR/speech configuration.
 
 The **Flow** page in the app explains the architecture with synthetic examples. It does not run a campaign or consume AI quota.
 

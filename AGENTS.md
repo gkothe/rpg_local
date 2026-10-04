@@ -1,15 +1,19 @@
-# Local RPG implementation
+# Agent guide
 
-Before inspecting, changing or running project code, read the root `CLAUDE.md` and the target app's `CLAUDE.md`. Root `CLAUDE.md` is the shared rule source; keep this file focused on implementation coordination. For cross-app work, read both app files.
+Read root `CLAUDE.md` and the target workspace's `CLAUDE.md` before changing code. Read both workspace files for changes crossing the API boundary. These files contain the project's maintained working rules; no external skills or reference checkouts are required.
 
-Read the reviewed plan at `docs/plans/local-rpg.md` before implementation. The applicable Gylden Rune conventions are adapted in `CLAUDE.md` and `docs/development-standards.md`; the standalone public checkout must not depend on external reference files. Use the available coding skill and relevant specialist skills; do not edit/install shared skills.
+## Setup and documentation
 
-One new monorepo, two apps: `rpg_be_local` and `rpg_fe_local`. Old RPG/Gylden/MarkItDown checkouts are read-only references. Never copy old `.env`, credentials, private data, logs, database dumps or Git histories. No public GitHub publication is authorized.
+- Follow `docs/documentation/installation.md`, including its coding-agent procedure, for dependencies, PostgreSQL, migrations, CLIs and optional audio/OCR tools.
+- Read `docs/documentation/rpg-backend-architecture.md` for processing and persistence, and `docs/documentation/api-contract.md` for HTTP contracts.
+- Keep public documentation in `docs/documentation/`. Keep temporary plans, review reports, investigation journals and verification transcripts outside the repository. Transfer lasting findings into maintained documentation.
 
-Coordination: backend agent owns `rpg_be_local/**`; frontend agent owns `rpg_fe_local/**`; primary agent owns root tooling and integration docs. Do not overwrite another agent's files. Backend owns the HTTP contract and served option sets; communicate contract changes promptly to frontend and primary. Record completed checks and limitations in each app's IMPLEMENTATION.md; primary reconciles the master plan.
+## Working in the monorepo
 
-Use Node 22.13+ compatible tooling. Backend package name `rpg-be-local`, HTTP port 4100; frontend package name `rpg-fe-local`, development port 5174, relative `/api` proxied to backend. Root npm workspaces owns installation/lockfile; coordinate before installing packages so concurrent npm commands do not race.
-
-PostgreSQL only, explicit local settings, isolated test DB. Never use existing production credentials/database. Real CLI generation and microphone access are not required for initial implementation; use meaningful synthetic boundary tests, and report unverified live behavior. No silent mock AI or in-memory persistence fallback in the shipped app.
-
-Audio working defaults: local Faster-Whisper for dictation, local installed voices for click-to-read GM text. Feature diagnostics/fallback typing must work if local runtimes are missing. Optional phone/LAN access; loopback default. HTTPS/tunnel provisioning and actual device testing can be documented as setup/validation gates; do not modify firewall or certificate trust automatically.
+- Root npm workspaces own installation and the lockfile. Coordinate dependency changes and avoid simultaneous installs. Node.js 22.13 or newer is required.
+- `rpg_be_local` owns the API, persisted state, validation and served domain options. `rpg_fe_local` owns the React interface. Keep shared contracts aligned.
+- Do not overwrite another contributor's changes. Coordinate ownership when several agents work on the same files.
+- Default to loopback: backend port 4100, Vite port 5174, relative `/api`. LAN access requires explicit setup; do not expose the Vite proxy to phones.
+- Never commit credentials, private books, campaign exports, logs or database dumps. Use placeholders in examples and isolated databases for tests.
+- Default tests mock external provider boundaries. Real CLI checks consume account allowance and must be reported separately. Missing runtime dependencies must produce explicit diagnostics, never simulated success.
+- Follow the root verification commands in `CLAUDE.md`. Report actual checks, skips and remaining limitations in the task response.

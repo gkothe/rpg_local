@@ -1,6 +1,6 @@
 # Frontend working rules
 
-Read `../CLAUDE.md`, `../AGENTS.md` and the backend-owned `../rpg_be_local/docs/api-contract.md`.
+Read `../CLAUDE.md`, `../AGENTS.md` and the backend-owned `../docs/documentation/api-contract.md`.
 
 - React/TypeScript/Vite, relative `/api`; development proxy uses loopback port 4100. No application auth or cloud API credentials.
 - Backend owns domain options, labels, defaults, capabilities and revision checks. Client workflow states are separate.

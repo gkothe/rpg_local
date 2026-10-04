@@ -1,6 +1,6 @@
 # Android Chrome play and audio
 
-Build the frontend and open the backend's approved HTTPS LAN URL on your Android phone. Keep the Windows host awake and both devices on the same Wi-Fi. Use the [LAN setup guide](../../docs/lan-setup.md) for certificate and network setup; the Vite development proxy must stay loopback-only.
+Build the frontend and open the backend's approved HTTPS LAN URL on your Android phone. Keep the Windows host awake and both devices on the same Wi-Fi. Use the [LAN setup guide](lan-setup.md) for certificate and network setup; the Vite development proxy must stay loopback-only.
 
 Chrome must trust the certificate for the LAN address. Merely dismissing a certificate warning does not prove microphone access will work. Certificate installation and Windows Private-network firewall configuration are explicit local setup steps; the app does not change either automatically.
 
