@@ -1,0 +1,76 @@
+import { Problem } from '../errors.js';
+import { mapResponseCitations } from './citationInput.js';
+import { ResponseFieldProblem } from './responseFields.js';
+import { citationPages } from './ruleCitationValidation.js';
+import type { KnowledgeValidation } from './knowledge.js';
+import type { GameplayResponseV5 } from './gameplayResponse.js';
+
+function occurrences(text: string, quote: string, base: number): number[] {
+  const result: number[] = [];
+  if (!quote) return result;
+  for (let index = text.indexOf(quote); index !== -1; index = text.indexOf(quote, index + 1))
+    result.push(base + index);
+  return result;
+}
+/** Bind exact quotes only to source material actually supplied in this frozen turn. */
+export function bindResponseCitations(
+  response: GameplayResponseV5,
+  context: KnowledgeValidation
+): GameplayResponseV5 {
+  return mapResponseCitations(response, (citation, book, path) => {
+    const invalid = (message: string): never => {
+      throw new ResponseFieldProblem(path, new Problem(502, 'citation_binding', message));
+    };
+    const quote = citation.quote as string;
+    let starts: number[];
+    if (book) {
+      const read = context.ruleReads?.find((entry) => entry.id === citation.receiptId);
+      const captured = context.ruleContext;
+      if (
+        !read ||
+        !captured ||
+        read.campaignId !== context.campaignId ||
+        read.turnId !== context.turnId ||
+        read.tool !== 'rules_get' ||
+        read.context.systemId !== captured.systemId ||
+        read.context.revision !== captured.revision ||
+        read.context.contentHash !== captured.contentHash ||
+        citation.systemId !== captured.systemId ||
+        citation.revision !== captured.revision ||
+        citation.contentHash !== captured.contentHash ||
+        read.payload.view !== 'text' ||
+        read.payload.structural ||
+        read.payload.path !== citation.path ||
+        read.payload.source !== citation.source ||
+        typeof read.payload.text !== 'string' ||
+        typeof read.payload.start !== 'number'
+      ) {
+        invalid(
+          'Book evidence must identify an owned text receipt and the captured library identity.'
+        );
+      }
+      starts = occurrences(read!.payload.text as string, quote, read!.payload.start as number);
+      if (starts.length !== 1)
+        invalid(
+          'Book quote must occur exactly once in its retrieved text; use a longer exact quote if ambiguous.'
+        );
+      citation.start = starts[0]!;
+      citation.end = starts[0]! + quote.length;
+      Object.assign(citation, citationPages(read!.payload, starts[0]!, citation.end as number));
+    } else {
+      const spans = (context.sourceSpans ?? []).filter(
+        (span) =>
+          span.id === citation.sourceId &&
+          span.version === citation.version &&
+          span.name === citation.sourceName
+      );
+      starts = [...new Set(spans.flatMap((span) => occurrences(span.text, quote, span.start)))];
+      if (starts.length !== 1)
+        invalid(
+          'Campaign quote must occur exactly once within supplied frozen source spans; use a longer exact quote if ambiguous.'
+        );
+      citation.start = starts[0]!;
+      citation.end = starts[0]! + quote.length;
+    }
+  }) as GameplayResponseV5;
+}

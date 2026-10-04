@@ -1,4 +1,5 @@
 import { gameplayResponseContract } from '../domain/ruleResponse.js';
+import { z } from 'zod';
 import { diceResponseSchema } from '../domain/diceResponse.js';
 import { ruleResponseSchema } from '../domain/ruleResponse.js';
 import type { BookGameplayAdapter } from './gameplayTools.js';
@@ -14,6 +15,9 @@ export function nativeGameplaySchema(adapter: BookGameplayAdapter | undefined, b
   const version = (adapter?.schema as { properties?: { version?: { const?: number } } })?.properties
     ?.version?.const;
   if (adapter?.schema !== undefined) {
+    // TurnService owns v5 field validation and repair. Preserve readable JSON for that boundary.
+    if (version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
+      return z.record(z.string(), z.unknown());
     if (
       version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION ||
       version === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION

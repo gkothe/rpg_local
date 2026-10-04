@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { prepareCitationInput, citationWireSchema } from './citationInput.js';
 import { responseSchema, operationSchema } from './schemas.js';
 import { diceResponseSchema } from './diceResponse.js';
 import { ruleResponseSchema } from './ruleResponse.js';
@@ -44,6 +45,11 @@ export const gameplayResponseV5Schema = gameplayResponseSchema
   })
   .strict();
 export const gameplayResponseV5JsonSchema = z.toJSONSchema(gameplayResponseV5Schema);
+export const gameplayResponseV5InputSchema = z.preprocess(
+  prepareCitationInput,
+  gameplayResponseV5Schema
+);
+export const gameplayResponseV5WireJsonSchema = citationWireSchema(gameplayResponseV5JsonSchema);
 export type GameplayResponseV5 = z.infer<typeof gameplayResponseV5Schema>;
 export function parseGameplayResponse(raw: unknown, version: number) {
   return version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION

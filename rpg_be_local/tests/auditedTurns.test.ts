@@ -120,6 +120,140 @@ async function begin() {
   });
   return { campaign, service, turn, ...fixture };
 }
+
+for (const mode of ['wrong-offset', 'bad-quote', 'scene-edit'] as const) {
+  test(
+    `v5 ${mode}: deterministic citations or restricted repair never regenerates the GM scene`,
+    { skip: !enabled },
+    async () => {
+      const campaign = newCampaign({ name: 'Citation repair fixture' });
+      campaign.sources = [textSource('Preparation', 'The old gate is locked.')];
+      await store.insert(campaign);
+      await store.transaction(async (client) => {
+        await store.reindex(campaign, client);
+      });
+      let gm = 0,
+        repairs = 0,
+        editors = 0;
+      let evidence: Record<string, unknown>;
+      let rollId = '';
+      const generator: Generator = {
+        capacity: async () => 16000,
+        gameplayCapacity: async () => 16000,
+        generateOwnedGameplay: async (_settings, prompt, _schema, _system, tools) => {
+          gm++;
+          const source = JSON.parse(prompt).mandatory.campaignSources[0];
+          const read = (await tools(
+            'campaign_sources_get',
+            { sourceId: source.id, version: source.version, sectionIndex: 0 },
+            'source'
+          )) as { sourceSpan: { name: string } };
+          evidence = {
+            type: 'campaign_source',
+            sourceId: source.id,
+            version: source.version,
+            sourceName: read.sourceSpan.name,
+            quote: 'The old gate is locked.',
+          };
+          rollId = (
+            (await tools(
+              'roll_dice',
+              {
+                slot: 0,
+                groups: [{ label: 'gate', count: 1, sides: 6 }],
+                reason: 'Check the gate',
+                declaration: 'A single die records the attempt',
+              },
+              'roll'
+            )) as { rollId: string }
+          ).rollId;
+          return {
+            version: 5,
+            narrative: 'You stand beside the old gate.',
+            operations: [],
+            ruleCitations: [],
+            operationExplanations: [],
+            rollInterpretations: [{ rollId, explanation: 'The gate remains closed.' }],
+            knowledgeChanges: [
+              {
+                op: 'create',
+                kind: 'event',
+                title: 'Locked gate',
+                text: 'The old gate is locked.',
+                certainty: 'established',
+                status: 'active',
+                characterIds: [],
+                origin: 'source',
+                visibility: 'gm_only',
+                evidence: [
+                  {
+                    ...evidence,
+                    quote: mode === 'wrong-offset' ? evidence.quote : 'Invented quotation',
+                    start: 0,
+                    end: 1,
+                  },
+                ],
+              },
+            ],
+          };
+        },
+        generate: async (_settings, prompt, _schema, _signal, trace) => {
+          if (trace?.purpose === 'response_repair') {
+            repairs++;
+            const input = JSON.parse(prompt);
+            assert.deepEqual(input.allowedPaths, [['knowledgeChanges', 0, 'evidence', 0]]);
+            assert.equal(input.response.narrative, 'You stand beside the old gate.');
+            assert.equal(input.response.rollInterpretations[0].rollId, rollId);
+            assert.equal(input.evidence.sourceSpans[0].text, evidence.quote);
+            return {
+              corrections: [
+                {
+                  path: mode === 'scene-edit' ? ['narrative'] : input.allowedPaths[0],
+                  value: mode === 'scene-edit' ? 'A different scene.' : evidence,
+                },
+              ],
+            };
+          }
+          editors++;
+          return { narrative: 'You stand beside the old gate.' };
+        },
+      };
+      const service = new TurnService(store, generator, 5);
+      const submitted = await service.submit(campaign.id, {
+        revision: 0,
+        requestId: randomUUID(),
+        action: 'start',
+      });
+      const done = await terminal(campaign.id, submitted.id);
+      assert.equal(gm, 1);
+      assert.equal(repairs, mode === 'wrong-offset' ? 0 : 1);
+      const dice = await new DiceService(store).records(done.diceSessionId!);
+      assert.equal(dice.length, 1);
+      assert.equal(dice[0]!.id, rollId);
+      const saved = await store.campaign(campaign.id);
+      if (mode === 'scene-edit') {
+        assert.equal(done.status, TurnStatus.Failed);
+        assert.equal(editors, 0);
+        assert.equal(saved.revision, 0);
+        assert.equal(saved.knowledge?.length ?? 0, 0);
+      } else {
+        assert.equal(done.status, TurnStatus.Completed, done.error ?? '');
+        assert.equal(editors, 1);
+        assert.equal(saved.revision, 1);
+        assert.equal(done.narrative, 'You stand beside the old gate.');
+        const proof = saved.knowledge![0]!.evidence[0]!;
+        assert.equal(proof.type, 'campaign_source');
+        if (proof.type === 'campaign_source') {
+          assert.equal(proof.start, 0);
+          assert.equal(proof.end, 'The old gate is locked.'.length);
+        }
+        assert.equal(saved.knowledge![0]!.visibility, 'gm_only');
+        await service.undo(campaign.id, 1);
+        assert.equal((await store.campaign(campaign.id)).knowledge?.length ?? 0, 0);
+      }
+    }
+  );
+}
 test(
   'required editor failure preserves candidate and rolls; editing-only idempotent resume commits once without rerunning GM',
   { skip: !enabled },

@@ -187,6 +187,7 @@ test('storage, permission and missing-schema errors have actionable diagnostics 
     ['42P01', 'database_setup'],
     ['42703', 'database_setup'],
     ['ECONNREFUSED', 'local_service'],
+    ['23514', 'database_constraint'],
   ]) {
     const problem = operationalProblem(
       Object.assign(new Error('PRIVATE_SQL PRIVATE_PATH'), { code })

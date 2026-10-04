@@ -1,5 +1,5 @@
 import { Problem } from '../errors.js';
-import { operationalProblem } from '../processingErrors.js';
+import { operationalProblem, safeProcessingFailure } from '../processingErrors.js';
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -119,7 +119,9 @@ export async function traceEvent(
   await trace.event(kind, payload, required, invocation);
 }
 
-export function safeTraceFailure(error: unknown): { code: string } {
+export function safeTraceFailure(error: unknown): ReturnType<typeof safeProcessingFailure> {
+  const failure = safeProcessingFailure(error);
+  if (failure.database) return failure;
   return { code: error instanceof Problem ? error.code : 'invalid_response' };
 }
 export async function logPrompt(

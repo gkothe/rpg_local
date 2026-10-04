@@ -1,3 +1,4 @@
+import { atResponseField, ResponseFieldProblem } from './responseFields.js';
 import { validateOperationExplanations } from './operationExplanations.js';
 import {
   AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
@@ -58,88 +59,88 @@ export function applyResponse(
   const changedFields = new Map<string, Set<'name' | 'attributes' | 'inventory' | 'description'>>();
   const changes: string[] = [];
   for (const [operationIndex, op] of response.operations.entries()) {
-    if (op.op === OPERATION_KIND.Create) {
-      const char: Character = {
-        ...op.character,
-        id: randomUUID(),
-        notes: '',
-        revision: c.revision + 1,
-      };
-      c.characters.push(char);
-      aliases.set(operationIndex, char.id);
-      if (
-        v5 &&
-        'introduction' in op &&
-        (op.introduction as { visibility?: KnowledgeVisibility }).visibility ===
-          KnowledgeVisibility.GmOnly
-      )
-        throw new Problem(
-          422,
-          'knowledge_invalid',
-          'Characters are public; keep unrevealed NPCs in GM-only knowledge'
+    atResponseField(['operations', operationIndex], () => {
+      function invalidField(field: string, message: string): never {
+        throw new ResponseFieldProblem(
+          ['operations', operationIndex, field],
+          new Problem(422, 'invalid_operation', message)
         );
-      if (v4 && char.type === CharacterType.Npc && 'introduction' in op)
-        introductions.push({
-          op: 'create',
-          kind: KnowledgeKind.Npc,
-          title: char.name,
-          text: `${char.name} was introduced.`,
-          certainty: KnowledgeCertainty.Established,
-          status: KnowledgeStatus.Active,
-          characterIds: [char.id],
-          ...(
-            op as (GameplayResponse | GameplayResponseV5)['operations'][number] & {
-              introduction: import('zod').infer<
-                typeof import('./knowledge.js').knowledgeProvenanceSchema
-              >;
-            }
-          ).introduction,
-        });
-      touched.add(char.id);
-      changes.push(`${char.name}: introduced`);
-    } else if (op.op === OPERATION_KIND.Set) {
-      const char = c.characters.find((x) => x.id === op.characterId);
-      if (!char) throw new Problem(422, 'invalid_operation', 'Character is not in this campaign');
-      if (!isDeepStrictEqual(char[op.field], op.expected))
-        throw new Problem(
-          422,
-          'invalid_operation',
-          `${char.name}: expected prior ${op.field} does not match`
-        );
-      if (op.field === CHARACTER_FIELD.Name) {
+      }
+      if (op.op === OPERATION_KIND.Create) {
+        const char: Character = {
+          ...op.character,
+          id: randomUUID(),
+          notes: '',
+          revision: c.revision + 1,
+        };
+        c.characters.push(char);
+        aliases.set(operationIndex, char.id);
         if (
-          typeof op.value !== 'string' ||
-          !op.value.trim() ||
-          op.value.length > MAX_ENTITY_NAME_CHARS
-        )
-          throw new Problem(422, 'invalid_operation', 'Invalid character name');
-        char.name = op.value;
-      } else {
-        if (
-          op.value === null ||
-          Array.isArray(op.value) ||
-          typeof op.value !== 'object' ||
-          JSON.stringify(op.value).length > MAX_JSON_OBJECT_CHARS
+          v5 &&
+          'introduction' in op &&
+          (op.introduction as { visibility?: KnowledgeVisibility }).visibility ===
+            KnowledgeVisibility.GmOnly
         )
           throw new Problem(
             422,
-            'invalid_operation',
-            'Character field must be an object under 100KB'
+            'knowledge_invalid',
+            'Characters are public; keep unrevealed NPCs in GM-only knowledge'
           );
-        char[op.field] = op.value as Record<string, unknown>;
+        if (v4 && char.type === CharacterType.Npc && 'introduction' in op)
+          introductions.push({
+            op: 'create',
+            kind: KnowledgeKind.Npc,
+            title: char.name,
+            text: `${char.name} was introduced.`,
+            certainty: KnowledgeCertainty.Established,
+            status: KnowledgeStatus.Active,
+            characterIds: [char.id],
+            ...(
+              op as (GameplayResponse | GameplayResponseV5)['operations'][number] & {
+                introduction: import('zod').infer<
+                  typeof import('./knowledge.js').knowledgeProvenanceSchema
+                >;
+              }
+            ).introduction,
+          });
+        touched.add(char.id);
+        changes.push(`${char.name}: introduced`);
+      } else if (op.op === OPERATION_KIND.Set) {
+        const char = c.characters.find((x) => x.id === op.characterId);
+        if (!char) invalidField('characterId', 'Character is not in this campaign');
+        if (!isDeepStrictEqual(char[op.field], op.expected))
+          invalidField('expected', `${char.name}: expected prior ${op.field} does not match`);
+        if (op.field === CHARACTER_FIELD.Name) {
+          if (
+            typeof op.value !== 'string' ||
+            !op.value.trim() ||
+            op.value.length > MAX_ENTITY_NAME_CHARS
+          )
+            invalidField('value', 'Invalid character name');
+          char.name = op.value;
+        } else {
+          if (
+            op.value === null ||
+            Array.isArray(op.value) ||
+            typeof op.value !== 'object' ||
+            JSON.stringify(op.value).length > MAX_JSON_OBJECT_CHARS
+          )
+            invalidField('value', 'Character field must be an object under 100KB');
+          char[op.field] = op.value as Record<string, unknown>;
+        }
+        char.revision = c.revision + 1;
+        touched.add(char.id);
+        const fields = changedFields.get(char.id) ?? new Set();
+        fields.add(op.field);
+        changedFields.set(char.id, fields);
+        changes.push(`${char.name}: ${op.field} changed`);
+      } else {
+        if (!isDeepStrictEqual(c.state, op.expected))
+          invalidField('expected', 'Expected campaign state does not match');
+        c.state = op.value;
+        changes.push('Campaign state changed');
       }
-      char.revision = c.revision + 1;
-      touched.add(char.id);
-      const fields = changedFields.get(char.id) ?? new Set();
-      fields.add(op.field);
-      changedFields.set(char.id, fields);
-      changes.push(`${char.name}: ${op.field} changed`);
-    } else {
-      if (!isDeepStrictEqual(c.state, op.expected))
-        throw new Problem(422, 'invalid_operation', 'Expected campaign state does not match');
-      c.state = op.value;
-      changes.push('Campaign state changed');
-    }
+    });
   }
   const knowledge = v4
     ? applyKnowledgeChanges(
@@ -148,7 +149,19 @@ export function applyResponse(
         c.characters,
         aliases,
         evidence ?? { campaignId: c.id, turnId },
-        v5 ? AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION : KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+        v5 ? AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION : KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+        (index) =>
+          index < introductions.length
+            ? [
+                'operations',
+                [...aliases.keys()].filter(
+                  (i) =>
+                    response.operations[i]?.op === 'create' &&
+                    response.operations[i]?.character.type === CharacterType.Npc
+                )[index]!,
+                'introduction',
+              ]
+            : ['knowledgeChanges', index - introductions.length]
       )
     : undefined;
   if (knowledge) {
@@ -159,20 +172,22 @@ export function applyResponse(
           : []
       )
     );
-    if (
-      (response as GameplayResponse).knowledgeChanges.some(
-        (op) =>
-          op.op === 'create' &&
-          op.kind === KnowledgeKind.Npc &&
-          op.characterIds.some((link) =>
-            npcIds.has(typeof link === 'string' ? link : (aliases.get(link.operationIndex) ?? ''))
-          )
-      )
-    )
-      throw new Problem(
-        422,
-        'knowledge_invalid',
-        'Created NPC introduction is registered automatically; do not duplicate it'
+    const duplicateIndex = (response as GameplayResponse).knowledgeChanges.findIndex(
+      (op) =>
+        op.op === 'create' &&
+        op.kind === KnowledgeKind.Npc &&
+        op.characterIds.some((link) =>
+          npcIds.has(typeof link === 'string' ? link : (aliases.get(link.operationIndex) ?? ''))
+        )
+    );
+    if (duplicateIndex >= 0)
+      throw new ResponseFieldProblem(
+        ['knowledgeChanges', duplicateIndex],
+        new Problem(
+          422,
+          'knowledge_invalid',
+          'Created NPC introduction is registered automatically; do not duplicate it'
+        )
       );
     c.knowledge = knowledge.records;
     changes.push(...knowledge.changes);

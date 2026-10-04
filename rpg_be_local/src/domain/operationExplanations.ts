@@ -1,3 +1,4 @@
+import { atResponseField, ResponseFieldProblem } from './responseFields.js';
 import { z } from 'zod';
 import { Problem } from '../errors.js';
 import type { Operation } from './types.js';
@@ -37,40 +38,45 @@ export function validateOperationExplanations(
   context: KnowledgeValidation & { rolls?: readonly DiceRecord[] }
 ): void {
   const seen = new Set<number>();
-  for (const raw of response.operationExplanations) {
-    const e = operationExplanationSchema.parse(raw);
-    if (!response.operations[e.operationIndex] || seen.has(e.operationIndex))
-      throw new Problem(
-        422,
-        'operation_explanation_invalid',
-        'Each operation needs exactly one explanation by index'
-      );
-    seen.add(e.operationIndex);
-    if (
-      new Set(e.rollIds).size !== e.rollIds.length ||
-      e.rollIds.some(
-        (id) => !context.rolls?.some((r) => r.id === id && r.campaignId === context.campaignId)
+  for (const [index, raw] of response.operationExplanations.entries()) {
+    atResponseField(['operationExplanations', index], () => {
+      const e = operationExplanationSchema.parse(raw);
+      if (!response.operations[e.operationIndex] || seen.has(e.operationIndex))
+        throw new Problem(
+          422,
+          'operation_explanation_invalid',
+          'Each operation needs exactly one explanation by index'
+        );
+      seen.add(e.operationIndex);
+      if (
+        new Set(e.rollIds).size !== e.rollIds.length ||
+        e.rollIds.some(
+          (id) => !context.rolls?.some((r) => r.id === id && r.campaignId === context.campaignId)
+        )
       )
-    )
-      throw new Problem(
-        422,
-        'operation_explanation_invalid',
-        'Explanation dice must refer to saved rolls in this turn'
-      );
-    if (e.basis === ExplanationBasis.Dice && !e.rollIds.length)
-      throw new Problem(422, 'operation_explanation_invalid', 'Dice basis requires a saved roll');
-    if (
-      (e.basis === ExplanationBasis.Source &&
-        !e.evidence.some((v) => v.type === 'campaign_source')) ||
-      (e.basis === ExplanationBasis.Rule && !e.evidence.some((v) => v.type === 'book'))
-    )
-      throw new Problem(
-        422,
-        'operation_explanation_invalid',
-        'Source basis requires exact source or book evidence'
-      );
-    if (e.evidence.length)
-      validateKnowledgeEvidence({ origin: KnowledgeOrigin.Source, evidence: e.evidence }, context);
+        throw new Problem(
+          422,
+          'operation_explanation_invalid',
+          'Explanation dice must refer to saved rolls in this turn'
+        );
+      if (e.basis === ExplanationBasis.Dice && !e.rollIds.length)
+        throw new Problem(422, 'operation_explanation_invalid', 'Dice basis requires a saved roll');
+      if (
+        (e.basis === ExplanationBasis.Source &&
+          !e.evidence.some((v) => v.type === 'campaign_source')) ||
+        (e.basis === ExplanationBasis.Rule && !e.evidence.some((v) => v.type === 'book'))
+      )
+        throw new Problem(
+          422,
+          'operation_explanation_invalid',
+          'Source basis requires exact source or book evidence'
+        );
+      if (e.evidence.length)
+        validateKnowledgeEvidence(
+          { origin: KnowledgeOrigin.Source, evidence: e.evidence },
+          context
+        );
+    });
   }
   if (
     response.operations.some(
@@ -79,9 +85,12 @@ export function validateOperationExplanations(
         !seen.has(index)
     )
   )
-    throw new Problem(
-      422,
-      'operation_explanation_invalid',
-      'Every mechanical operation requires an explanation'
+    throw new ResponseFieldProblem(
+      ['operationExplanations'],
+      new Problem(
+        422,
+        'operation_explanation_invalid',
+        'Every mechanical operation requires an explanation'
+      )
     );
 }

@@ -75,3 +75,36 @@ test('post-result trace write failure marks incomplete and never fails completed
   assert.equal(trace.incomplete, true);
   await assert.rejects(trace.event('request', {}, true), /Prompt logging failed/);
 });
+
+test('database rejection traces retain SQLSTATE and constraint identity without rejected values', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'rpg-sql-trace-'));
+  try {
+    const trace = await createPromptTrace('read', { executionId: 'db-test' }, directory);
+    const error = Object.assign(new Error('PRIVATE_SQL PASSWORD'), {
+      code: '23514',
+      table: 'turn_rule_budgets',
+      constraint: 'turn_rule_budgets_transcript_bytes_check',
+      detail: 'Failing row contains PRIVATE_CAMPAIGN',
+      query: 'PRIVATE_SQL',
+    });
+    await trace.event('owned_tool_rejected', safeTraceFailure(error));
+    const text = await readFile(trace.file, 'utf8');
+    const row = JSON.parse(text.trim());
+    assert.deepEqual(row.payload, {
+      code: 'database_constraint',
+      database: {
+        sqlState: '23514',
+        table: 'turn_rule_budgets',
+        constraint: 'turn_rule_budgets_transcript_bytes_check',
+      },
+    });
+    assert.doesNotMatch(text, /PRIVATE_|PASSWORD/);
+    assert.equal(
+      safeTraceFailure({ code: '23514', constraint: 'password=PRIVATE_VALUE' }).database
+        ?.constraint,
+      undefined
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

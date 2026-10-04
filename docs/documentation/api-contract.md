@@ -131,7 +131,7 @@ Character parsing accepts imported UTF-8 text in any extension (including JSON/M
 
 Campaign budgets are soft retrieval/compaction targets, not AI admission limits. Mandatory context is preserved even above a target. Native CLI context/output/compaction and inference limits apply; the app adds no AI attempt deadline. Active turn Cancel remains available. Version warnings remain informational, and installed model-supported efforts plus Default are accepted.
 
-A pending/running turn can perform up to two automatic correction attempts for malformed JSON, invalid final-schema fields, citations, roll interpretations or mutations, and reported provider generation failures. The original action/provider/model/context and turn identity remain fixed. Saved dice are replayed without redrawing, state changes commit only after complete validation, and exhaustion becomes a normal failed turn with manual saved-dice retry available. Cancellation, changed rules/campaign context and forbidden capabilities never auto-retry. Prompt/correction diagnostics are local Git-ignored logs. The UI shows an animated busy indicator and keeps the next-action draft editable.
+Current v5 readable responses use field-only repair: application validation identifies allowed paths; a tools-free call to the same CLI/model/effort returns path/value corrections, which are checked and fully revalidated. Narrative and other valid fields stay unchanged. Citation offsets/pages are computed in code from exact, uniquely identifiable supplied quotes; computed fields are optional only on the CLI wire contract and remain required in storage/archives. Invalid or ambiguous quotes still require correction. Restricted repair failure stops without automatic scene regeneration. Unreadable JSON and pre-final generation failures retain up to two generation retries with saved-dice replay; historical versions retain their complete-response retry behavior. Both correction loops stop on quota, cancellation, changed ownership/rules/campaign context or forbidden capabilities. Diagnostic prompts and responses remain local Git-ignored logs. The UI keeps an animated busy indicator and an editable next-action draft.
 
 Invalid Antigravity `call_mcp_tool` gateway server/tool envelopes use recoverable `gameplay_tool_unavailable`: dispatch is denied, the provider attempt closes, and correction feedback identifies the owned registry. Saved dice/context remain unchanged. Actual native capability violations retain non-retryable isolation errors. Argument-free DONE metadata is accepted only for an already validated/dispatched owned tool step.
 
@@ -240,3 +240,15 @@ Cancel abandons the pending candidate. Pending editing blocks new actions.
 Local trace records correlate the action, provider attempts, tool requests/results,
 validation, editor and commit. `traceWarning` reports incomplete post-save logging;
 it does not undo a committed turn or trigger another roll.
+
+### Rule-read accounting after migration 0011
+
+Rule lookups have no accumulated request-count or transcript-byte ceiling. The database
+keeps nonnegative audit counters and immutable receipts. Responses remain paginated;
+a cursor requests the next page. Archive v5 preserves receipt totals above the former
+8 KiB ceiling, while historical archive contracts remain unchanged.
+
+Private tool-failure traces retain `database.sqlState` and safe table/column/constraint
+identifiers. A PostgreSQL CHECK rejection is classified as `database_constraint`, rather
+than an unrelated local-service connection failure. SQL text, rejected row values and
+raw database messages are omitted.

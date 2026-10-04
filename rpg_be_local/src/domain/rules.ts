@@ -62,7 +62,7 @@ export const RULE_LIMITS = {
   searchHits: 10,
   childDescriptors: 20,
   resultBytes: 4096,
-  transcriptBytes: 8192,
+  legacyArchiveTranscriptBytes: 8192,
   calls: 12,
   combinedCalls: 36,
   gameplayDeadlineMs: 180000,

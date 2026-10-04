@@ -312,11 +312,10 @@ export class RuleStore {
         [turn.id]
       );
       const id = randomUUID();
-      const remaining = RULE_LIMITS.transcriptBytes;
-      const overhead = serializedBytes({ tool, arguments: raw, result: {} }) - serializedBytes({});
       let payload: Record<string, unknown>;
       try {
-        payload = lookup.execute(system, tool, raw, id, remaining - overhead);
+        // Pagination bounds each result; accumulated audit bytes never block another read.
+        payload = lookup.execute(system, tool, raw, id);
       } catch (error) {
         if (!(error instanceof Problem || error instanceof ZodError)) throw error;
         payload = {
@@ -328,8 +327,6 @@ export class RuleStore {
         };
       }
       const bytes = serializedBytes({ tool, arguments: raw, result: payload });
-      if (bytes > remaining)
-        throw new Problem(422, 'rules_budget_exhausted', 'Rule transcript limit exhausted');
       if (signal?.aborted) throw new Problem(409, 'rules_inactive', 'Rule attempt was cancelled');
       const resultHash = createHash('sha256').update(canonicalRuleJson(payload)).digest('hex');
       const saved = await client.query(

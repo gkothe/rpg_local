@@ -115,7 +115,7 @@ export const nodes: FlowItem[] = [
       'rpg_be_local/src/domain/state.ts',
       'rpg_be_local/src/services/turns.ts',
     ],
-    "The app checks roll IDs, quoted text and its saved receipt, the origin of new facts, and expected previous values. It does not prove that the story's arithmetic or interpretation of a rule is correct. Mechanical mutations need indexed explanations backed by current state, original sources or saved dice. Hidden explanations remain private. The editor receives no campaign JSON, rules or tools and cannot change operations. A response may have no citations. Gameplay repair preserves saved tool records. Editor repair is separate and never replays gameplay."
+    "The app checks roll IDs, quoted text and its saved receipt, the origin of new facts, and expected previous values. It does not prove that the story's arithmetic or interpretation of a rule is correct. Mechanical mutations need indexed explanations backed by current state, original sources or saved dice. Hidden explanations remain private. The editor receives no campaign JSON, rules or tools and cannot change operations. A response may have no citations. The app computes citation positions and pages from exact supplied quotes without an AI call. Readable v5 response errors use tools-free CLI corrections restricted to invalid field paths; the narrative and valid fields stay unchanged. Failed restricted repair stops instead of regenerating the scene. Unreadable JSON retains generation retries with saved-dice replay. Editor repair is separate and never replays gameplay."
   ),
   item(
     'commit',
@@ -283,7 +283,7 @@ export const steps: FlowStep[] = [
     id: 'check',
     label: '7. Validate the proposal',
     node: 'validate',
-    data: "The model proposes changing Mira's HP from 10 to 9. The app checks the response format, roll IDs, citations, and the origin of new facts. It also checks that Mira's saved HP really is 10.",
+    data: "The model proposes changing Mira's HP from 10 to 9. The app computes citation positions and pages from exact supplied quotes, then checks the format, roll IDs, provenance and Mira's saved HP. Invalid fields can receive restricted CLI corrections without changing the scene or rerolling dice.",
   },
   {
     id: 'edit',
@@ -436,7 +436,7 @@ export const tools: FlowTool[] = [
       "The app's rule service reads PostgreSQL and saves a receipt for each call, including navigation calls and errors.",
       '5.4',
       ['rpg_be_local/src/services/ruleStore.ts', 'rpg_be_local/src/domain/rules.ts'],
-      'A citation must match a receipt from this turn, the selected rule system, its version and content hash, the exact quoted text, and its pages. Text positions use UTF-16 offsets, as JavaScript strings do. These checks verify the quote; they do not judge its interpretation. Rule calls share a cumulative SQL budget. HTTP MCP limits arguments to 1024 bytes, even though the dice validator allows more.'
+      'A citation must match a receipt from this turn, the selected rule system, its version and content hash, the exact quoted text, and its pages. Text positions use UTF-16 offsets, as JavaScript strings do. These checks verify the quote; they do not judge its interpretation. Rule reads retain audit counters without an accumulated request or byte ceiling after migration 0011. HTTP MCP limits arguments to 1024 bytes, even though the dice validator allows more.'
     ),
     bookOnly: true,
     args:

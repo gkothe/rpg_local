@@ -27,6 +27,12 @@ export function cliFailure(diagnostics: string): Problem {
 export function operationalProblem(error: unknown): Problem {
   if (error instanceof Problem) return error;
   const code = (error as { code?: string } | null)?.code;
+  if (code === '23514')
+    return new Problem(
+      503,
+      'database_constraint',
+      'Database rejected a stored value; check application diagnostics and pending migrations.'
+    );
   if (['42P01', '42703'].includes(code ?? ''))
     return new Problem(
       503,
@@ -57,12 +63,28 @@ export function operationalProblem(error: unknown): Problem {
     'Local processing failed; inspect the application diagnostics.'
   );
 }
+/** Preserve machine-readable database causes without SQL, rejected values or raw messages. */
+export function safeProcessingFailure(error: unknown): {
+  code: string;
+  database?: { sqlState: string; table?: string; column?: string; constraint?: string };
+} {
+  const result: ReturnType<typeof safeProcessingFailure> = { code: operationalProblem(error).code };
+  const fields = error as Record<string, unknown> | null;
+  if (typeof fields?.code !== 'string' || !/^[0-9A-Z]{5}$/.test(fields.code)) return result;
+  result.database = { sqlState: fields.code };
+  for (const key of ['table', 'column', 'constraint'] as const) {
+    const value = fields[key];
+    if (typeof value === 'string' && /^[a-zA-Z_][a-zA-Z0-9_]{0,127}$/.test(value))
+      result.database[key] = value;
+  }
+  return result;
+}
 export function reportProcessingFailure(stage: string, error: unknown, turnId?: string): void {
   console.error(
     JSON.stringify({
       event: 'processing_failure',
       stage,
-      code: operationalProblem(error).code,
+      ...safeProcessingFailure(error),
       ...(turnId ? { turnId } : {}),
     })
   );

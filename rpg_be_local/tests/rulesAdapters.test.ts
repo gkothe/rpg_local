@@ -9,7 +9,7 @@ import { generateAntigravityDice } from '../src/providers/antigravityDice.js';
 import { GameplayTools } from '../src/providers/gameplayTools.js';
 import {
   gameplayResponseJsonSchema,
-  gameplayResponseV5JsonSchema,
+  gameplayResponseV5WireJsonSchema,
 } from '../src/domain/gameplayResponse.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import { freezeKnowledge } from '../src/domain/knowledgeRecall.js';
@@ -20,7 +20,7 @@ else { process.stdin.resume();process.stdin.on('end',()=>{
 const tools=args[args.indexOf('--allowedTools')+1].split(',');
 const book=tools.some(t=>t.endsWith('rules_get'));const knowledge=tools.some(t=>t.endsWith('campaign_knowledge_get'));if(knowledge&&!args[args.indexOf('--system-prompt')+1].includes('ENVELOPE_NATIVE'))throw Error('Missing envelope');
 console.log(JSON.stringify({type:'system',subtype:'init',tools,mcp_servers:[{name:'dice',status:'connected'}]}));
-console.log(JSON.stringify({type:'result',subtype:'success',is_error:false,num_turns:1,result:JSON.stringify({version:knowledge?(Number(process.env.RPG_ADAPTER_RESPONSE_VERSION)||4):book?3:2,narrative:'Original synthetic response',operations:[],rollInterpretations:[],...((book||knowledge)?{ruleCitations:[]}:{ }),...(knowledge?{knowledgeChanges:[],...(process.env.RPG_ADAPTER_RESPONSE_VERSION==='5'?{operationExplanations:[]}:{} )}:{})}),modelUsage:{fixture:{contextWindow:128000,outputTokens:100}}}));
+console.log(JSON.stringify({type:'result',subtype:'success',is_error:false,num_turns:1,result:JSON.stringify({version:knowledge?(Number(process.env.RPG_ADAPTER_RESPONSE_VERSION)||4):book?3:2,narrative:'Original synthetic response',operations:[],rollInterpretations:[],...((book||knowledge)?{ruleCitations:[]}:{ }),...(knowledge?{knowledgeChanges:JSON.parse(process.env.RPG_ADAPTER_KNOWLEDGE||'[]'),...(process.env.RPG_ADAPTER_RESPONSE_VERSION==='5'?{operationExplanations:[]}:{} )}:{})}),modelUsage:{fixture:{contextWindow:128000,outputTokens:100}}}));
 });}`;
 const codex = `
 import readline from 'node:readline';
@@ -29,7 +29,7 @@ const send=x=>console.log(JSON.stringify(x));let book=false,knowledge=false;
 lines.on('line',raw=>{const m=JSON.parse(raw);
 if(m.id===1)send({id:1,result:{}});
 else if(m.id===2){book=m.params.dynamicTools.some(t=>t.name==='rules_get');knowledge=m.params.dynamicTools.some(t=>t.name==='campaign_knowledge_get');send({id:2,result:{thread:{id:'thread'}}});}
-else if(m.id===3){send({id:3,result:{turn:{id:'turn'}}});send({method:'turn/completed',params:{threadId:'thread',turn:{id:'turn',status:'completed',items:[{type:'agentMessage',text:JSON.stringify({payload_json:JSON.stringify({version:knowledge?(Number(process.env.RPG_ADAPTER_RESPONSE_VERSION)||4):book?3:2,narrative:'Original synthetic response',operations:[],rollInterpretations:[],...((book||knowledge)?{ruleCitations:[]}:{ }),...(knowledge?{knowledgeChanges:[],...(process.env.RPG_ADAPTER_RESPONSE_VERSION==='5'?{operationExplanations:[]}:{} )}:{})})})}]}}});}
+else if(m.id===3){send({id:3,result:{turn:{id:'turn'}}});send({method:'turn/completed',params:{threadId:'thread',turn:{id:'turn',status:'completed',items:[{type:'agentMessage',text:JSON.stringify({payload_json:JSON.stringify({version:knowledge?(Number(process.env.RPG_ADAPTER_RESPONSE_VERSION)||4):book?3:2,narrative:'Original synthetic response',operations:[],rollInterpretations:[],...((book||knowledge)?{ruleCitations:[]}:{ }),...(knowledge?{knowledgeChanges:JSON.parse(process.env.RPG_ADAPTER_KNOWLEDGE||'[]'),...(process.env.RPG_ADAPTER_RESPONSE_VERSION==='5'?{operationExplanations:[]}:{} )}:{})})})}]}}});}
 });`;
 const antigravity = `
 import {readFileSync} from 'node:fs';import {homedir} from 'node:os';import path from 'node:path';
@@ -49,7 +49,7 @@ if(server.name!=='local_rpg'||!knowledge&&definitions.filter(x=>!x.name.startsWi
 const permissions=JSON.parse(readFileSync(path.join(homedir(),'.gemini','antigravity-cli','settings.json'),'utf8')).permissions;
 if(permissions.allow.length!==definitions.length||!permissions.deny.includes('read_file(*)'))throw new Error('Permissions must be private and bounded');}
 console.log(JSON.stringify({event:'init',init:{agent:args[args.indexOf('--agent')+1]}}));
-const phase={kind:'final',response:{version:knowledge?(Number(process.env.RPG_ADAPTER_RESPONSE_VERSION)||4):book?3:2,narrative:'Original synthetic response',operations:[],rollInterpretations:[],...((book||knowledge)?{ruleCitations:[]}:{ }),...(knowledge?{knowledgeChanges:[],...(process.env.RPG_ADAPTER_RESPONSE_VERSION==='5'?{operationExplanations:[]}:{} )}:{})}};
+const phase={kind:'final',response:{version:knowledge?(Number(process.env.RPG_ADAPTER_RESPONSE_VERSION)||4):book?3:2,narrative:'Original synthetic response',operations:[],rollInterpretations:[],...((book||knowledge)?{ruleCitations:[]}:{ }),...(knowledge?{knowledgeChanges:JSON.parse(process.env.RPG_ADAPTER_KNOWLEDGE||'[]'),...(process.env.RPG_ADAPTER_RESPONSE_VERSION==='5'?{operationExplanations:[]}:{} )}:{})}};
 console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:1,state:'DONE',usage:{input_tokens:1000,output_tokens:100,cache_read_tokens:0}}}));
 console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:{input_tokens:1000},response:JSON.stringify(phase.response)}}));
 });}`;
@@ -184,6 +184,28 @@ test('all native transports dispatch explicit v4 with the owned no-library knowl
 });
 
 test('all native transports dispatch explicit v5 including frozen campaign source tools', async () => {
+  const fixtureKnowledge = [
+    {
+      op: 'create',
+      kind: 'event',
+      title: 'Gate',
+      text: 'The gate is locked.',
+      certainty: 'established',
+      status: 'active',
+      characterIds: [],
+      origin: 'source',
+      visibility: 'gm_only',
+      evidence: [
+        {
+          type: 'campaign_source',
+          sourceId: '11111111-1111-4111-8111-111111111111',
+          sourceName: 'Preparation',
+          version: 1,
+          quote: 'The gate is locked.',
+        },
+      ],
+    },
+  ];
   const directory = await mkdtemp(path.join(os.tmpdir(), 'rpg-v5-adapter-test-'));
   const unexpected = async (): Promise<never> => {
     throw Error('Unexpected dice');
@@ -198,7 +220,7 @@ test('all native transports dispatch explicit v5 including frozen campaign sourc
   const adapter = {
     dispatch: registry.call,
     definitions: registry.definitions,
-    schema: gameplayResponseV5JsonSchema,
+    schema: gameplayResponseV5WireJsonSchema,
     systemPrompt: 'ENVELOPE_NATIVE',
   };
   try {
@@ -218,7 +240,11 @@ test('all native transports dispatch explicit v5 including frozen campaign sourc
               settings,
               'DATA_ONLY',
               directory,
-              { ...process.env, RPG_ADAPTER_RESPONSE_VERSION: '5' },
+              {
+                ...process.env,
+                RPG_ADAPTER_RESPONSE_VERSION: '5',
+                RPG_ADAPTER_KNOWLEDGE: JSON.stringify(fixtureKnowledge),
+              },
               unexpected,
               undefined,
               adapter
@@ -229,7 +255,11 @@ test('all native transports dispatch explicit v5 including frozen campaign sourc
                 settings,
                 'DATA_ONLY',
                 directory,
-                { ...process.env, RPG_ADAPTER_RESPONSE_VERSION: '5' },
+                {
+                  ...process.env,
+                  RPG_ADAPTER_RESPONSE_VERSION: '5',
+                  RPG_ADAPTER_KNOWLEDGE: JSON.stringify(fixtureKnowledge),
+                },
                 {},
                 unexpected,
                 undefined,
@@ -240,13 +270,20 @@ test('all native transports dispatch explicit v5 including frozen campaign sourc
                 settings,
                 'DATA_ONLY',
                 directory,
-                { ...process.env, RPG_ADAPTER_RESPONSE_VERSION: '5' },
+                {
+                  ...process.env,
+                  RPG_ADAPTER_RESPONSE_VERSION: '5',
+                  RPG_ADAPTER_KNOWLEDGE: JSON.stringify(fixtureKnowledge),
+                },
                 unexpected,
                 undefined,
                 adapter
               );
       assert.equal((result as { version: number }).version, 5);
-      assert.deepEqual((result as { knowledgeChanges: unknown[] }).knowledgeChanges, []);
+      assert.deepEqual(
+        (result as { knowledgeChanges: unknown[] }).knowledgeChanges,
+        fixtureKnowledge
+      );
     }
   } finally {
     await rm(directory, { recursive: true, force: true });

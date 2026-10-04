@@ -387,46 +387,30 @@ To prevent injection attacks, path traversal, or unpredictable Windows command-l
 
 ### 2.4 Automatic Response Repair & Self-Correction Loop
 
-Implementation evidence: [responseRetry.ts](../../rpg_be_local/src/domain/responseRetry.ts), [turns.ts](../../rpg_be_local/src/services/turns.ts).
+Implementation evidence: [citationBinding.ts](../../rpg_be_local/src/domain/citationBinding.ts), [responseRepair.ts](../../rpg_be_local/src/services/responseRepair.ts), [responseRetry.ts](../../rpg_be_local/src/domain/responseRetry.ts), [turns.ts](../../rpg_be_local/src/services/turns.ts).
 
-When the LLM finishes generation, its response undergoes strict validation via Zod schemas. If the model fails (e.g., outputs markdown instead of JSON, violates schema, forgets to explain a dice roll, or invents a fake receipt ID), the backend executes **automatic response repair** (`responseRetry.ts: withResponseRetries`):
+Validation runs in application code, without a tool call or an AI call. Current version 5 responses follow these steps:
+
+1. Preserve the readable provider JSON. The wire schema allows citation offsets and page metadata to be omitted; the persisted/archive schema still requires them.
+2. Bind each exact quote to the original source spans supplied in this frozen turn or its owned original-book text receipt. The app computes absolute UTF-16 positions and book pages. Overlapping spans pointing to the same occurrence are deduplicated. Missing, forged or ambiguous quotes are rejected; there is no fuzzy matching or access to unseen document text.
+3. Validate schema, ownership, saved dice, operations, knowledge provenance and explanations. A successful validation saves the private narrative candidate.
+4. If a readable response fails in a repairable field, send its candidate, allowed field paths, failure reason and captured evidence to the same selected CLI/model/effort, without gameplay tools. The CLI returns only path/value corrections. The application rejects any path outside its allowlist and revalidates the corrected response. Valid fields, the narrative and saved dice cannot be replaced through this correction contract. Paths may identify an invalid item or metadata collection when the error involves that complete item/collection.
+5. A validated candidate proceeds to mandatory narrative-only editing, then atomic commit. No state mutation is committed during field repair, and no database transaction spans the correction CLI call.
+
+Field validation permits up to two correction calls. If restricted repair fails, the turn fails with saved dice available; it does not automatically generate another scenario. Account quota, authentication, cancellation, isolation and ownership/revision failures stop immediately. Failed candidates remain in private diagnostic logs; only fully validated candidates receive an editing-resume record.
+
+Unreadable JSON or failures occurring before a final response exists still use the legacy generation-retry loop, with up to two additional attempts and enforced replay of saved dice. Historical version 1–4 retries retain their original complete-response contract. Neither receipt checks nor narrative anchor checks prove semantic fidelity or correct rule interpretation.
 
 ```mermaid
 flowchart TD
-    RunAttempt["Attempt LLM Generation (Attempt 0)"] --> ParseResponse{"Parse Output with Zod"}
-    ParseResponse -- Valid --> DBCommit["Commit State to PostgreSQL"]
-    ParseResponse -- Invalid --> CheckRetry{"Attempt < 2 & Not Aborted?"}
-    CheckRetry -- Yes --> PrepareRetry["Reset Dice Requests & Next Slot\n(Preserve Faces & Transcript Bytes)"]
-    PrepareRetry --> ConstructFeedback["Construct Specific Error Feedback\n(e.g., 'Acknowledge roll UUID x', 'Cite only retrieved text')"]
-    ConstructFeedback --> NextAttempt["Re-invoke LLM with Feedback & Enforced Roll Replay"]
-    NextAttempt --> ParseResponse
-    CheckRetry -- No --> FailTurn["Mark Turn as 'failed' in PostgreSQL\n(Saved dice preserved for manual Retry)"]
+    GM[GM response] --> Bind[App computes exact citation positions and pages]
+    Bind --> Validate{App validation}
+    Validate -- Valid --> Edit[Required narrative-only editor]
+    Validate -- Repairable field --> Repair[CLI returns only allowed field corrections; no tools]
+    Repair --> Bind
+    Validate -- Cannot repair --> Fail[Failed turn; saved dice retained]
+    Edit --> Commit[Atomic state and narrative commit]
 ```
-
-#### What Triggers Auto-Repair?
-
-The system checks against `RETRYABLE_RESPONSE_CODES`:
-
-- `provider_json`: SyntaxError or failure to output valid JSON.
-- `provider_protocol`, `provider_failure`: Subprocess stream or execution anomalies.
-- `dice_protocol`: Invalid dice transport envelope. `dice_references`: Missing, duplicated or unknown recorded roll references.
-- `rules_citations_invalid`: Hallucinated receipt IDs or start/end character offsets that do not match the exact quoted substring in the book.
-- `invalid_operation`: Mismatch between expected prior character attribute/inventory value and actual state.
-- `knowledge_invalid`: Duplicate NPC introduction or invalid provenance links.
-- `gameplay_tool_unavailable`: In-session tool resolution failure, including direct invocation of a registered Antigravity tool instead of its MCP gateway.
-- `gameplay_tool_arguments`: Invalid Antigravity MCP argument JSON or object envelope, rejected before dispatch.
-
-Account quota (`provider_quota`) and authentication (`provider_auth`) failures are classified separately from generic process failures and are not in this repair allowlist. Malformed or incomplete output can use the existing JSON/protocol codes when ownership has been established; isolation errors remain non-retryable.
-
-#### Retry Budget & Prompt Injection Mechanism
-
-- **Persisted accounting**: Outer repair resets only `dice_attempts.requests` and `next_slot`; `transcript_bytes` and session `new_faces` remain. It does not reset persisted rule-call budgets or delete rule receipts. The tool registry is recreated per repair and rule request IDs include the repair number.
-- **Budget**: `RESPONSE_RETRY_COUNT = 2` permits up to two outer repair attempts (three generation callbacks). This does not cap native model inference count or all adapter-internal recovery. `ZodError` and `SyntaxError` are retryable too; aborts and non-allowlisted ownership/context/isolation failures stop immediately.
-- **Feedback & Enforced Replay**: The retry prompt dynamically appends the validation error plus explicit dice replay instructions:
-  ```text
-  Response correction: Your previous response was rejected: [specific error]. Correct it and return the complete required JSON. All saved dice are authoritative; replay their original requests without changing their specifications or faces. Cite only retrieved original text. For each citation, start and end must identify exactly the quoted substring (end = start + quote.length), not the whole retrieved section. Never invent receipt IDs or state.
-  Replay the original requests in order with exactly these specifications before appending any dice: [{"slot":0,"groups":[{"label":"Attack","sides":20,"count":1}]}]
-  ```
 
 ---
 
@@ -802,7 +786,7 @@ The database schema evolves through 8 deterministic SQL migrations (`migrationss
    - `rule_reads_immutable`: Protects rule citation receipts.
    - `rule_default_protected`: Prohibits deleting the default or changing its ID, kind or system key. Display name and instructions can change; the trigger also prevents any system's revision from decreasing.
 
-**Rule-budget enforcement limitation:** `turn_rule_budgets` still has SQL limits of 12 requests and 8,192 cumulative transcript bytes. Current `RuleStore.read` checks each new result against the full 8,192-byte allowance, then increments the cumulative columns; it does not subtract prior usage or explicitly check the request counter. Therefore a SQL CHECK can reject a read before a friendly budget error is returned. The v4 registry receives no explicit call-count limits; the legacy `VERIFIED_BOOK_LIMITS` values are `Number.MAX_SAFE_INTEGER`. Do not infer unlimited successful persisted rule reads from those registry values.
+**Rule-read audit counters:** Migration 0011 removes the historical SQL ceilings of 12 requests and 8,192 accumulated bytes. `turn_rule_budgets` retains nonnegative accounting counters; they do not limit how many book pages a CLI can consult. Individual lookup responses remain paginated, with cursors for additional text. V5 campaign backups accept the accumulated receipt transcript; strict historical v1–v4 import rules remain unchanged. Database failures in private traces and operational diagnostics retain SQLSTATE and validated table/column/constraint identifiers, never SQL, raw exception messages or rejected row contents.
 
 ---
 
@@ -1243,7 +1227,7 @@ If the model issues an invalid request (malformed schema, unmapped character UUI
 
 When a roll is recorded, PostgreSQL stores the SHA-256 `spec_digest` of the request:
 $$\text{spec\_digest} = \text{SHA256}(\text{JSON.stringify}(\text{parsed diceInput}))$$
-During an auto-repair attempt or retry:
+During a full generation retry (not a tools-free v5 field correction):
 
 - If slot $0$ was previously rolled for an "Attack check with 1d20", the model must send the **exact same specification** for slot $0$.
 - If `existing.spec_digest !== digest`, the backend throws a 409 `dice_specification` error: _"The retry changed the original dice specification or declaration"_.
@@ -1264,7 +1248,7 @@ In **Library Rulebook Mode**, supplied structured citations must match retrieved
    Each read generates an immutable database receipt (`turn_rule_reads`) with a unique UUID, capturing `argument_digest` and `result_hash`.
    Receipts also exist for navigation and recorded lookup errors; replay of the same transport identity/arguments returns the existing receipt. Receipts persist until campaign deletion and remain in archive audit history. Only current-turn text receipts can back new citations.
 3. **Exact Substring Verification**:
-   In the final response, any cited rule in `ruleCitations` must supply the `receiptId`. The backend verifies:
+   In the final response, any cited rule in `ruleCitations` must supply the `receiptId` and exact quote. For v5, the app finds the unique quote occurrence in that receipt and computes positions and pages before applying the strict persisted validator. Legacy v3/v4 responses supply their own positions. The backend verifies:
    $$\text{end} = \text{start} + \text{quote.length}$$
    and asserts that the text between `start` and `end` in the retrieved receipt matches the quoted text character-for-character:
    $$\text{payload.text.slice(start - payload.start, end - payload.start)} == \text{citation.quote}$$

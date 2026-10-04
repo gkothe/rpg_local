@@ -47,38 +47,7 @@ export function validateRuleCitations<T extends Pick<RuleResponse, 'ruleCitation
         citation.quote
     )
       invalid();
-    const spans = z
-      .array(rulePageSpanSchema)
-      .parse(payload.pageSpans ?? [])
-      .filter((span) => span.start < citation.end && span.end > citation.start);
-    let covered = citation.start;
-    for (const span of spans) {
-      if (span.start > covered || span.pdfPage === null) break;
-      covered = Math.max(covered, span.end);
-    }
-    const exact = covered >= citation.end;
-    const pages = payload.pages as {
-      precision: string;
-      pdfPages: number[];
-      printedPages: string[];
-    };
-    const expected = exact
-      ? {
-          precision: 'exact',
-          pdfPages: [
-            ...new Set(spans.flatMap((span) => (span.pdfPage === null ? [] : [span.pdfPage]))),
-          ],
-          printedPages: [
-            ...new Set(
-              spans.flatMap((span) => (span.printedPage === null ? [] : [span.printedPage]))
-            ),
-          ],
-        }
-      : {
-          precision: pages?.precision === 'approximate' ? 'approximate' : 'unknown',
-          pdfPages: pages?.pdfPages ?? [],
-          printedPages: pages?.printedPages ?? [],
-        };
+    const expected = citationPages(payload, citation.start, citation.end);
     if (
       citation.precision !== expected.precision ||
       JSON.stringify(citation.pdfPages) !== JSON.stringify(expected.pdfPages) ||
@@ -86,4 +55,39 @@ export function validateRuleCitations<T extends Pick<RuleResponse, 'ruleCitation
     )
       invalid();
   }
+}
+
+export function citationPages(payload: RuleRead['payload'], start: number, end: number) {
+  const spans = z
+    .array(rulePageSpanSchema)
+    .parse(payload.pageSpans ?? [])
+    .filter((span) => span.start < end && span.end > start);
+  let covered = start;
+  for (const span of spans) {
+    if (span.start > covered || span.pdfPage === null) break;
+    covered = Math.max(covered, span.end);
+  }
+  const exact = covered >= end;
+  const pages = payload.pages as {
+    precision: string;
+    pdfPages: number[];
+    printedPages: string[];
+  };
+  return exact
+    ? {
+        precision: 'exact',
+        pdfPages: [
+          ...new Set(spans.flatMap((span) => (span.pdfPage === null ? [] : [span.pdfPage]))),
+        ],
+        printedPages: [
+          ...new Set(
+            spans.flatMap((span) => (span.printedPage === null ? [] : [span.printedPage]))
+          ),
+        ],
+      }
+    : {
+        precision: pages?.precision === 'approximate' ? 'approximate' : 'unknown',
+        pdfPages: pages?.pdfPages ?? [],
+        printedPages: pages?.printedPages ?? [],
+      };
 }

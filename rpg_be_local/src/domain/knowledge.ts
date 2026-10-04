@@ -1,3 +1,4 @@
+import { atResponseField, type ResponsePath } from './responseFields.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { Problem } from '../errors.js';
@@ -231,7 +232,8 @@ export function applyKnowledgeChanges(
   characters: readonly Character[],
   aliases: ReadonlyMap<number, string>,
   context: KnowledgeValidation,
-  version = 4
+  version = 4,
+  responsePath?: (index: number) => ResponsePath
 ): {
   records: CampaignKnowledge[];
   before: CampaignKnowledge[];
@@ -249,106 +251,108 @@ export function applyKnowledgeChanges(
       );
     return id!;
   };
-  for (const value of raw) {
-    const op =
-      version === 5 ? knowledgeChangeV5Schema.parse(value) : knowledgeChangeSchema.parse(value);
-    validateKnowledgeEvidence(op, context);
-    const now = new Date().toISOString();
-    const current = op.op === 'update' ? records.find((r) => r.id === op.id) : undefined;
-    if (op.op === 'update' && (!current || current.revision !== op.expectedRevision))
-      invalid('Knowledge expected prior revision does not match');
-    const modern = version === 5 ? (op as KnowledgeChangeV5) : undefined;
-    const requestedVisibility =
-      modern?.op === 'create'
-        ? modern.visibility
-        : modern?.op === 'update'
-          ? (modern.changes.visibility ?? current?.visibility)
-          : current?.visibility;
-    const revealing =
-      current?.visibility === KnowledgeVisibility.GmOnly &&
-      requestedVisibility === KnowledgeVisibility.Player;
-    if (
-      revealing &&
-      (modern?.op !== 'update' ||
-        !modern.revealReason ||
-        !modern.changes.text ||
-        !modern.changes.title ||
-        !modern.changes.characterIds ||
-        modern.changes.holderId === undefined)
-    )
-      invalid(
-        'Revelation requires a reason and explicit public title, text, character links and holder'
-      );
-    const visibility = requestedVisibility ?? KnowledgeVisibility.Player;
-    const fields = op.op === 'create' ? op : op.changes;
-    const ids = fields.characterIds?.map(link) ?? current?.characterIds ?? [];
-    if (new Set(ids).size !== ids.length) invalid('Knowledge character links must be unique');
-    const holder =
-      fields.holderId === undefined
-        ? current?.holderId
-        : fields.holderId === null
-          ? null
-          : link(fields.holderId);
-    const names = { ...(current?.characterNames ?? {}) };
-    for (const id of ids) names[id] = characters.find((c) => c.id === id)?.name ?? names[id]!;
-    const attribution = {
-      origin: op.origin,
-      evidence: structuredClone(op.evidence),
-      turnId: context.turnId,
-      at: now,
-      ...(version === 5
+  for (const [index, value] of raw.entries()) {
+    atResponseField(responsePath?.(index) ?? ['knowledgeChanges', index], () => {
+      const op =
+        version === 5 ? knowledgeChangeV5Schema.parse(value) : knowledgeChangeSchema.parse(value);
+      validateKnowledgeEvidence(op, context);
+      const now = new Date().toISOString();
+      const current = op.op === 'update' ? records.find((r) => r.id === op.id) : undefined;
+      if (op.op === 'update' && (!current || current.revision !== op.expectedRevision))
+        invalid('Knowledge expected prior revision does not match');
+      const modern = version === 5 ? (op as KnowledgeChangeV5) : undefined;
+      const requestedVisibility =
+        modern?.op === 'create'
+          ? modern.visibility
+          : modern?.op === 'update'
+            ? (modern.changes.visibility ?? current?.visibility)
+            : current?.visibility;
+      const revealing =
+        current?.visibility === KnowledgeVisibility.GmOnly &&
+        requestedVisibility === KnowledgeVisibility.Player;
+      if (
+        revealing &&
+        (modern?.op !== 'update' ||
+          !modern.revealReason ||
+          !modern.changes.text ||
+          !modern.changes.title ||
+          !modern.changes.characterIds ||
+          modern.changes.holderId === undefined)
+      )
+        invalid(
+          'Revelation requires a reason and explicit public title, text, character links and holder'
+        );
+      const visibility = requestedVisibility ?? KnowledgeVisibility.Player;
+      const fields = op.op === 'create' ? op : op.changes;
+      const ids = fields.characterIds?.map(link) ?? current?.characterIds ?? [];
+      if (new Set(ids).size !== ids.length) invalid('Knowledge character links must be unique');
+      const holder =
+        fields.holderId === undefined
+          ? current?.holderId
+          : fields.holderId === null
+            ? null
+            : link(fields.holderId);
+      const names = { ...(current?.characterNames ?? {}) };
+      for (const id of ids) names[id] = characters.find((c) => c.id === id)?.name ?? names[id]!;
+      const attribution = {
+        origin: op.origin,
+        evidence: structuredClone(op.evidence),
+        turnId: context.turnId,
+        at: now,
+        ...(version === 5
+          ? {
+              visibility,
+              ...(modern?.op === 'update' && modern.revealReason
+                ? { revealReason: modern.revealReason }
+                : {}),
+            }
+          : {}),
+      };
+      const record: CampaignKnowledge = current
         ? {
-            visibility,
-            ...(modern?.op === 'update' && modern.revealReason
-              ? { revealReason: modern.revealReason }
-              : {}),
+            ...current,
+            ...fields,
+            ...(version === 5 ? { visibility } : {}),
+            characterIds: ids,
+            characterNames: names,
+            holderId: holder,
+            updatedAt: now,
+            updatedTurnId: context.turnId,
+            revision: current.revision + 1,
+            attributions: [...current.attributions, attribution],
           }
-        : {}),
-    };
-    const record: CampaignKnowledge = current
-      ? {
-          ...current,
-          ...fields,
-          ...(version === 5 ? { visibility } : {}),
-          characterIds: ids,
-          characterNames: names,
-          holderId: holder,
-          updatedAt: now,
-          updatedTurnId: context.turnId,
-          revision: current.revision + 1,
-          attributions: [...current.attributions, attribution],
-        }
-      : {
-          id: randomUUID(),
-          ...(version === 5 ? { visibility, introductionVisibility: visibility } : {}),
-          kind: op.op === 'create' ? op.kind : KnowledgeKind.Other,
-          title: op.op === 'create' ? op.title : '',
-          text: op.op === 'create' ? op.text : '',
-          certainty: op.op === 'create' ? op.certainty : KnowledgeCertainty.Established,
-          status: op.op === 'create' ? op.status : KnowledgeStatus.Active,
-          characterIds: ids,
-          characterNames: names,
-          holderId: holder,
-          origin: op.origin,
-          evidence: structuredClone(op.evidence),
-          createdTurnId: context.turnId,
-          updatedTurnId: context.turnId,
-          createdAt: now,
-          updatedAt: now,
-          revision: 1,
-          attributions: [attribution],
-        };
-    if (holder)
-      record.holderName = characters.find((c) => c.id === holder)?.name ?? record.holderName;
-    else delete record.holderName;
-    campaignKnowledgeSchema.parse(record);
-    if (current) records[records.indexOf(current)] = record;
-    else records.push(record);
-    touched.add(record.id);
-    if (visibility === KnowledgeVisibility.Player)
-      changes.push(
-        `${record.title}: knowledge ${current ? 'updated' : 'introduced'} (${record.origin}, ${record.certainty}, ${record.status})`
-      );
+        : {
+            id: randomUUID(),
+            ...(version === 5 ? { visibility, introductionVisibility: visibility } : {}),
+            kind: op.op === 'create' ? op.kind : KnowledgeKind.Other,
+            title: op.op === 'create' ? op.title : '',
+            text: op.op === 'create' ? op.text : '',
+            certainty: op.op === 'create' ? op.certainty : KnowledgeCertainty.Established,
+            status: op.op === 'create' ? op.status : KnowledgeStatus.Active,
+            characterIds: ids,
+            characterNames: names,
+            holderId: holder,
+            origin: op.origin,
+            evidence: structuredClone(op.evidence),
+            createdTurnId: context.turnId,
+            updatedTurnId: context.turnId,
+            createdAt: now,
+            updatedAt: now,
+            revision: 1,
+            attributions: [attribution],
+          };
+      if (holder)
+        record.holderName = characters.find((c) => c.id === holder)?.name ?? record.holderName;
+      else delete record.holderName;
+      campaignKnowledgeSchema.parse(record);
+      if (current) records[records.indexOf(current)] = record;
+      else records.push(record);
+      touched.add(record.id);
+      if (visibility === KnowledgeVisibility.Player)
+        changes.push(
+          `${record.title}: knowledge ${current ? 'updated' : 'introduced'} (${record.origin}, ${record.certainty}, ${record.status})`
+        );
+    });
   }
   return {
     records,

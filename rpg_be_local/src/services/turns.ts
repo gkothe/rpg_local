@@ -1,3 +1,6 @@
+import { bindResponseCitations } from '../domain/citationBinding.js';
+import { atResponseField } from '../domain/responseFields.js';
+import { validateWithFieldRepair } from './responseRepair.js';
 import { sourceSpanSchema } from '../domain/knowledge.js';
 import { CampaignSourceLookup } from './campaignSourceLookup.js';
 import { NarrativeCandidateRepository, humanizeNarrative } from './narrativeHumanizer.js';
@@ -8,10 +11,15 @@ import {
 } from '../domain/versions.js';
 import {
   gameplayResponseV5Schema,
-  gameplayResponseV5JsonSchema,
+  gameplayResponseV5WireJsonSchema,
+  gameplayResponseV5InputSchema,
   type GameplayResponseV5,
 } from '../domain/gameplayResponse.js';
-import { operationalProblem, reportProcessingFailure } from '../processingErrors.js';
+import {
+  operationalProblem,
+  reportProcessingFailure,
+  safeProcessingFailure,
+} from '../processingErrors.js';
 import {
   KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
   KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
@@ -703,19 +711,18 @@ export class TurnService {
                 ? '\nReplay the original requests in order with exactly these specifications before appending any dice: ' +
                   JSON.stringify(specifications)
                 : '');
-            if (v4)
-              diceResponse = (v5 ? gameplayResponseV5Schema : gameplayResponseSchema).parse(
-                await this.generator.generateOwnedGameplay!(
-                  t.settings,
-                  prompt,
-                  v5 ? gameplayResponseV5JsonSchema : gameplayResponseJsonSchema,
-                  t.context!.systemPrompt!,
-                  this.tracedTools(registry!, trace),
-                  ctl.signal,
-                  trace
-                )
+            if (v4) {
+              const raw = await this.generator.generateOwnedGameplay!(
+                t.settings,
+                prompt,
+                v5 ? gameplayResponseV5WireJsonSchema : gameplayResponseJsonSchema,
+                t.context!.systemPrompt!,
+                this.tracedTools(registry!, trace),
+                ctl.signal,
+                trace
               );
-            else if (t.ruleContext?.kind === RuleSystemKind.Library) {
+              diceResponse = v5 ? (raw as GameplayResponseV5) : gameplayResponseSchema.parse(raw);
+            } else if (t.ruleContext?.kind === RuleSystemKind.Library) {
               const rules = new RuleStore(this.store);
               const lookup = new RuleLookup();
               const registry = new GameplayTools({
@@ -776,7 +783,49 @@ export class TurnService {
             );
           }
           try {
-            await this.persistResponse(t, response, diceResponse, v5);
+            if (v5) {
+              await validateWithFieldRepair(
+                response,
+                async (candidate) => {
+                  const parsed = gameplayResponseV5InputSchema.parse(candidate);
+                  await this.persistResponse(t, parsed, parsed, true);
+                  response = parsed;
+                  diceResponse = parsed;
+                },
+                this.generator,
+                t.settings,
+                ctl.signal,
+                trace,
+                async () =>
+                  this.store.transaction(async (client) => {
+                    const { campaign } = await this.lockedOwned(t, client);
+                    const sources = await new CampaignSourceLookup(this.store).records(
+                      t.campaignId,
+                      t.id,
+                      client
+                    );
+                    const rules = await client.query(
+                      'SELECT id,payload FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
+                      [t.id]
+                    );
+                    return {
+                      sourceSpans: [
+                        ...(t.context?.sourceSpans ?? []),
+                        ...sources.flatMap((read) =>
+                          read.payload.sourceSpan ? [read.payload.sourceSpan] : []
+                        ),
+                      ],
+                      ruleReads: rules.rows,
+                      characters: campaign.characters,
+                      knowledge: campaign.knowledge,
+                      state: campaign.state,
+                      rolls: t.diceSessionId
+                        ? await new DiceService(this.store).records(t.diceSessionId, client)
+                        : [],
+                    };
+                  })
+              );
+            } else await this.persistResponse(t, response, diceResponse, false);
             await traceEvent(trace, 'validated_candidate', { response, editingPending: v5 });
           } catch (error) {
             await traceEvent(trace, 'candidate_rejected', { code: operationalProblem(error).code });
@@ -830,7 +879,7 @@ export class TurnService {
         await traceEvent(trace, 'owned_tool_rejected', {
           name,
           requestId,
-          code: operationalProblem(error).code,
+          ...safeProcessingFailure(error),
         });
         throw error;
       }
@@ -888,6 +937,41 @@ export class TurnService {
     await this.store.transaction(async (client) => {
       const v4 = response.version >= KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
       const { campaign, turn } = await this.lockedOwned(t, client);
+      if (response.version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION) {
+        const sourceReads = await new CampaignSourceLookup(this.store).records(
+          t.campaignId,
+          t.id,
+          client
+        );
+        const rows = await client.query(
+          'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
+          [t.id]
+        );
+        const bound = bindResponseCitations(response as GameplayResponseV5, {
+          campaignId: t.campaignId,
+          turnId: t.id,
+          ruleContext: t.ruleContext,
+          sourceSpans: [
+            ...(t.context?.sourceSpans ?? []),
+            ...sourceReads.flatMap((read) =>
+              read.payload.sourceSpan ? [sourceSpanSchema.parse(read.payload.sourceSpan)] : []
+            ),
+          ],
+          ruleReads: rows.rows.map((row) => ({
+            id: row.id,
+            campaignId: row.campaign_id,
+            turnId: row.turn_id,
+            context: row.captured_context,
+            tool: row.tool_name,
+            transportRequestId: row.transport_request_id,
+            argumentDigest: row.argument_digest,
+            resultHash: row.result_hash,
+            payload: row.payload,
+            createdAt: new Date(row.created_at).toISOString(),
+          })),
+        });
+        Object.assign(response, bound);
+      }
       if (diceResponse && t.diceSessionId) {
         const records = await dice.records(t.diceSessionId, client);
         const attempt = await client.query('SELECT next_slot FROM dice_attempts WHERE turn_id=$1', [
@@ -899,9 +983,11 @@ export class TurnService {
             'dice_replay',
             'Replay every original roll before completing the retry'
           );
-        validateRollInterpretations(
-          diceResponse,
-          records.map((record) => record.id)
+        atResponseField(['rollInterpretations'], () =>
+          validateRollInterpretations(
+            diceResponse!,
+            records.map((record) => record.id)
+          )
         );
         turn.rollInterpretations = diceResponse.rollInterpretations;
         turn.rolls = records;

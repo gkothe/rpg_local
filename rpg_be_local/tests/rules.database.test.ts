@@ -7,6 +7,7 @@ import { rm } from 'node:fs/promises';
 import { RuleStore, ruleContent } from '../src/services/ruleStore.js';
 import { DiceService } from '../src/services/dice.js';
 import { RuleLibrary } from '../src/services/ruleLibrary.js';
+import { LibraryService, remapArchive } from '../src/services/library.js';
 import { RulePreview } from '../src/services/rulePreview.js';
 import type { RuleUpload } from '../src/domain/ruleImport.js';
 import { RuleLookup } from '../src/services/ruleLookup.js';
@@ -402,6 +403,16 @@ test(
       [turn.id]
     );
     assert.equal(counters.rows[0].requests, 2);
+    // A real gameplay turn may need many pages. Audit totals are not capacity limits.
+    for (let index = 0; index < 40; index++)
+      await rules.read(turn, 'rules_map', {}, `unlimited-map-${index}`, lookup);
+    const unlimited = await store.pool.query(
+      'SELECT requests,transcript_bytes FROM turn_rule_budgets WHERE turn_id=$1',
+      [turn.id]
+    );
+    assert.equal(unlimited.rows[0].requests, 42);
+    assert.ok(unlimited.rows[0].transcript_bytes > 8192);
+    assert.deepEqual(await rules.read(turn, 'rules_map', {}, 'map-first', lookup), first);
     await assert.rejects(
       rules.read(turn, 'rules_map', { column: 'lore' }, 'map-first', lookup),
       /changed arguments/
@@ -419,6 +430,13 @@ test(
       turn.id,
       TurnStatus.Cancelled,
     ]);
+    await store.pool.query(
+      "UPDATE turns SET document=jsonb_set(document,'{status}',to_jsonb($2::text)) WHERE id=$1",
+      [turn.id, TurnStatus.Cancelled]
+    );
+    const archive = await new LibraryService(store).export(campaign.id);
+    const restored = remapArchive(archive);
+    assert.equal(restored.turns[0]!.ruleReads!.length, 42);
     await assert.rejects(
       rules.read(turn, 'rules_map', {}, 'cancelled', lookup),
       /no longer active/

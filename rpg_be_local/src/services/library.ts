@@ -330,6 +330,7 @@ const auditedArchiveSchema = knowledgeArchiveSchema
         turn
           .extend({
             context: auditedContext.nullable(),
+            ruleReads: z.array(ruleReadSchema).optional(),
             sourceReads: z.array(sourceRead).optional(),
             operationExplanations: z.array(operationExplanationSchema).optional(),
             traceId: z.string().optional(),
@@ -881,8 +882,9 @@ export function remapArchive(raw: unknown): Archive {
       throw new Problem(422, 'archive_invalid', 'Rule evidence requires captured context');
     if (
       new Set(reads.map((read) => read.transportRequestId)).size !== reads.length ||
-      reads.reduce((sum, read) => sum + serializedBytes(read.payload), 0) >
-        RULE_LIMITS.transcriptBytes
+      (archive.version < AUDITED_ARCHIVE_FORMAT_VERSION &&
+        reads.reduce((sum, read) => sum + serializedBytes(read.payload), 0) >
+          RULE_LIMITS.legacyArchiveTranscriptBytes)
     )
       throw new Problem(422, 'archive_invalid', 'Rule receipt identities or size are invalid');
     for (const read of reads) {
