@@ -33,8 +33,8 @@ Campaigns also include `pinnedSourceSections: {sourceId:string,version:number,in
 - PATCH `/campaigns/:id/notes` `{notes,notesRevision}` => Campaign (private notes don't enter prompt).
 - POST `/campaigns/:id/characters` `{revision,name,type?,attributes?,inventory?,description?,notes?}` => Campaign.
 - PATCH `/campaigns/:id/characters/:characterId` `{revision,name?,attributes?,inventory?,description?,notes?}` => Campaign. DELETE same path `{revision}` => Campaign.
-- POST `/campaigns/:id/sources` JSON `{revision,name,text}` => Campaign (draft, not used by GM).
-- POST `/campaigns/:id/sources/extract` multipart `file`, `revision`, `language` ('eng'/'por'/'eng+por') => Campaign with extracted draft; or JSON `{revision,url,name?}` public Google Docs only. Text/MD/PDF up to20MiB; PDF requires configured local Python dependencies. No browser file paths.
+- POST `/campaigns/:id/sources` JSON `{revision,name,text}` => Campaign with a confirmed source, immediately eligible for GM context.
+- POST `/campaigns/:id/sources/extract` multipart `file`, `revision`, `language` ('eng'/'por'/'eng+por') => Campaign with a confirmed extracted source; or JSON `{revision,url,name?}` public Google Docs only. Text/MD/PDF up to20MiB; PDF requires configured local Python dependencies. No browser file paths.
 - PATCH `/campaigns/:id/sources/:sourceId` `{revision,text,name?,confirmed:boolean}` => Campaign; confirmation/correction bumps source version.
 - DELETE `/campaigns/:id/sources/:sourceId` `{revision}` => Campaign.
 - GET `/campaigns/:id/sources/:sourceId/sections` => sections `{id,index,text,start,end,page:number|null,version,pinned:boolean}[]`. Offsets are JavaScript string offsets; corrections invalidate old section pins.
@@ -79,7 +79,7 @@ Exports now use `local-rpg` archive version 2 with canonical `diceSessions` and 
 
 Trusted faces do not mechanically prove that the GM requested every roll required by a game system, interpreted arithmetic correctly or kept narration consistent. The application validates the structured audit and mutations; free-form rule interpretation remains the AI's responsibility.
 
-## Shared current rules libraries (2026-10-01)
+## Shared current rules libraries
 
 Backend owners: domain/rules.ts (eleven columns, schemas and RULE_LIMITS), domain/versions.ts (package/backup v1, rule-response/archive v3), ruleStore/ruleLibrary/ruleLookup/ruleBackup and provider gameplay registry. All routes retain Host/Origin/device/write protections and {data} envelopes. Numeric collection continuation is returned in pagination.nextCursor; opaque rule lookup cursors/locators are bound to system/revision/hash/arguments and may expire on server restart.
 
@@ -123,13 +123,11 @@ Principal errors: rules_import_invalid/rules_backup_invalid (422), rules_preview
 
 Provider responses add optional `compatibilityWarning: string | null`. CLI versions differing from the recorded tested baselines no longer disable discovery, dice or book gameplay. The warning is informational and must not be treated as `reason` or as unsupported capability by clients. Required flags, subscription authentication, model/effort constraints, context limits, owned tool isolation and runtime response validation still apply. Selection and Settings show the warning; actual failed turns retain their visible errors. Recorded version/model evidence above is historical test coverage, not an exact-version allowlist.
 
-UTF-8 Markdown/plain-text file imports (.md/.markdown/.txt) are created confirmed and are immediately eligible for context and character parsing. PDF extraction, Google Docs export and pasted-source creation retain draft status. Existing saved drafts are not altered automatically. Explicit source edits/confirmation and source version/revision checks remain unchanged.
-
-Current import policy (2026-10-02, supersedes review prerequisites above): all successful source imports, including PDFs, public Google Docs and pasted text, create confirmed sources immediately. Source review/correction and explicit draft status remain supported but are optional. No review step is required between upload and GM use or character draft generation. Invalid/empty/oversized inputs remain rejected.
+Current import policy: all successful source imports, including PDFs, public Google Docs and pasted text, create confirmed sources immediately. Source review/correction and explicit draft status remain supported but are optional. No review step is required between upload and GM use or character draft generation. Invalid/empty/oversized inputs remain rejected.
 
 Character parsing accepts imported UTF-8 text in any extension (including JSON/Markdown/YAML), or locally extracted PDF text, and normalizes it through the selected LLM into the existing draft JSON schema. It uses actual serialized UTF-8 request bytes and available provider capacity. Oversized single requests are split into sequential bounded sections, merged and validated instead of asking the user to shorten the sheet. Source text remains saved and no section is silently discarded. Explicit campaign revision validation remains required throughout parsing. Binary/invalid UTF-8 inputs remain rejected.
 
-### CLI capacity and automatic response repair (2026-10-02)
+### CLI capacity and automatic response repair
 
 Campaign budgets are soft retrieval/compaction targets, not AI admission limits. Mandatory context is preserved even above a target. Native CLI context/output/compaction and inference limits apply; the app adds no AI attempt deadline. Active turn Cancel remains available. Version warnings remain informational, and installed model-supported efforts plus Default are accepted.
 

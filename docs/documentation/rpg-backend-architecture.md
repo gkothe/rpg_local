@@ -1,6 +1,6 @@
 # Local RPG Backend (`rpg_be_local`) — Comprehensive Technical Architecture & Information Governance Guide
 
-This document describes the implementation of `rpg_be_local`, reviewed against source code and migrations on 2026-10-03, with a follow-up against the uncommitted provider recovery and processing-error changes on 2026-10-04. Source code remains authoritative; examples are illustrative unless marked exact. Static inspection does not establish live provider, device or database compatibility. Section 6 describes the implemented educational Flow guide.
+This document describes backend processing, persistence and information handling. Source code remains authoritative; examples are illustrative unless marked exact. Static inspection does not establish live provider, device or database compatibility. Section 6 describes the educational Flow guide.
 
 ---
 

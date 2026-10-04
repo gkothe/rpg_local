@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import architecture from '../../../docs/rpg-backend-architecture.md?raw';
+import architecture from '../../../docs/documentation/rpg-backend-architecture.md?raw';
 import { edges, nodes, steps, tools, storageItems } from '../features/flow/content';
 import FlowDiagram from '../features/flow/FlowDiagram';
 import FlowInspector from '../features/flow/FlowInspector';
@@ -68,7 +68,7 @@ export default function Flow() {
   );
   return (
     <div className="page flow-page">
-      <div className="flow-kicker">How the system works · reviewed 04 Oct 2026</div>
+      <div className="flow-kicker">How the system works Â· reviewed 04 Oct 2026</div>
       <h1>Follow the Flow</h1>
       <p className="flow-lead">
         Follow your action through the app and the language model (LLM). See what each part

@@ -124,7 +124,7 @@ test('educational graph, document sections and source references remain navigabl
   }
   for (const step of steps) assert.ok(nodeIds.has(step.node));
   const document = readFileSync(
-    new URL('../../docs/rpg-backend-architecture.md', import.meta.url),
+    new URL('../../docs/documentation/rpg-backend-architecture.md', import.meta.url),
     'utf8'
   );
   for (const item of [...nodes, ...edges, ...tools, ...storageItems]) {
