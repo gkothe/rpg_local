@@ -38,7 +38,7 @@ $env:RPG_TESSERACT_BIN = 'C:\Program Files\Tesseract-OCR\tesseract.exe'
 & $env:RPG_TESSERACT_BIN --list-langs
 ```
 
-Both language packs must appear. Native pages use MarkItDown; scanned pages use PDFium rendering and Tesseract. Review and correct extracted text before confirming it, particularly tables, columns and dice notation. Uploads are limited to 20 MiB, 300 pages and 120 seconds of processing.
+Both language packs must appear. Native pages use MarkItDown; scanned pages use PDFium rendering and Tesseract. Successful uploads are usable immediately. You can optionally inspect and correct extracted text, particularly tables, columns and dice notation. Uploads are limited to 20 MiB, 300 pages and 120 seconds of processing.
 
 Download the multilingual speech model explicitly (internet required for this setup step):
 

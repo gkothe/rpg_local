@@ -63,7 +63,7 @@ Dice faces survive a failed attempt. **Retry with saved dice** continues the ori
 
 Campaigns, source documents, characters, dice and undo records live in PostgreSQL. The Windows launcher stores local connection/runtime settings under `%LOCALAPPDATA%\LocalRPG`; database credentials are encrypted with Windows DPAPI. CLI credentials remain managed by the providers' own tools.
 
-Every outgoing CLI prompt is written to `log/` at the repository root. These files can contain character sheets, rule text and private campaign details. The folder is ignored by Git. Campaign exports and library backups can contain private material too; keep them outside the checkout when sharing or publishing code.
+GM and AI parsing prompts are written to `log/` at the repository root. These files can contain character sheets, rule text and private campaign details. The folder is ignored by Git. Campaign exports and library backups can contain private material too; keep them outside the checkout when sharing or publishing code.
 
 Gameplay exposes the app's dice, rules and campaign-recall tools to the GM. Shell commands, unrelated MCPs and arbitrary computer-file access are blocked by the provider adapters. Imported text can still affect model behavior, and selected context is sent to your AI provider.
 
