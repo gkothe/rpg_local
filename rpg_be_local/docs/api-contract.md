@@ -202,3 +202,13 @@ accepted through strict legacy schemas; old campaigns receive empty knowledge on
 activation without guessed origins. V4 fields are rejected in older archive versions.
 Templates retain setup and portable book references, excluding knowledge timeline,
 turns, receipts, snapshots and frozen sessions.
+
+`GET /api/campaigns/:id/turns/:turnId/context` loads the existing saved context
+inspection on demand. It returns `{data: ContextManifest|null}`. New v4 contexts
+hydrate exact system/user inputs, digest version, frozen knowledge and definitions
+from the immutable owning root session; ordinary campaign/turn lists retain only
+the reference. Legacy contexts remain unchanged. Cross-campaign IDs return 404.
+
+If a v4 session cannot be created because database columns are missing, the turn
+fails before a CLI call with an actionable `setup-database.cmd` migration message
+instead of the generic invalid-response message. No game changes are committed.

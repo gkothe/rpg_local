@@ -1,5 +1,18 @@
 # Frontend implementation — 2026-10-01
 
+## Flow copy and architecture follow-up — 2026-10-04
+
+Rewrote the guide's explanations, labels, walkthrough, and inspector text in plain English.
+Exact system prompts, JSON examples, tool arguments, and response schema remain unchanged.
+Compared uncommitted backend/provider changes with the guide and architecture document;
+updated MCP routing, tool argument correction, protocol framing, operational failures,
+logging and cleanup behavior. Journey now includes an account/database/file failure outcome.
+
+Verification: seven Flow unit tests, four backend fixture checks, 33 focused backend
+recovery/error tests, and five installed-Chrome Flow scenarios passed. Frontend typecheck
+and zero-warning lint passed. Browser checks cover 360/768/1440px and the LAN pairing gate.
+Concurrent backend and Journal edits were preserved.
+
 ## Interactive Flow guide — 2026-10-03
 
 Global **Flow** navigation opens a lazy `/flow` architecture guide. Journey provides a clickable
@@ -163,6 +176,8 @@ attributions and option catalogs. Legacy campaigns may omit the registry. No ded
 knowledge view or frontend-owned enum values were added; automatic changes use the
 existing turn change list.
 
-Verification: 13 frontend test files / 50 tests passed, including a real Play component
+Verification: 14 frontend test files / 52 tests passed, including a real Play component
 regression for literal rendering of knowledge changes and composer retention when
 switching tabs. These checks do not certify live CLI behavior.
+
+Existing Journal context inspection lazily loads the immutable root metadata through the owned context endpoint only when expanded. Tests verify exact instruction display, literal rendering, and rejection of delayed responses after inspecting a newer turn.

@@ -12,19 +12,19 @@ export default function StorageExplorer({
     [changedState, setChangedState] = useState(true);
   const status =
     outcome === 'success'
-      ? 'Committed: Mira HP 10 → 9; snapshot and completed narrative save together.'
+      ? "Committed: Mira's HP changes from 10 to 9. The app saves the snapshot and completed story together."
       : outcome === 'undo'
         ? conflict
-          ? 'Undo blocked: a touched attributes field changed later. The app refuses to overwrite it.'
-          : 'Undone: Mira HP 9 → 10; the turn remains in audit history.'
-        : 'No gameplay commit: HP remains 10. Tool audit and any earlier committed memory milestones can survive.';
+          ? 'Undo blocked: a later edit changed the same attributes field. The app refuses to overwrite that edit.'
+          : "Undone: Mira's HP returns from 9 to 10. The app keeps the turn in its history."
+        : 'The app saves no gameplay change, so HP remains 10. Tool records and any summaries saved earlier can survive the failure.';
   return (
     <section className="flow-card" aria-label="Storage explorer">
-      <h2>What persists, and when?</h2>
+      <h2>What gets saved, and when?</h2>
       <p>
-        PostgreSQL stores canonical data and audit records. Extraction and model inference run
-        outside the final gameplay transaction. Disk artifacts, provider authentication and
-        in-memory snapshots have different lifetimes.
+        PostgreSQL stores the saved campaign and records of what happened. File extraction and model
+        calls run before the final gameplay transaction. Original files on disk, provider
+        authentication, and temporary copies in memory have their own lifetimes.
       </p>
       <div className="flow-storage-list">
         {storageItems.map((item) => (
@@ -48,24 +48,27 @@ export default function StorageExplorer({
         </select>
       </label>
       <ol className="flow-trace">
-        <li>Submit → turn identity and frozen session recorded.</li>
-        <li>Optional compaction → memory milestone may commit before gameplay.</li>
-        <li>Tool loop → dice persisted before reveal; rule-read receipts persisted.</li>
+        <li>The app records the submitted turn and its fixed session.</li>
+        <li>If it summarizes older turns, that summary may be saved before gameplay finishes.</li>
+        <li>
+          When tools run, dice results are saved before the model sees them, and rule reads get
+          saved receipts.
+        </li>
         <li>
           {outcome === 'success' || outcome === 'undo'
-            ? 'Validate → atomic campaign, snapshot and narrative commit.'
-            : 'Stop → no final canonical update.'}
+            ? 'After validation, the app saves campaign changes, the snapshot, and the story in one transaction.'
+            : 'The attempt stops without saving gameplay changes.'}
         </li>
         {outcome === 'undo' && (
-          <li>Undo → compare touched fields and restore only their previous values.</li>
+          <li>Undo checks the fields this turn changed and restores only their previous values.</li>
         )}
       </ol>
       <p className="flow-notice" role="status">
         {status}
       </p>
       <p>
-        Dice and rule-read audit retained when those tools ran; they are not rolled back by a
-        rejected proposal or undo.
+        The app keeps any dice results and rule-read records already saved. A rejected proposal or
+        an undo does not erase them.
       </p>
       {outcome === 'undo' && (
         <>
@@ -89,24 +92,25 @@ export default function StorageExplorer({
           </div>
           <p>
             {changedState
-              ? 'State restoration also requires the touched campaign state to match the snapshot’s after value.'
-              : 'This turn did not touch state: undo preserves a later location/state edit.'}{' '}
-            Unrelated character edits and private notes remain. A newly created NPC with later
-            private notes can block its removal.
+              ? 'To restore campaign state, the app checks that its current value still matches the value saved after this turn.'
+              : 'This turn did not change campaign state, so undo leaves a later location or state edit alone.'}{' '}
+            The app keeps unrelated character edits and private notes. If you added private notes to
+            an NPC created by this turn, those notes can block the NPC's removal.
           </p>
           <p>
-            Memory covering the undone turn becomes invalid; prior valid memory can be restored. The
-            completed turn is marked undone, never erased.
+            A summary covering the undone turn becomes invalid, and the app can restore an earlier
+            valid summary. The completed turn is marked undone and stays in the history.
           </p>
         </>
       )}
       <details>
-        <summary>Recovery and explicit retry</summary>
+        <summary>What happens after an interruption?</summary>
         <p>
-          A heartbeat renews only an owned, unchanged turn. Recovery marks expired leases
-          interrupted; it does not call the model. An explicit eligible retry creates a new TurnID
-          and reuses the unchanged original frozen session and matching dice specification. Imported
-          sessions cannot be executed.
+          A heartbeat renews the attempt's permission to run only while it still owns the turn and
+          the required versions match. Recovery marks expired turns interrupted without calling the
+          model. If the attempt is eligible and you request a retry, the app creates a new turn ID
+          and reuses the unchanged original session. Matching dice requests reuse their saved
+          results. Imported sessions cannot run again.
         </p>
       </details>
       <h3 style={{ marginTop: '1.5rem' }}>Other paths into and out of the system</h3>

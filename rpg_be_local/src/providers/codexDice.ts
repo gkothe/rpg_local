@@ -1,10 +1,10 @@
+import { cliFailure, finishProcessingCleanup } from '../processingErrors.js';
 import { link, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import type { ProviderSettings } from '../domain/types.js';
 import type { Executable } from './discovery.js';
 import { Problem } from '../errors.js';
-import { DICE_TOOL_NAME } from '../domain/dice.js';
 import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
 import { nativeGameplaySchema } from './gameplayContract.js';
 
@@ -44,7 +44,7 @@ const rpcSchema = z
   .passthrough();
 const toolCallSchema = z
   .object({
-    tool: z.literal(DICE_TOOL_NAME),
+    tool: z.string(),
     arguments: z.unknown(),
     callId: z.string(),
     threadId: z.string(),
@@ -71,6 +71,7 @@ export async function generateCodexDice(
     throw new Problem(422, 'codex_model', 'Select a supported Codex model and effort');
   const home = codexHome(env);
   const isolatedHome = await mkdtemp(path.join(home, 'rpg-isolated-'));
+  let failed = false;
   try {
     try {
       await link(path.join(home, 'auth.json'), path.join(isolatedHome, 'auth.json'));
@@ -111,8 +112,11 @@ export async function generateCodexDice(
       signal,
       book
     );
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
-    await cleanDiceHome(home, isolatedHome);
+    await finishProcessingCleanup(() => cleanDiceHome(home, isolatedHome), failed);
   }
 }
 async function cleanDiceHome(home: string, isolatedHome: string): Promise<void> {
@@ -182,8 +186,7 @@ export async function runCodexDicePhases(
         },
         async line(raw, send, end) {
           const message = rpcSchema.parse(raw);
-          if (message.error)
-            throw new Problem(502, 'codex_protocol', 'Codex rejected the isolated dice phase');
+          if (message.error) throw cliFailure(JSON.stringify(message.error));
           if (message.id === CODEX_DICE_REQUEST_ID.Initialize && message.result) {
             send({ method: CODEX_DICE_RPC.Initialized, params: {} });
             send({
@@ -217,9 +220,7 @@ export async function runCodexDicePhases(
           } else if (message.id === CODEX_DICE_REQUEST_ID.Turn && message.result) {
             turnId = z.object({ turn: z.object({ id: z.string() }) }).parse(message.result).turn.id;
           } else if (message.method === CODEX_DICE_RPC.ToolCall) {
-            const call = (
-              book ? toolCallSchema.extend({ tool: z.string() }) : toolCallSchema
-            ).parse(message.params);
+            const call = toolCallSchema.parse(message.params);
             if (
               !threadId ||
               call.namespace ||
@@ -237,11 +238,38 @@ export async function runCodexDicePhases(
             if (calls.has(call.callId) && calls.get(call.callId) !== identity)
               throw new Problem(409, 'gameplay_transport_conflict', 'Native tool identity changed');
             calls.set(call.callId, identity);
-            const result = await (book ? book.dispatch : protocol.call.bind(protocol))(
-              call.tool,
-              call.arguments,
-              call.callId
-            );
+            let result: GameplayToolResult;
+            try {
+              result = await (book ? book.dispatch : protocol.call.bind(protocol))(
+                call.tool,
+                call.arguments,
+                call.callId
+              );
+            } catch (error) {
+              if (
+                !(error instanceof Problem) ||
+                ![
+                  'dice_input',
+                  'gameplay_arguments_invalid',
+                  'knowledge_not_found',
+                  'knowledge_cursor',
+                ].includes(error.code)
+              )
+                throw error;
+              send({
+                id: message.id,
+                result: {
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: `${error.code}: ${error.message}. Correct the arguments using the owned tool schema; use a new callId.`,
+                    },
+                  ],
+                  success: false,
+                },
+              });
+              return;
+            }
             transcript.push({
               ...(book ? { tool: call.tool } : {}),
               arguments: call.arguments,
@@ -321,7 +349,7 @@ export async function runCodexDicePhases(
               if (messages.length !== 1 || typeof messages[0]?.text !== 'string')
                 throw new Problem(
                   502,
-                  'codex_protocol',
+                  'provider_json',
                   'Codex did not return one complete application response'
                 );
               final = parseCodexPayload(messages[0].text);
@@ -344,7 +372,7 @@ export async function runCodexDicePhases(
       },
     });
     if (!completed)
-      throw new Problem(502, 'codex_protocol', 'Codex closed before completing its dice phase');
+      throw new Problem(502, 'provider_protocol', 'Codex closed before completing its dice phase');
     return nativeGameplaySchema(book, !!book).parse(final);
   }
 }

@@ -14,15 +14,15 @@ const paths: Record<string, string> = {
   dbwrite: 'M510 440 V455 H90 V442',
 };
 const captions: Record<string, string> = {
-  browser: 'Action + revision + requestId',
+  browser: 'Send your action and campaign version',
   api: 'Access and request checks',
-  turn: 'Owner, lease, idempotency',
-  context: 'Select data; freeze session',
-  model: 'Cloud inference via local CLI',
+  turn: 'Prevent duplicate or competing turns',
+  context: 'Prepare a fixed copy of the context',
+  model: 'Ask the provider for a response',
   tools: 'Request → app → result',
-  validate: 'Schema, evidence, expected values',
-  commit: 'Accepted diff + snapshot',
-  database: 'App-owned reads and writes',
+  validate: 'Check the response and proposed changes',
+  commit: 'Save the result and its snapshot',
+  database: 'The app reads and saves data here',
 };
 export default function FlowDiagram({
   selected,
@@ -35,8 +35,9 @@ export default function FlowDiagram({
     <section className="flow-card flow-map" aria-label="System map">
       <h2>The round trip</h2>
       <p>
-        Choose an actor or a connection. Solid arrows carry the turn; dashed arrows show storage
-        access and the browser refresh. The tool loop returns to the model.
+        Select a box or a connection to read what happens there. Solid arrows follow the turn.
+        Dashed arrows show database access and the browser refresh. After a tool runs, its result
+        goes back to the model so it can continue.
       </p>
       <div className="flow-canvas">
         <svg viewBox="0 0 600 480" preserveAspectRatio="none" aria-hidden="true">
@@ -83,7 +84,7 @@ export default function FlowDiagram({
           ))}
         </ol>
       </div>
-      <h3>Information connections</h3>
+      <h3>What moves between each part</h3>
       <div className="flow-edges">
         {edges.map((edge) => (
           <button

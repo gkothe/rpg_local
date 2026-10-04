@@ -38,3 +38,27 @@ test('prompt logs preserve full text, safe filenames and repeated calls without 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('prompt log I/O failures are actionable and never expose source content or private paths', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'rpg-log-error-'));
+  try {
+    const file = path.join(directory, 'PRIVATE_PATH');
+    await writeFile(file, 'occupied');
+    await assert.rejects(
+      logPrompt(
+        'test',
+        { provider: 'codex', model: 'fixture', effort: null },
+        'PRIVATE_PROMPT',
+        undefined,
+        file
+      ),
+      (e: unknown) => {
+        assert.equal((e as { code: string }).code, 'prompt_log');
+        assert.doesNotMatch(String(e), /PRIVATE_PROMPT|PRIVATE_PATH/);
+        return true;
+      }
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import Journal from '../src/features/journal/Journal';
 import { fixtureCampaign, fixtureTurn, options } from './fixtures';
 
@@ -57,7 +57,10 @@ it('does not replace a newer inspected turn with an older delayed response', asy
   const updated = { ...campaign, turns: [{ ...campaign.turns[0]!, id: 'new-turn' }] };
   rerender(<Journal campaign={updated} options={options} onSaved={async () => {}} />);
   await screen.findByText(/New saved instructions/);
-  finishOld(new Response(JSON.stringify({ data: { systemPrompt: 'Outdated instructions' } })));
+  await act(async () => {
+    finishOld(new Response(JSON.stringify({ data: { systemPrompt: 'Outdated instructions' } })));
+    await oldResponse;
+  });
   await waitFor(() => expect(screen.queryByText(/Outdated instructions/)).not.toBeInTheDocument());
   expect(screen.getByText(/New saved instructions/)).toBeInTheDocument();
 });

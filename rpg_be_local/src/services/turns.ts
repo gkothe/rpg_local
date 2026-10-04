@@ -1,3 +1,4 @@
+import { operationalProblem, reportProcessingFailure } from '../processingErrors.js';
 import {
   KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
   KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
@@ -184,7 +185,9 @@ export class TurnService {
     });
     if (launch)
       queueMicrotask(() => {
-        void this.run(turn).catch(() => {});
+        void this.run(turn).catch((error) =>
+          reportProcessingFailure('turn_background', error, turn.id)
+        );
       });
     return turn;
   }
@@ -334,7 +337,9 @@ export class TurnService {
     });
     if (launch)
       queueMicrotask(() => {
-        void this.run(next).catch(() => {});
+        void this.run(next).catch((error) =>
+          reportProcessingFailure('turn_background', error, next.id)
+        );
       });
     return next;
   }
@@ -730,6 +735,7 @@ export class TurnService {
         ctl.signal
       );
     } catch (e) {
+      reportProcessingFailure('turn_generation', heartbeatFailure ?? e, t.id);
       await this.store
         .transaction(async (client) => {
           await this.store.campaign(t.campaignId, client, true);
@@ -737,15 +743,10 @@ export class TurnService {
           if (![TurnStatus.Pending, TurnStatus.Running].includes(turn.status as TurnStatus)) return;
           turn.status = ctl.signal.aborted ? TurnStatus.Cancelled : TurnStatus.Failed;
           turn.completedAt = new Date().toISOString();
-          turn.error =
-            heartbeatFailure instanceof Problem
-              ? heartbeatFailure.message
-              : e instanceof Problem
-                ? e.message
-                : 'Invalid local AI response or unavailable local service; no game-state changes were applied';
+          turn.error = operationalProblem(heartbeatFailure ?? e).message;
           await this.store.saveTurn(turn, client);
         })
-        .catch(() => {});
+        .catch((error) => reportProcessingFailure('turn_failure_persistence', error, t.id));
     } finally {
       clearInterval(heartbeat);
       this.aborts.delete(t.id);

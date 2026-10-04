@@ -10,7 +10,7 @@ it('opens a linked step, selects evidence and safely falls back from unknown sel
     </MemoryRouter>
   );
   expect(screen.getByRole('heading', { name: '4. Freeze context' })).toBeVisible();
-  await userEvent.click(screen.getByText('Implementation evidence'));
+  await userEvent.click(screen.getByText('Source code and documentation'));
   await userEvent.click(screen.getByRole('button', { name: 'Read document section 4.3' }));
   expect(screen.getByLabelText('Architecture document')).toBeVisible();
   expect(screen.getByLabelText('Document section')).toHaveValue('4.3');

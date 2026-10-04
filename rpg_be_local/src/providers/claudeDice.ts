@@ -1,3 +1,4 @@
+import { cliFailure, finishProcessingCleanup } from '../processingErrors.js';
 import type { Executable } from './discovery.js';
 import type { ProviderSettings } from '../domain/types.js';
 import { Problem } from '../errors.js';
@@ -60,6 +61,7 @@ export async function generateClaudeDice(
         signal
       )
     : await startDiceMcp((input, id) => protocol.call(DICE_TOOL_NAME, input, id), signal);
+  let failed = false;
   try {
     const config = JSON.stringify({
       mcpServers: { dice: { type: 'http', url: endpoint.url, headers: endpoint.headers } },
@@ -148,18 +150,22 @@ export async function generateClaudeDice(
                 )
                   throw new Problem(502, 'dice_isolation', 'Claude attempted an unapproved tool');
             } else if (event.type === CLAUDE_DICE_EVENT.Result) {
+              if (!initialized || completed)
+                throw new Problem(
+                  502,
+                  'dice_isolation',
+                  'Claude returned an unowned or repeated final result'
+                );
+              if (event.is_error || event.subtype !== CLAUDE_DICE_SUBTYPE.Success)
+                throw cliFailure(typeof event.result === 'string' ? event.result : '');
               if (
-                !initialized ||
-                completed ||
-                event.subtype !== CLAUDE_DICE_SUBTYPE.Success ||
-                event.is_error ||
                 typeof event.result !== 'string' ||
                 !Number.isInteger(event.num_turns) ||
                 (event.num_turns as number) < 1
               )
                 throw new Problem(
                   502,
-                  'claude_dice_result',
+                  'provider_protocol',
                   `Claude did not complete a bounded dice conversation (${typeof event.subtype === 'string' && /^[a-z_]{1,80}$/.test(event.subtype) ? event.subtype : 'invalid result'}; turns=${Number.isInteger(event.num_turns) ? event.num_turns : 'unreported'}; error=${event.is_error === true}; category=${typeof event.result === 'string' && /hit your limit|usage limit|rate limit/i.test(event.result) ? 'subscription_limit' : 'unclassified'})`
                 );
               const usage = event.modelUsage as Record<
@@ -179,7 +185,7 @@ export async function generateClaudeDice(
               )
                 throw new Problem(
                   502,
-                  'dice_context',
+                  'provider_protocol',
                   'Claude did not report a verified dice continuation budget'
                 );
               const text = event.result.trim();
@@ -212,9 +218,12 @@ export async function generateClaudeDice(
       }
     );
     if (!completed)
-      throw new Problem(502, 'claude_dice_result', 'Claude closed before completing the dice turn');
+      throw new Problem(502, 'provider_protocol', 'Claude closed before completing the dice turn');
     return nativeGameplaySchema(book, !!book).parse(final);
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
-    await endpoint.close();
+    await finishProcessingCleanup(() => endpoint.close(), failed);
   }
 }

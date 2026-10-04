@@ -1,3 +1,4 @@
+import { finishProcessingCleanup } from '../processingErrors.js';
 import { lstat, link, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -226,6 +227,7 @@ export async function generateCodex(
   const home = codexHome(env);
   // Same-volume hardlink: the app never reads, copies or logs authentication contents.
   const isolatedHome = await mkdtemp(path.join(home, 'rpg-isolated-'));
+  let failed = false;
   try {
     try {
       if (!(await lstat(path.join(home, 'auth.json'))).isFile())
@@ -264,8 +266,11 @@ export async function generateCodex(
         maxOutputBytes: Infinity,
       }
     );
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
-    await cleanIsolatedHome(home, isolatedHome);
+    await finishProcessingCleanup(() => cleanIsolatedHome(home, isolatedHome), failed);
   }
 }
 

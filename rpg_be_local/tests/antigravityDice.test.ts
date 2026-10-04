@@ -4,6 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { generateAntigravityMcpBook } from '../src/providers/antigravityMcpBook.js';
+import { gameplayToolDefinitions } from '../src/providers/gameplayTools.js';
+import { withResponseRetries } from '../src/domain/responseRetry.js';
+import { diceInputSchema } from '../src/domain/dice.js';
 import {
   antigravityDiceEnvironment,
   generateAntigravityDice,
@@ -34,6 +38,13 @@ else if(args.includes('/hooks')) {
     if(process.env.RPG_TEST_AGY_MODE==='foreign-server') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:1,state:'ACTIVE',tool_name:'call_mcp_tool',tool_info:{parameters:{ServerName:'outside',ToolName:'roll_dice',Arguments:{}}}}}));
     if(process.env.RPG_TEST_AGY_MODE==='foreign-tool') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:1,state:'ACTIVE',tool_name:'call_mcp_tool',tool_info:{parameters:{ServerName:'local_rpg',ToolName:'shell',Arguments:{}}}}}));
     if(process.env.RPG_TEST_AGY_MODE==='orphan-completion') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:99,state:'DONE',tool_name:'call_mcp_tool'}}));
+    if(process.env.RPG_TEST_AGY_MODE==='direct-owned') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:2,state:'ACTIVE',tool_name:'rules_search',tool_info:{name:'rules_search',parameters:{query:'original rules'}}}}));
+    if(process.env.RPG_TEST_AGY_MODE==='direct-foreign') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:2,state:'ACTIVE',tool_name:'shell',tool_info:{name:'shell',parameters:{command:'forbidden'}}}}));
+    const mode=process.env.RPG_TEST_AGY_MODE;
+    if(['malformed-arguments','array-arguments','null-arguments','orphan-envelope'].includes(mode)) {
+      const argumentsValue=mode==='malformed-arguments' ? '{broken' : mode==='array-arguments' ? [] : mode==='null-arguments' ? null : {};
+      console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:99,state:mode==='orphan-envelope'?'DONE':'ACTIVE',tool_name:'call_mcp_tool',tool_info:{parameters:{ServerName:'local_rpg',ToolName:'roll_dice',Arguments:argumentsValue}}}}));
+    }
     for(let slot=0;slot<2;slot++) {
       const input={...${JSON.stringify(request)},slot};
       console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:slot*2,state:'DONE',usage:{input_tokens:10000,output_tokens:50,cache_read_tokens:0}}}));
@@ -41,14 +52,100 @@ else if(args.includes('/hooks')) {
       const reply=await fetch(server.serverUrl,{method:'POST',headers:{...server.headers,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'roll_dice',arguments:input}})});
       const payload=await reply.json(); if(payload.result.isError)throw new Error(JSON.stringify(payload));
       history.push({result:JSON.parse(payload.result.content[0].text)});
-      console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:slot*2+1,state:'DONE',tool_name:'call_mcp_tool'}}));
+      const completion={step_type:'tool',step_index:slot*2+1,state:'DONE',tool_name:'call_mcp_tool'};
+      if(mode==='matching-envelope'||mode==='changed-envelope') completion.tool_info={parameters:{ServerName:'local_rpg',ToolName:'roll_dice',Arguments:mode==='changed-envelope'?{...input,slot:99}:input}};
+      console.log(JSON.stringify({event:'step_update',step_update:completion}));
     }
     console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:4,state:'DONE',usage:{input_tokens:10000,output_tokens:12417}}}));
     const response={version:2,narrative:history.map(r=>r.result.groups[0].faces[0]).join(','),operations:[],rollInterpretations:history.map(r=>({rollId:r.result.rollId,explanation:'Recorded face '+r.result.groups[0].faces[0]}))};
+    if(process.env.RPG_TEST_AGY_MODE==='book-success'){response.version=3;response.ruleCitations=[];}
     console.log(JSON.stringify({event:'step_update',step_update:{step_type:'unknown',step_index:5,state:'DONE',duration_seconds:0.1}}));
     console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:{input_tokens:30000},response:JSON.stringify(response)}}));
   });
 }`;
+
+test('a registered tool called directly fails before dispatch and automatically retries with MCP guidance', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-direct-repair-'));
+  try {
+    const filename = path.join(root, 'cli.mjs');
+    await writeFile(filename, fixture);
+    let attempts = 0;
+    let dispatches = 0;
+    const result = await withResponseRetries(
+      async (attempt, feedback) => {
+        attempts++;
+        if (attempt > 0) {
+          assert.equal(dispatches, 0);
+          assert.match(feedback, /rules_search directly/);
+          assert.match(feedback, /call_mcp_tool/);
+          assert.match(feedback, /ServerName="local_rpg"/);
+        }
+        return generateAntigravityMcpBook(
+          { binary: process.execPath, prefix: [filename] },
+          settings,
+          `Synthetic ${feedback ?? ''}`,
+          root,
+          { ...process.env, RPG_TEST_AGY_MODE: attempt === 0 ? 'direct-owned' : 'book-success' },
+          {
+            definitions: gameplayToolDefinitions(true),
+            dispatch: async (name, input) => {
+              assert.equal(name, 'roll_dice');
+              dispatches++;
+              return {
+                rollId: randomUUID(),
+                slot: diceInputSchema.parse(input).slot,
+                groups: [{ label: 'check', sides: 6, faces: [3] }],
+                reused: false,
+              };
+            },
+          }
+        );
+      },
+      async () => {}
+    );
+    assert.equal(attempts, 2);
+    assert.equal(dispatches, 2);
+    assert.equal((result as { version: number }).version, 3);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a genuinely external direct tool remains non-retryable and never dispatches', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-direct-denied-'));
+  try {
+    const filename = path.join(root, 'cli.mjs');
+    await writeFile(filename, fixture);
+    let attempts = 0;
+    await assert.rejects(
+      withResponseRetries(
+        async () => {
+          attempts++;
+          return generateAntigravityMcpBook(
+            { binary: process.execPath, prefix: [filename] },
+            settings,
+            'Synthetic',
+            root,
+            { ...process.env, RPG_TEST_AGY_MODE: 'direct-foreign' },
+            {
+              definitions: gameplayToolDefinitions(true),
+              dispatch: async () => {
+                assert.fail('External tool must never dispatch');
+              },
+            }
+          );
+        },
+        async () => {
+          assert.fail('External tool must never retry');
+        }
+      ),
+      (error: unknown) => (error as { code: string }).code === 'dice_isolation'
+    );
+    assert.equal(attempts, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('Antigravity rejects intrinsic native tools, error framing and opaque repeated inference turns', () => {
   const response = {
@@ -243,3 +340,82 @@ test('unavailable MCP server/tools and unmatched completion markers fail before 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+for (const mode of ['malformed-arguments', 'array-arguments', 'null-arguments']) {
+  test(`invalid owned MCP arguments are repaired before dice dispatch: ${mode}`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-arguments-'));
+    try {
+      const filename = path.join(root, 'cli.mjs');
+      await writeFile(filename, fixture);
+      let attempts = 0;
+      let calls = 0;
+      await withResponseRetries(
+        async (attempt, feedback) => {
+          attempts++;
+          if (attempt > 0) {
+            assert.equal(calls, 0);
+            assert.match(feedback, /Arguments/);
+            assert.match(feedback, /JSON object/);
+          }
+          return generateAntigravityDice(
+            { binary: process.execPath, prefix: [filename] },
+            settings,
+            feedback,
+            root,
+            { ...process.env, RPG_TEST_AGY_MODE: attempt === 0 ? mode : 'matching-envelope' },
+            async () => {
+              calls++;
+              return {
+                rollId: randomUUID(),
+                slot: calls - 1,
+                groups: [{ label: 'check', sides: 6, faces: [3] }],
+                reused: false,
+              };
+            }
+          );
+        },
+        async () => {}
+      );
+      assert.equal(attempts, 2);
+      assert.equal(calls, 2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const [mode, expectedCalls] of [
+  ['orphan-envelope', 0],
+  ['changed-envelope', 1],
+] as const) {
+  test(`MCP completion must match an actually dispatched request: ${mode}`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-completion-'));
+    try {
+      const filename = path.join(root, 'cli.mjs');
+      await writeFile(filename, fixture);
+      let calls = 0;
+      await assert.rejects(
+        generateAntigravityDice(
+          { binary: process.execPath, prefix: [filename] },
+          settings,
+          'Synthetic',
+          root,
+          { ...process.env, RPG_TEST_AGY_MODE: mode },
+          async () => {
+            calls++;
+            return {
+              rollId: randomUUID(),
+              slot: calls - 1,
+              groups: [{ label: 'check', sides: 6, faces: [3] }],
+              reused: false,
+            };
+          }
+        ),
+        (error: unknown) => (error as { code: string }).code === 'dice_isolation'
+      );
+      assert.equal(calls, expectedCalls);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}

@@ -25,17 +25,31 @@ the user's active campaigns are not played or modified.
   The textual schemas are therefore retained as one canonical registry-derived
   block. Removing them is not a verified optimization. This does not restore the
   duplicated generic narrator policy removed from the normal v4 envelope.
+- A real service-level recovery probe passed in 30.2 seconds against an isolated
+  PostgreSQL schema. Codex was cancelled after its first persisted roll; Antigravity
+  retried the same root, reused the same roll ID/faces, completed one knowledge
+  change, and undo removed it. Cancelled output committed no facts.
 - Claude live acceptance remains deferred because the user's weekly quota is
   exhausted. Mocked transport checks cover v4 routing, not live model behavior.
 
 ## Integration checks
 
 - Fresh isolated PostgreSQL 18 on loopback port 55439, database `rpg_local_test`:
-  migrations 0001–0008 applied successfully. Initial full backend run: 138 passed,
-  14 explicitly skipped optional checks; feature tests still being completed.
-- Frontend: 13 files / 50 tests passed, including safe literal knowledge changes
+  migrations 0001–0008 applied successfully. Final backend run: 154 passed,
+  17 explicitly skipped optional checks, zero failures. Native opt-in checks above
+  were run separately. Source/character deletion, archive roundtrips, real memory
+  compaction and exact inputs above 16,000 characters passed.
+- Feature frontend: 14 files / 52 tests passed, including safe literal knowledge changes
   and composer preservation when switching tabs.
 - Installed Windows Chrome: 13 browser checks passed; 6 optional environment
   checks were explicitly skipped. Android and macOS/Linux are not acceptance gates.
 
-This report is updated with final results before implementation handoff.
+Root typecheck, zero-warning lint and production build passed before concurrent
+Flow Explorer work started adding incomplete frontend files. A later whole-repo
+frontend run encountered that work's not-yet-created imports; it is not counted
+as a pass. Backend checks and this feature's frontend tests are independently
+verified. Public Gitleaks audit completed with zero findings.
+
+All migrations through 0008 were applied to the user's configured local database;
+no pending migration files remain. No system instruction text was changed. The
+user deleted the failed campaign created before migration; it was not restored.

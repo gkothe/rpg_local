@@ -6,10 +6,10 @@ it('distinguishes surviving audit from state changes and models an undo conflict
   render(<StorageExplorer selected="campaigns" onSelect={vi.fn()} />);
   await userEvent.selectOptions(screen.getByLabelText('Outcome'), 'invalid');
   expect(screen.getByRole('status')).toHaveTextContent('HP remains 10');
-  expect(screen.getByText(/Dice and rule-read audit retained/)).toBeVisible();
+  expect(screen.getByText(/keeps any dice results and rule-read records/)).toBeVisible();
   await userEvent.selectOptions(screen.getByLabelText('Outcome'), 'undo');
   await userEvent.click(screen.getByLabelText('Later edit changed a touched field'));
   expect(screen.getByRole('status')).toHaveTextContent('Undo blocked');
   await userEvent.click(screen.getByText('Audio'));
-  expect(screen.getByText(/local FasterWhisper/)).toBeVisible();
+  expect(screen.getByText(/Local FasterWhisper/)).toBeVisible();
 });

@@ -117,12 +117,12 @@ test(
       },
       generateOwnedGameplay: async (_settings, _prompt, _schema, systemPrompt, tools) => {
         assert.ok(systemPrompt);
-      const read = await tools(
+        const read = await tools(
           'rules_get',
           { path: 'core_rules.original.archive', view: 'text' },
-        'original-book'
-      );
-      if (!('text' in read)) throw new Error('Owned book lookup must return text');
+          'original-book'
+        );
+        if (!('text' in read)) throw new Error('Owned book lookup must return text');
         const roll = await tools(
           'roll_dice',
           {

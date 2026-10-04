@@ -1,3 +1,4 @@
+import { cliFailure } from '../processingErrors.js';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,6 +21,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const MCP_SERVER = 'local_rpg';
 const MCP_GATEWAY = 'call_mcp_tool';
+const MCP_INVOCATION_GUIDANCE = `Invoke every owned tool through ${MCP_GATEWAY} with ServerName="${MCP_SERVER}", ToolName set to its registered name, and Arguments set to its argument object. Never invoke a registered tool name directly as a native function.`;
 const PROFILE_PREFIX = 'rpg-agy-private-';
 const NATIVE_ACCESS_DENIED = [
   'command(*)',
@@ -132,8 +134,8 @@ export async function generateAntigravityMcpBook(
         privateMcp: { name: MCP_SERVER, endpoint },
         agentPrompt:
           book.systemPrompt !== undefined
-            ? `${book.systemPrompt}\nNative transport: use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests.\nOwned MCP argument schemas:${JSON.stringify(definitions)}`
-            : `${selectedBook ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR} Use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests. This is one bounded logical game turn. The supplied frozen campaign context and application tool results are authoritative. Return only the complete final GM JSON.\nOwned MCP argument schemas:${JSON.stringify(definitions)}`,
+            ? `${book.systemPrompt}\nNative transport: use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests. ${MCP_INVOCATION_GUIDANCE}\nOwned MCP argument schemas:${JSON.stringify(definitions)}`
+            : `${selectedBook ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR} Use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests. ${MCP_INVOCATION_GUIDANCE} This is one bounded logical game turn. The supplied frozen campaign context and application tool results are authoritative. Return only the complete final GM JSON.\nOwned MCP argument schemas:${JSON.stringify(definitions)}`,
         timeoutMs: 0,
         deadlineMs: deadline,
         maxOutputBytes: Infinity,
@@ -220,18 +222,29 @@ export async function generateAntigravityMcpBook(
                   !tools.includes(parameters?.ToolName ?? '')
                 ) {
                   await logPrompt('antigravityRejectedTool', settings, JSON.stringify(event));
+                  const ownedDirectCall = typeof gateway === 'string' && tools.includes(gateway);
+                  const recoverable = gateway === MCP_GATEWAY || ownedDirectCall;
                   throw new Problem(
                     502,
-                    gateway === MCP_GATEWAY ? 'gameplay_tool_unavailable' : 'dice_isolation',
-                    gateway === MCP_GATEWAY
-                      ? `Antigravity requested an unavailable MCP tool. Use only server ${MCP_SERVER} with tools: ${tools.join(', ')}. Match the supplied argument schema.`
+                    recoverable ? 'gameplay_tool_unavailable' : 'dice_isolation',
+                    recoverable
+                      ? `Antigravity ${ownedDirectCall ? `invoked permitted tool ${gateway} directly instead of through MCP` : 'requested an unavailable MCP tool'}. ${MCP_INVOCATION_GUIDANCE} Available tools: ${tools.join(', ')}. Match the supplied argument schema.`
                       : 'Antigravity attempted a tool outside its private MCP'
                   );
                 }
-                const input =
-                  typeof parameters.Arguments === 'string'
-                    ? JSON.parse(parameters.Arguments)
-                    : parameters.Arguments;
+                let input: unknown;
+                try {
+                  input =
+                    typeof parameters.Arguments === 'string'
+                      ? JSON.parse(parameters.Arguments)
+                      : parameters.Arguments;
+                } catch {
+                  throw new Problem(
+                    422,
+                    'gameplay_tool_arguments',
+                    `Arguments for ${parameters.ToolName} must be a valid JSON object matching its registered schema. ${MCP_INVOCATION_GUIDANCE}`
+                  );
+                }
                 if (
                   !input ||
                   typeof input !== 'object' ||
@@ -240,8 +253,22 @@ export async function generateAntigravityMcpBook(
                 )
                   throw new Problem(
                     422,
-                    'rules_request_invalid',
-                    'Antigravity native MCP arguments exceed their owned request contract'
+                    'gameplay_tool_arguments',
+                    `Arguments for ${parameters.ToolName} must be a JSON object matching its registered schema and owned request size. ${MCP_INVOCATION_GUIDANCE}`
+                  );
+                if (
+                  step.state === 'DONE' &&
+                  !pending.some(
+                    (entry) =>
+                      entry.index === step.step_index &&
+                      entry.claimed &&
+                      entry.key === `${parameters.ToolName}:${canonicalRuleJson(input)}`
+                  )
+                )
+                  throw new Problem(
+                    502,
+                    'dice_isolation',
+                    'Antigravity completed a tool without its matching dispatched request'
                   );
                 if (step.state === 'ACTIVE') {
                   if (
@@ -300,6 +327,8 @@ export async function generateAntigravityMcpBook(
                 usage?: { input_tokens?: number };
               };
               const total = result.usage?.input_tokens;
+              if (initialized && !completed && result.status !== 'SUCCESS')
+                throw cliFailure(typeof result.response === 'string' ? result.response : '');
               if (
                 !initialized ||
                 completed ||

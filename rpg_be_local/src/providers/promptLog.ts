@@ -1,3 +1,5 @@
+import { Problem } from '../errors.js';
+import { operationalProblem } from '../processingErrors.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { appRoot } from '../config.js';
@@ -26,14 +28,27 @@ export async function logPrompt(
     null,
     2
   );
-  await mkdir(directory, { recursive: true });
+  try {
+    await mkdir(directory, { recursive: true });
+  } catch (error) {
+    throw promptLogFailure(error);
+  }
   for (let suffix = 0; ; suffix++) {
     const file = path.join(directory, `${stamp}__${name}${suffix ? `_${suffix + 1}` : ''}.json`);
     try {
       await writeFile(file, content, { encoding: 'utf8', flag: 'wx' });
       return file;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw promptLogFailure(error);
     }
   }
+}
+
+function promptLogFailure(error: unknown): Problem {
+  const problem = operationalProblem(error);
+  return new Problem(
+    503,
+    'prompt_log',
+    `Prompt logging failed. ${problem.message} Check the application's log folder before retrying.`
+  );
 }

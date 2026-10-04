@@ -1,3 +1,4 @@
+import { cliFailure } from '../processingErrors.js';
 import { Problem } from '../errors.js';
 import { CODEX_INPUT_TOKENS, parseCodexPayload } from './codex.js';
 import type { ProviderSettings } from '../domain/types.js';
@@ -125,7 +126,13 @@ export function parseProviderOutput(id: string, output: string): unknown {
     }
     const envelope = JSON.parse(output);
     if (envelope.is_error || envelope.error)
-      throw new Problem(502, 'provider_failure', 'CLI reported a failed generation');
+      throw cliFailure(
+        typeof envelope.result === 'string'
+          ? envelope.result
+          : typeof envelope.error === 'string'
+            ? envelope.error
+            : ''
+      );
     if (envelope.structured_output) return envelope.structured_output;
     if (typeof envelope.result === 'string') return JSON.parse(envelope.result);
     if (typeof envelope.response === 'string') return JSON.parse(envelope.response);

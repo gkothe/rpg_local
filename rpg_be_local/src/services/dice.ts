@@ -15,6 +15,10 @@ import {
 } from '../domain/dice.js';
 
 import { diceDigest } from '../domain/diceContext.js';
+import {
+  KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+  KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
+} from '../domain/versions.js';
 import { RuleStore } from './ruleStore.js';
 export { diceDigest, gameplayDigest } from '../domain/diceContext.js';
 export class DiceService {
@@ -33,29 +37,39 @@ export class DiceService {
       await this.assertOwned(turn, client);
       if (turn.ruleContext) await new RuleStore(this.store).guard(turn.ruleContext, client);
       const id = randomUUID();
-      await client.query(
-        metadata
-          ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,prompt_contract_version,digest_version,system_prompt,frozen_knowledge,tool_definitions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)'
-          : 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids) VALUES($1,$2,$3,$4,$5,$6,$7)',
-        [
-          id,
-          turn.campaignId,
-          turn.id,
-          contextDigest,
-          turn.context!.prompt,
-          turn.context!.revision,
-          JSON.stringify(characterIds),
-          ...(metadata
-            ? [
-                4,
-                2,
-                metadata.systemPrompt,
-                metadata.knowledge,
-                JSON.stringify(metadata.toolDefinitions),
-              ]
-            : []),
-        ]
-      );
+      try {
+        await client.query(
+          metadata
+            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,prompt_contract_version,digest_version,system_prompt,frozen_knowledge,tool_definitions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)'
+            : 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids) VALUES($1,$2,$3,$4,$5,$6,$7)',
+          [
+            id,
+            turn.campaignId,
+            turn.id,
+            contextDigest,
+            turn.context!.prompt,
+            turn.context!.revision,
+            JSON.stringify(characterIds),
+            ...(metadata
+              ? [
+                  KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+                  KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
+                  metadata.systemPrompt,
+                  metadata.knowledge,
+                  JSON.stringify(metadata.toolDefinitions),
+                ]
+              : []),
+          ]
+        );
+      } catch (error) {
+        if (metadata && (error as { code?: string }).code === '42703')
+          throw new Problem(
+            503,
+            'database_setup',
+            'Database migrations are missing. Run setup-database.cmd in the project root, then restart the application; no game-state changes were applied.'
+          );
+        throw error;
+      }
       await client.query(
         'INSERT INTO dice_attempts(turn_id,campaign_id,session_id) VALUES($1,$2,$3)',
         [turn.id, turn.campaignId, id]

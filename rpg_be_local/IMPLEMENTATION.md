@@ -108,3 +108,36 @@ Migration 0008 initializes empty registries without inferring past origins and a
 Verified backend checks include typecheck, zero-warning ESLint, strict adapter/registry contracts, UTF-16 evidence, frozen lookup/cursor isolation, touched undo and archive compatibility. Isolated PostgreSQL tests exercise migration replay, immutable metadata, atomic invalid/cancelled responses, idempotency, saved-face provider-switch retry, original-book receipt evidence, deleted NPC identity, complete export/import/undo and empty registries. The actual TurnService compaction scenario moved to `tests/knowledge.database.test.ts`: five sufficiently large turns trigger memory generation, preserve an old rumor byte-for-byte and recall it through owned tools after a provider switch. Full system/user inputs above 16,000 characters round-trip without truncation. The 1,000-turn synthetic compaction regression remains in `tests/longCampaign.test.ts`.
 
 Parent-coordinated Windows Codex and Antigravity probes passed multi-action no-library recall and v4 original-book provenance with genuine dice. An Antigravity experiment removing textual MCP schemas failed both native scenarios; the single schema guidance block is retained. Windows transient updater-lock cleanup retries only the owned temporary profile and preserves a primary provider error. Fresh Claude live acceptance stays explicitly deferred; mocked Claude transport coverage passes. Final coordinated totals and native recovery evidence are recorded in `../docs/reviews/campaign-knowledge-native.md` and the implementation plan.
+
+Final acceptance: 154 isolated backend tests passed with 17 explicit optional skips.
+Real Codex persisted-roll cancellation and Antigravity same-root recovery/undo passed.
+The owned on-demand context endpoint hydrates exact root inputs without duplicating
+registry data in ordinary campaign fetches. A missing-metadata migration regression
+now verifies an actionable setup-database.cmd message before any CLI call. The user's
+local migrations 0001–0008 are applied with none pending.
+
+Antigravity allowed-name direct tool invocations now receive explicit MCP routing
+guidance and automatic response repair rather than being mislabeled as a forbidden
+capability. No bad invocation executes; external names remain non-retryable.
+Transport/retry regressions, backend checks, and a real High-model/High-effort
+rules_search → rules_get → roll_dice probe passed. See
+../docs/reviews/antigravity-tool-routing.md.
+
+Follow-up CLI transport audit reproduced and repaired invalid owned MCP argument
+recovery and unmatched/changed completion envelopes. Five new process/MCP
+regressions failed before the fixes and passed afterward, including valid envelope
+completion on the repaired attempt. Default backend suite: 123 passed, 55 optional
+skips, zero failures; focused transports/retries: 27 passed. Typecheck, lint and
+build passed. Details: ../docs/reviews/antigravity-tool-routing.md.
+
+Processing failure remediation (2026-10-04): shared CLI EOF framing and safe schema
+feedback fixed; Codex correctable tool-input errors return native success:false in
+the same turn, while isolation/replay/context/cancellation still stop. Account
+login/quota errors are explicit and non-repairable. Turn/background persistence
+failures emit safe diagnostics; storage/schema/permission failures are actionable.
+Codex and Claude cleanup preserve primary failures and prompt-log errors identify
+setup actions. Default backend suite: 142 passed, 55 optional skips, zero failures;
+19 added cases. Typecheck/lint/build passed. Fresh synthetic native source/dice
+checks passed on Windows Codex (23.7s) and Antigravity (24.5s). Live Claude remains
+deferred for quota. No user campaign mutation or migration. Details:
+../docs/reviews/processing-failure-inventory.md.

@@ -12,6 +12,7 @@ const RETRYABLE_RESPONSE_CODES = new Set([
   'invalid_operation',
   'knowledge_invalid',
   'gameplay_tool_unavailable',
+  'gameplay_tool_arguments',
 ]);
 
 export function responseRetryFeedback(error: unknown): string | null {

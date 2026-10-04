@@ -21,7 +21,7 @@ test('explores the complete guide without campaign or provider requests', async 
   );
   await page.reload();
   await expect(page.getByRole('complementary')).toContainText('Send prompt');
-  await page.getByRole('button', { name: /PostgreSQL App-owned/ }).focus();
+  await page.getByRole('button', { name: /PostgreSQL/ }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('complementary')).toContainText('PostgreSQL');
   await page.goBack();
@@ -29,21 +29,21 @@ test('explores the complete guide without campaign or provider requests', async 
   await page.goForward();
   await expect(page.getByRole('complementary')).toContainText('PostgreSQL');
   await page.screenshot({ path: testInfo.outputPath('journey-desktop.png'), fullPage: true });
-  await page.getByRole('link', { name: /Payload Inputs/ }).click();
+  await page.getByRole('link', { name: /^Payload/ }).click();
   await page.getByLabel('Mention Ivo in the action').check();
   await expect(page.getByText('Ivo included', { exact: true })).toBeVisible();
   await page.getByLabel('Simulate stale prior value').check();
   await expect(page.getByRole('status')).toContainText('Rejected');
-  await page.getByRole('link', { name: /Tools Requests/ }).click();
+  await page.getByRole('link', { name: /^Tools/ }).click();
   await page.getByLabel('Enable book tools').check();
   await page.getByRole('button', { name: /rules_get Book mode/ }).click();
-  await page.getByText('Example arguments and model-visible result').click();
+  await page.getByText('Example arguments and result sent to the model').click();
   await expect(page.getByRole('heading', { name: 'Final ruleCitations entry' })).toBeVisible();
-  await page.getByRole('link', { name: /Storage Commit/ }).click();
+  await page.getByRole('link', { name: /^Storage/ }).click();
   await page.getByRole('combobox', { name: 'Outcome', exact: true }).selectOption('undo');
   await page.getByLabel('Later edit changed a touched field').check();
   await expect(page.getByRole('status')).toContainText('Undo blocked');
-  await page.getByText('Implementation evidence', { exact: true }).click();
+  await page.getByText('Source code and documentation', { exact: true }).click();
   await page.getByRole('button', { name: 'Read document section 3.1' }).click();
   await expect(page.getByLabel('Architecture document')).toContainText('PostgreSQL');
   expect(calls.length).toBeGreaterThan(0);
@@ -76,7 +76,7 @@ for (const width of [360, 768, 1440]) {
     ).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`journey-${width}.png`), fullPage: true });
     if (width <= 900) {
-      await page.getByRole('button', { name: /PostgreSQL App-owned/ }).click();
+      await page.getByRole('button', { name: /PostgreSQL/ }).click();
       await expect(
         page.getByRole('complementary').getByRole('heading', { name: 'PostgreSQL' })
       ).toBeFocused();

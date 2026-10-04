@@ -68,23 +68,24 @@ export default function Flow() {
   );
   return (
     <div className="page flow-page">
-      <div className="flow-kicker">Architecture field guide · reviewed 03 Oct 2026</div>
+      <div className="flow-kicker">How the system works · reviewed 04 Oct 2026</div>
       <h1>Follow the Flow</h1>
       <p className="flow-lead">
-        From your action to the model, and back to a trusted campaign state. Explore who receives
-        what, where tools fit, and what actually reaches the database.
+        Follow your action through the app and the language model (LLM). See what each part
+        receives, how tools help, and how the app checks the response before saving it to the
+        database.
       </p>
       <p className="flow-notice">
-        Educational example — no AI call or campaign changes. All names, values and transitions
-        below are synthetic.
+        Educational example. This page makes no AI calls and does not change your campaign. The
+        names, values, and steps below are made up for the guide.
       </p>
       <nav className="flow-tabs" aria-label="Flow views">
         {(
           [
             ['journey', 'Journey', 'Follow an action'],
-            ['payload', 'Payload', 'Inputs & proposals'],
-            ['tools', 'Tools', 'Requests & results'],
-            ['storage', 'Storage', 'Commit, fail & undo'],
+            ['payload', 'Payload', 'What the LLM receives'],
+            ['tools', 'Tools', 'How tools are used'],
+            ['storage', 'Storage', 'What gets saved'],
           ] as const
         ).map(([id, label, hint]) => (
           <Link key={id} to={`/flow?view=${id}`} aria-current={view === id ? 'page' : undefined}>
@@ -135,8 +136,9 @@ export default function Flow() {
       >
         <summary>Read the architecture document</summary>
         <p>
-          The bundled source document, rendered as plain text. Section 6 describes this implemented
-          educational guide. Backend source code remains authoritative.
+          This is the architecture document the guide is based on, shown as plain text. Section 6
+          describes this page. If the document and the backend code differ, the code determines how
+          the system runs.
         </p>
         <label>
           Document section

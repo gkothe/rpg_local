@@ -10,6 +10,6 @@ it('keeps book tools visible but unavailable in default mode, and explains froze
   await userEvent.click(screen.getByRole('button', { name: /rules_get/ }));
   expect(select).toHaveBeenCalledWith('rules_get');
   rerender(<ToolExplorer selected="campaign_knowledge_search" onSelect={select} />);
-  expect(screen.getByRole('heading', { name: 'Frozen knowledge trace' })).toBeVisible();
-  expect(screen.getByText(/No SQL is executed by this recall call/)).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'How knowledge lookup works' })).toBeVisible();
+  expect(screen.getByText(/do not query PostgreSQL again/)).toBeVisible();
 });

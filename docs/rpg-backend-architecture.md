@@ -1,6 +1,6 @@
 # Local RPG Backend (`rpg_be_local`) — Comprehensive Technical Architecture & Information Governance Guide
 
-This document describes the checked-in implementation of `rpg_be_local`, reviewed against source code and migrations on 2026-10-03. Source code remains authoritative; examples are illustrative unless marked exact. Static inspection does not establish live provider, device or database compatibility. Section 6 describes the implemented educational Flow guide.
+This document describes the implementation of `rpg_be_local`, reviewed against source code and migrations on 2026-10-03, with a follow-up against the uncommitted provider recovery and processing-error changes on 2026-10-04. Source code remains authoritative; examples are illustrative unless marked exact. Static inspection does not establish live provider, device or database compatibility. Section 6 describes the implemented educational Flow guide.
 
 ---
 
@@ -360,7 +360,10 @@ During a game turn, the model has access to application-owned tools exposed thro
   - **Environment Sanitization (`antigravityDiceEnvironment`)**: Unsets all variables matching `/^ANTIGRAVITY_|^CASCADE_|^MCP_|API_KEY|AUTH_TOKEN|OAUTH_TOKEN|^GEMINI_|^GOOGLE_/i`.
   - **Legacy Phase Parser (`parseAntigravityDicePhase`)**: Expects newline-delimited JSON stream with strictly 1 `init` event and 1 `result` event. Restricts `step_update` event types strictly to `user_input` and `agent_response`; any unapproved step type (e.g. bash execution, file read) throws a 502 `dice_isolation` error.
   - **Current Transport**: `generateAntigravityDice` delegates to `generateAntigravityMcpBook`; the legacy phase parser above is not the live entry point. Current code verifies private MCP configuration, stream activity and owned calls.
+  - **Owned MCP routing**: Adapter instructions require `call_mcp_tool` with `ServerName: "local_rpg"`, a registered `ToolName`, and an object `Arguments`. Calling a registered tool directly is rejected before dispatch with recoverable `gameplay_tool_unavailable`; malformed arguments use `gameplay_tool_arguments`. External tool names still stop with `dice_isolation`. A `DONE` event must match a previously claimed request by step index, tool and canonical arguments.
   - **Subprocess Confinement**: Employs isolated `USERPROFILE` (`rpg-agy-private-*`) and denies native OS permissions: `command(*)`, `unsandboxed(*)`, `read_file(*)`, `write_file(*)`, `read_url(*)`, `execute_url(*)`.
+- **Correctable native tool arguments**: Codex returns a native `success:false` result for `dice_input`, `gameplay_arguments_invalid`, `knowledge_not_found`, and `knowledge_cursor`. The model can correct the arguments within the same native turn using a new call ID. This is separate from the outer response-repair budget. Ownership, isolation, changed saved dice, and operational errors are not included.
+- **Protocol framing**: The shared process runner delivers a final JSON event at EOF even without a trailing newline. Malformed events still fail; protocol schema errors retain safe field paths and error codes for feedback.
 - **Sequential Tool Promise Tail (`gameplayTools.ts: GameplayTools.call`)**:
   - Tools are strictly serialized through an internal promise chain (`this.tail = work.then(...)`).
   - Even if a model emits parallel tool calls, the backend dispatches and resolves them one at a time in FIFO order.
@@ -410,7 +413,10 @@ The system checks against `RETRYABLE_RESPONSE_CODES`:
 - `rules_citations_invalid`: Hallucinated receipt IDs or start/end character offsets that do not match the exact quoted substring in the book.
 - `invalid_operation`: Mismatch between expected prior character attribute/inventory value and actual state.
 - `knowledge_invalid`: Duplicate NPC introduction or invalid provenance links.
-- `gameplay_tool_unavailable`: In-session tool resolution failure.
+- `gameplay_tool_unavailable`: In-session tool resolution failure, including direct invocation of a registered Antigravity tool instead of its MCP gateway.
+- `gameplay_tool_arguments`: Invalid Antigravity MCP argument JSON or object envelope, rejected before dispatch.
+
+Account quota (`provider_quota`) and authentication (`provider_auth`) failures are classified separately from generic process failures and are not in this repair allowlist. Malformed or incomplete output can use the existing JSON/protocol codes when ownership has been established; isolation errors remain non-retryable.
 
 #### Retry Budget & Prompt Injection Mechanism
 
@@ -426,7 +432,7 @@ The system checks against `RETRYABLE_RESPONSE_CODES`:
 
 ### 2.5 Turn Recovery, Leases & Heartbeats
 
-Implementation evidence: [turns.ts](../rpg_be_local/src/services/turns.ts), [store.ts](../rpg_be_local/src/store.ts), [server.ts](../rpg_be_local/src/server.ts).
+Implementation evidence: [turns.ts](../rpg_be_local/src/services/turns.ts), [store.ts](../rpg_be_local/src/store.ts), [server.ts](../rpg_be_local/src/server.ts), [processingErrors.ts](../rpg_be_local/src/processingErrors.ts).
 
 Expired leases enable recovery while the server and PostgreSQL are available. This is eventual interruption marking, not a guarantee of progress during database outage:
 
@@ -456,6 +462,7 @@ Expired leases enable recovery while the server and PostgreSQL are available. Th
    ```
 4. **Zero-Partial-Mutation Rollback Invariant**:
    If an error occurs, the turn status transitions to `cancelled` (if `ctl.signal.aborted`) or `failed`. Proposed narrative, character/state/knowledge changes and snapshots commit together only after final validation. Failure does not partially apply that proposal. Earlier memory compaction, dice records and rule receipts are separate committed writes and remain; independent human edits are not rolled back. Failure status recording is best-effort; if PostgreSQL is unavailable, lease recovery must later mark the attempt interrupted.
+   Processing failures produce structured `processing_failure` diagnostics containing stage, classified code and optional turn ID, without raw provider output or exception messages. Detached-run failures and errors while recording failure status are reported too. HTTP and stored turn errors classify missing migrations as `database_setup`, connection problems as `local_service`, full storage as `local_storage`, and denied file access as `local_permissions`. These messages help identify the problem; they do not guarantee that failure status could be saved during an outage.
 5. **Idempotent Manual Retry & Dynamic Availability Checks (`Store.hydrateTurns`)**:
    An eligible interrupted, failed or cancelled local dice turn can be retried (`POST /turns/:id/retry`). Upon retrieval, `Store.hydrateTurns` dynamically computes whether `diceRetry` is available without storing derived state in the database:
    - Verifies the session was not imported (`session.imported === false`).
@@ -818,6 +825,8 @@ Most subprocess scratch files use `os.tmpdir()` or an isolated Codex home. Promp
 | `os.tmpdir()/rpg-local-rule-previews/*.json`        | Staged rule import/backup payloads                                         | Removed on consumption/expiry/close or preview-store initialization |
 | `os.tmpdir()/rpg-native-*`, `rpg-ocr-*`             | Python per-page conversion/render files                                    | Python temporary-directory context cleanup                          |
 | `<repository>/log/YYYYMMDD__HHMMSS__<action>*.json` | Git-ignored local audit log of prompts sent to LLMs                        | Persisted locally for developer inspection & debugging              |
+
+Prompt log creation and writes are awaited. A failure raises `prompt_log` and can prevent generation; logs are not a best-effort side effect. Claude MCP and Codex isolated-home cleanup preserve an existing generation or cancellation error if cleanup also fails, while reporting the cleanup problem. If only cleanup fails, it raises `provider_cleanup`. Abrupt termination can still leave temporary files.
 
 Basic Antigravity generation also writes a uniquely named agent definition under the real user home `.gemini/config/agents/local-rpg-*`, then removes that file/directory. Owned gameplay puts its `local-rpg-gameplay` agent and permissions in the temporary profile instead. Prompt logs are not a complete audit of every transport: basic Claude and Antigravity generation log, gameplay adapters log, and Antigravity additionally logs selected final/rejected events. Basic Codex generation has no corresponding `logPrompt` call.
 

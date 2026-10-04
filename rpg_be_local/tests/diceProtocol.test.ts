@@ -112,7 +112,7 @@ test('Codex adapter rejects foreign tools and ambient capabilities and cleans it
             throw new Error('Unexpected dice');
           }
         ),
-        /invalid protocol|outside|context budget/
+        (error: unknown) => (error as { code: string }).code === 'dice_isolation'
       );
       assert.equal(calls, 0);
       assert.equal(

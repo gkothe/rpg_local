@@ -67,6 +67,47 @@ const base: Generator = {
   },
   generateOwnedGameplay: async () => answer,
 };
+
+test(
+  'missing metadata migration gives an actionable message before any CLI call',
+  { skip: !enabled },
+  async () => {
+    const c = newCampaign({ name: 'Missing migration fixture' });
+    await store.insert(c);
+    let called = false;
+    const service = new TurnService(
+      store,
+      {
+        ...base,
+        generateOwnedGameplay: async () => {
+          called = true;
+          return answer;
+        },
+      },
+      4
+    );
+    await store.pool.query('ALTER TABLE dice_sessions DROP COLUMN tool_definitions');
+    try {
+      const submitted = await service.submit(c.id, {
+        revision: 0,
+        requestId: randomUUID(),
+        action: 'Begin',
+      });
+      const failed = await finish(c.id, submitted.id);
+      assert.equal(failed.status, 'failed');
+      assert.match(failed.error!, /migrations are missing.*setup-database\.cmd/);
+      assert.equal(called, false);
+      assert.deepEqual((await store.campaign(c.id)).knowledge, []);
+      assert.equal(
+        (await store.pool.query('SELECT id FROM dice_sessions WHERE campaign_id=$1', [c.id]))
+          .rowCount,
+        0
+      );
+    } finally {
+      await store.pool.query('ALTER TABLE dice_sessions ADD COLUMN tool_definitions jsonb');
+    }
+  }
+);
 async function finish(campaignId: string, id: string): Promise<Turn> {
   for (let n = 0; n < 300; n++) {
     const t = await store.turn(campaignId, id);

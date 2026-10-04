@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
+import { ZodError } from 'zod';
+import { cliFailure } from '../processingErrors.js';
+import { responseRetryFeedback } from '../domain/responseRetry.js';
 import { Problem } from '../errors.js';
 export type RunOptions = {
   cwd?: string;
@@ -76,6 +79,27 @@ export function runProcess(
       failure = error;
       kill();
     };
+    const enqueue = (line: string) => {
+      if (!line.trim()) return;
+      protocolWork = protocolWork
+        .then(async () => {
+          if (failure || settled) return;
+          await options.protocol!.line(JSON.parse(line), send, () => child.stdin.end());
+        })
+        .catch((error: unknown) =>
+          stop(
+            error instanceof Problem
+              ? error
+              : new Problem(
+                  502,
+                  'provider_protocol',
+                  error instanceof ZodError
+                    ? responseRetryFeedback(error)!
+                    : 'Local CLI returned an invalid protocol message'
+                )
+          )
+        );
+    };
     const cancel = () => stop(new Problem(409, 'cancelled', 'Request cancelled'));
     const timer =
       options.timeoutMs === 0
@@ -109,22 +133,7 @@ export function runProcess(
             const line = pending.slice(0, newline);
             pending = pending.slice(newline + 1);
             if (!line.trim()) continue;
-            protocolWork = protocolWork
-              .then(async () => {
-                if (failure || settled) return;
-                await options.protocol!.line(JSON.parse(line), send, () => child.stdin.end());
-              })
-              .catch((error: unknown) =>
-                stop(
-                  error instanceof Problem
-                    ? error
-                    : new Problem(
-                        502,
-                        'provider_protocol',
-                        'Local CLI returned an invalid protocol message'
-                      )
-                )
-              );
+            enqueue(line);
           }
         }
       }
@@ -138,21 +147,16 @@ export function runProcess(
       else stderr += errorDecoder.write(chunk);
     });
     child.on('close', async (code) => {
+      const tail = outputDecoder.end();
+      output += tail;
+      if (options.protocol) {
+        pending += tail;
+        enqueue(pending);
+        pending = '';
+      }
       await protocolWork;
-      output += outputDecoder.end();
       stderr += errorDecoder.end();
-      finish(
-        failure ??
-          (code === 0
-            ? undefined
-            : new Problem(
-                502,
-                'provider_failure',
-                /login|auth|sign.?in/i.test(stderr + output)
-                  ? 'Local CLI requires login; authenticate in its own terminal'
-                  : 'Local process failed; inspect its own diagnostics and account/model availability'
-              ))
-      );
+      finish(failure ?? (code === 0 ? undefined : cliFailure(stderr + output)));
     });
     child.stdin.on('error', () => {});
     if (options.protocol) {

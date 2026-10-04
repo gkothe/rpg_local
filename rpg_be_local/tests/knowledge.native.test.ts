@@ -237,7 +237,7 @@ for (const provider of providers) {
       const context = buildContext(
         campaign,
         [],
-        'First call rules_get with path lore.original.location and view text. Next roll_dice exactly once slot 0 one d6. Return operations [], exactly one rollInterpretations entry with its genuine rollId, and exactly one ruleCitations entry quoting the entire original text returned by rules_get. Copy receipt identity, source, system identity, hash and exact page provenance; quote start/end are the supplied text window start/end. Save exactly one established active place knowledge record named Old Lantern Inn with the original founded-by fact and seal in its text, origin source, characterIds [], and evidence [{type:"book",citation:<the same complete rule citation>}].',
+        'First call rules_search with query "Old Lantern Inn". Then call rules_get with path lore.original.location and view text. Next roll_dice exactly once slot 0 one d6. Return operations [], exactly one rollInterpretations entry with its genuine rollId, and exactly one ruleCitations entry quoting the entire original text returned by rules_get. Copy receipt identity, source, system identity, hash and exact page provenance; quote start/end are the supplied text window start/end. Save exactly one established active place knowledge record named Old Lantern Inn with the original founded-by fact and seal in its text, origin source, characterIds [], and evidence [{type:"book",citation:<the same complete rule citation>}].',
         [],
         16000,
         true,
@@ -332,7 +332,7 @@ for (const provider of providers) {
                 adapter
               ))
         );
-        assert.deepEqual(trace, ['rules_get', 'roll_dice']);
+        assert.deepEqual(trace, ['rules_search', 'rules_get', 'roll_dice']);
         assert.equal(response.ruleCitations.length, 1);
         assert.deepEqual(response.operations, []);
         assert.equal(response.ruleCitations[0]!.quote, quote);

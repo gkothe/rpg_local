@@ -1,3 +1,4 @@
+import { operationalProblem } from './processingErrors.js';
 import {
   KNOWLEDGE_KIND_OPTIONS,
   KNOWLEDGE_ORIGIN_OPTIONS,
@@ -905,11 +906,7 @@ export function createApp(options: AppOptions) {
             )
           : error instanceof multer.MulterError
             ? new Problem(413, 'upload_limit', 'Upload exceeds allowed size or file count')
-            : new Problem(
-                503,
-                'local_service',
-                'Local service failed; check PostgreSQL setup/migrations and local runtime diagnostics'
-              );
+            : operationalProblem(error);
     res
       .status(problem.status)
       .type('application/problem+json')

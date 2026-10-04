@@ -1,6 +1,6 @@
 # Plan: Campaign knowledge and instruction cleanup
 
-**Status:** Ready for implementation — two independent rounds completed | **Date:** 2026-10-03 | **Mode:** default
+**Status:** Implemented — automated and Windows native acceptance complete; Claude live check deferred | **Date:** 2026-10-03 | **Mode:** default
 
 **Request:** “ok, pode no plano junto com a parte de salvar as infos”;
 “NPCs e fatos importantes, automaticamente”; “Sim; salvar automaticamente e
@@ -385,12 +385,12 @@ rolling deployment is required for this local Windows app.
 
 ### Phase 1 — Contract foundation
 
-- [ ] T001 Define record/operation/evidence Zod schemas, backend enums and the existing text constraints above in `rpg_be_local/src/domain/knowledge.ts`.
-- [ ] T002 Add legacy-compatible campaign/snapshot/frozen knowledge and system/user instruction envelope types in `rpg_be_local/src/domain/types.ts` (after T001).
-- [ ] T003 Add named v4 response/archive constants while keeping current enabled versions unchanged in `rpg_be_local/src/domain/versions.ts`.
-- [ ] T004 Add the new v4 response parser with strict knowledge fields and legacy dispatch in `rpg_be_local/src/domain/gameplayResponse.ts` (after T001–T003).
-- [ ] T005 Create the additive knowledge initialization migration in `rpg_be_local/migrationssql/0008_campaign_knowledge.sql`; verify filename remains unused.
-- [ ] T006 Prepare dormant new-campaign knowledge initialization in `rpg_be_local/src/domain/campaign.ts`; do not emit the new field before archive activation.
+- [x] T001 Define record/operation/evidence Zod schemas, backend enums and the existing text constraints above in `rpg_be_local/src/domain/knowledge.ts`.
+- [x] T002 Add legacy-compatible campaign/snapshot/frozen knowledge and system/user instruction envelope types in `rpg_be_local/src/domain/types.ts` (after T001).
+- [x] T003 Add named v4 response/archive constants while keeping current enabled versions unchanged in `rpg_be_local/src/domain/versions.ts`.
+- [x] T004 Add the new v4 response parser with strict knowledge fields and legacy dispatch in `rpg_be_local/src/domain/gameplayResponse.ts` (after T001–T003).
+- [x] T005 Create the additive knowledge initialization migration in `rpg_be_local/migrationssql/0008_campaign_knowledge.sql`; verify filename remains unused.
+- [x] T006 Prepare dormant new-campaign knowledge initialization in `rpg_be_local/src/domain/campaign.ts`; do not emit the new field before archive activation.
 
 **Checkpoint:** root `npm run typecheck`, `npm run lint`, `npm test` pass; run migration on an isolated test DB and prove repeat execution is a no-op.
 
@@ -398,16 +398,16 @@ rolling deployment is required for this local Windows app.
 
 **Independent test:** count the policy block in composed inputs and compare system/campaign strings byte-for-byte for book/no-library prompts.
 
-- [ ] T007 [US1] Add preservation/deduplication and empty-instruction tests in `rpg_be_local/tests/gameplayNarrator.test.ts` (pair T008).
-- [ ] T008 [US1] Implement one neutral technical-contract builder in `rpg_be_local/src/domain/gameplayNarrator.ts`, retaining legacy narrator exports for frozen retries.
-- [ ] T009 [US1] Add full-instructions and data-only context regression tests in `rpg_be_local/tests/context.test.ts` (pair T010).
-- [ ] T010 [US1] Prepare version-selected native instruction envelope/user context assembly in `rpg_be_local/src/domain/context.ts`; preserve exact column content and keep legacy output enabled until the shared archive activation gate.
-- [ ] T011 [US1] Make overview navigation-only in `rpg_be_local/src/domain/ruleMapping.ts`.
-- [ ] T012 [US1] Extend exact system/user input logging in `rpg_be_local/src/providers/promptLog.ts` without recording credentials.
-- [ ] T013 [US1] Pass the one composed instruction block to native Claude in `rpg_be_local/src/providers/claudeDice.ts`.
-- [ ] T014 [US1] Pass the one composed instruction block without duplicating model-base/file policy in `rpg_be_local/src/providers/codexDice.ts`.
-- [ ] T015 [US1] Pass the one composed instruction block to Antigravity in `rpg_be_local/src/providers/antigravityMcpBook.ts`; retain textual tool schemas until the live gate.
-- [ ] T016 [US1] Verify all native-adapter payloads, actual tool names, schema presence and extraction/memory independence in `rpg_be_local/tests/rulesAdapters.test.ts`.
+- [x] T007 [US1] Add preservation/deduplication and empty-instruction tests in `rpg_be_local/tests/gameplayNarrator.test.ts` (pair T008).
+- [x] T008 [US1] Implement one neutral technical-contract builder in `rpg_be_local/src/domain/gameplayNarrator.ts`, retaining legacy narrator exports for frozen retries.
+- [x] T009 [US1] Add full-instructions and data-only context regression tests in `rpg_be_local/tests/context.test.ts` (pair T010).
+- [x] T010 [US1] Prepare version-selected native instruction envelope/user context assembly in `rpg_be_local/src/domain/context.ts`; preserve exact column content and keep legacy output enabled until the shared archive activation gate.
+- [x] T011 [US1] Make overview navigation-only in `rpg_be_local/src/domain/ruleMapping.ts`.
+- [x] T012 [US1] Extend exact system/user input logging in `rpg_be_local/src/providers/promptLog.ts` without recording credentials.
+- [x] T013 [US1] Pass the one composed instruction block to native Claude in `rpg_be_local/src/providers/claudeDice.ts`.
+- [x] T014 [US1] Pass the one composed instruction block without duplicating model-base/file policy in `rpg_be_local/src/providers/codexDice.ts`.
+- [x] T015 [US1] Pass the one composed instruction block to Antigravity in `rpg_be_local/src/providers/antigravityMcpBook.ts`; retain textual tool schemas until the live gate.
+- [x] T016 [US1] Verify all native-adapter payloads, actual tool names, schema presence and extraction/memory independence in `rpg_be_local/tests/rulesAdapters.test.ts`.
 
 **Checkpoint:** root `npm run typecheck`, `npm run lint`, `npm test`, `npm run build` pass; no system-column edit; new-contract test inputs have no duplicate narrator policy while live manifests remain compatible until activation.
 
@@ -415,14 +415,14 @@ rolling deployment is required for this local Windows app.
 
 **Independent test:** an NPC plus invented debt is saved with distinct origins; an NPC rumor remains a rumor; undo restores exact prior records.
 
-- [ ] T017 [US2] Add create/update/rumor/source-evidence/alias/conflict tests in `rpg_be_local/tests/knowledge.test.ts` (pair T018).
-- [ ] T018 [US2] Implement staged knowledge validation/application in `rpg_be_local/src/domain/knowledge.ts`; server IDs/audit fields, exact prior revision, evidence checks, no physical delete.
-- [ ] T019 [US2] Add mixed character/state/knowledge atomic application and undo conflict tests in `rpg_be_local/tests/state.test.ts` (pair T020).
-- [ ] T020 [US2] Integrate v4 operations, NPC introduction records and touched-record snapshots into `rpg_be_local/src/domain/state.ts`; preserve legacy snapshot semantics.
-- [ ] T021 [US2] Add old-session digest/empty-registry compatibility tests in `rpg_be_local/tests/diceContext.test.ts` (pair T022).
-- [ ] T022 [US2] Implement legacy/new digest version dispatch in `rpg_be_local/src/domain/diceContext.ts`; legacy hashing retains exactly the original keys and empty-knowledge retry identity.
-- [ ] T023 [US2] Select saved digest version in retry availability/hydration in `rpg_be_local/src/store.ts` (after T022).
-- [ ] T024 [US2] Add malformed-knowledge recovery classification in `rpg_be_local/src/domain/responseRetry.ts`; retain existing retry counts and dice preservation.
+- [x] T017 [US2] Add create/update/rumor/source-evidence/alias/conflict tests in `rpg_be_local/tests/knowledge.test.ts` (pair T018).
+- [x] T018 [US2] Implement staged knowledge validation/application in `rpg_be_local/src/domain/knowledge.ts`; server IDs/audit fields, exact prior revision, evidence checks, no physical delete.
+- [x] T019 [US2] Add mixed character/state/knowledge atomic application and undo conflict tests in `rpg_be_local/tests/knowledge.test.ts` (pair T020).
+- [x] T020 [US2] Integrate v4 operations, NPC introduction records and touched-record snapshots into `rpg_be_local/src/domain/state.ts`; preserve legacy snapshot semantics.
+- [x] T021 [US2] Add old-session digest/empty-registry compatibility tests in `rpg_be_local/tests/diceContext.test.ts` (pair T022).
+- [x] T022 [US2] Implement legacy/new digest version dispatch in `rpg_be_local/src/domain/diceContext.ts`; legacy hashing retains exactly the original keys and empty-knowledge retry identity.
+- [x] T023 [US2] Select saved digest version in retry availability/hydration in `rpg_be_local/src/store.ts` (after T022).
+- [x] T024 [US2] Add malformed-knowledge recovery classification in `rpg_be_local/src/domain/responseRetry.ts`; retain existing retry counts and dice preservation.
 
 **Checkpoint:** root `npm run typecheck`, `npm run lint`, `npm test` pass; v4 remains dormant until its tool/provider wiring is ready.
 
@@ -430,22 +430,22 @@ rolling deployment is required for this local Windows app.
 
 **Independent test:** retrieve an old location after compaction and provider switch, without reading a different campaign or changed live state.
 
-- [ ] T025 [US3] Add frozen search/get, relevance, cursor and cross-campaign rejection tests in `rpg_be_local/tests/knowledgeRecall.test.ts` (pair T026).
-- [ ] T026 [US3] Implement frozen search/get, relevance selection and opaque pagination in `rpg_be_local/src/domain/knowledgeRecall.ts` (after T025).
-- [ ] T027 [US3] Register backend-owned read-only knowledge tools for library and no-library turns in `rpg_be_local/src/providers/gameplayTools.ts`; add a distinct knowledge capability, avoid counting reads as dice/rules, and derive actual definitions from the registry.
-- [ ] T028 [US3] Add no-library native registry/schema dispatch regression tests in `rpg_be_local/tests/gameplayExtension.test.ts` (pair T029).
-- [ ] T029 [US3] Extend the `Generator` gameplay interface and CLI routing to carry explicit schema, instruction envelope and owned registry independently of book mode in `rpg_be_local/src/providers/service.ts`; leave extraction/memory generation interfaces unchanged.
-- [ ] T030 [US3] Add optional strict frozen-session metadata to `rpg_be_local/src/domain/dice.ts`, preserving legacy archive acceptance.
-- [ ] T031 [US3] Write native envelope/frozen knowledge/digest versions at root session creation in `rpg_be_local/src/services/dice.ts`; load the same data for retries, protected by the new migration (after T030).
-- [ ] T032 [US2] Wire v4 turn generation/validation and atomically commit knowledge/frozen registry metadata in `rpg_be_local/src/services/turns.ts`; preserve legacy frozen retry parsing, consume complete v4 knowledge changes without stripping them in the current v1 conversion, and use the same versioned digest as retry availability (after T017–T027 and T029–T031).
-- [ ] T033 [US3] Include relevance-selected knowledge and explicit rumor/status labels in `rpg_be_local/src/domain/context.ts`; keep complete records available through frozen tools.
-- [ ] T034 [US3] Update Claude response dispatch/tool ownership to v4 and the registered knowledge tools in `rpg_be_local/src/providers/claudeDice.ts`.
-- [ ] T035 [US3] Update Codex response dispatch/tool ownership to v4 and the registered knowledge tools in `rpg_be_local/src/providers/codexDice.ts`.
-- [ ] T036 [US3] Update Antigravity response dispatch/tool ownership to v4 and the registered knowledge tools in `rpg_be_local/src/providers/antigravityMcpBook.ts`.
-- [ ] T037 [US2] Add isolated DB acceptance covering success, invalid response, cancellation, duplicate request, retry and undo in `rpg_be_local/tests/knowledge.database.test.ts`.
-- [ ] T038 [US3] Add compaction/old-fact lookup/provider-switch tests in `rpg_be_local/tests/longCampaign.test.ts`.
-- [ ] T039 [US3] Preserve registry certainty and source/status distinctions during memory compaction in `rpg_be_local/src/domain/context.ts`; memory remains derived rather than a canonical facts store.
-- [ ] T040 [US3] Update owned-tool contract assertions for actual registry definitions in `rpg_be_local/tests/gameplayTools.test.ts`.
+- [x] T025 [US3] Add frozen search/get, relevance, cursor and cross-campaign rejection tests in `rpg_be_local/tests/knowledgeRecall.test.ts` (pair T026).
+- [x] T026 [US3] Implement frozen search/get, relevance selection and opaque pagination in `rpg_be_local/src/domain/knowledgeRecall.ts` (after T025).
+- [x] T027 [US3] Register backend-owned read-only knowledge tools for library and no-library turns in `rpg_be_local/src/providers/gameplayTools.ts`; add a distinct knowledge capability, avoid counting reads as dice/rules, and derive actual definitions from the registry.
+- [x] T028 [US3] Add no-library native registry/schema dispatch regression tests in `rpg_be_local/tests/gameplayExtension.test.ts` (pair T029).
+- [x] T029 [US3] Extend the `Generator` gameplay interface and CLI routing to carry explicit schema, instruction envelope and owned registry independently of book mode in `rpg_be_local/src/providers/service.ts`; leave extraction/memory generation interfaces unchanged.
+- [x] T030 [US3] Add optional strict frozen-session metadata to `rpg_be_local/src/domain/dice.ts`, preserving legacy archive acceptance.
+- [x] T031 [US3] Write native envelope/frozen knowledge/digest versions at root session creation in `rpg_be_local/src/services/dice.ts`; load the same data for retries, protected by the new migration (after T030).
+- [x] T032 [US2] Wire v4 turn generation/validation and atomically commit knowledge/frozen registry metadata in `rpg_be_local/src/services/turns.ts`; preserve legacy frozen retry parsing, consume complete v4 knowledge changes without stripping them in the current v1 conversion, and use the same versioned digest as retry availability (after T017–T027 and T029–T031).
+- [x] T033 [US3] Include relevance-selected knowledge and explicit rumor/status labels in `rpg_be_local/src/domain/context.ts`; keep complete records available through frozen tools.
+- [x] T034 [US3] Update Claude response dispatch/tool ownership to v4 and the registered knowledge tools in `rpg_be_local/src/providers/claudeDice.ts`.
+- [x] T035 [US3] Update Codex response dispatch/tool ownership to v4 and the registered knowledge tools in `rpg_be_local/src/providers/codexDice.ts`.
+- [x] T036 [US3] Update Antigravity response dispatch/tool ownership to v4 and the registered knowledge tools in `rpg_be_local/src/providers/antigravityMcpBook.ts`.
+- [x] T037 [US2] Add isolated DB acceptance covering success, invalid response, cancellation, duplicate request, retry and undo in `rpg_be_local/tests/knowledge.database.test.ts`.
+- [x] T038 [US3] Add actual compaction/old-fact lookup/provider-switch tests in `rpg_be_local/tests/knowledge.database.test.ts` (retain the existing 1,000-turn regression).
+- [x] T039 [US3] Preserve registry certainty and source/status distinctions during memory compaction in `rpg_be_local/src/domain/context.ts`; memory remains derived rather than a canonical facts store.
+- [x] T040 [US3] Update owned-tool contract assertions for actual registry definitions in `rpg_be_local/tests/gameplayTools.test.ts`.
 
 T032–T036 are one wiring checkpoint: do not enable v4 for a provider before its
 parser and tools are ready. Keep intermediate implementations behind explicit schema
@@ -459,33 +459,33 @@ may exercise v4 through tests; it must not produce live saves that old exports l
 
 **Independent test:** v4 round-trip keeps origins/status/undo with remapped IDs; old archives import without invented origins; existing chat shows fact changes.
 
-- [ ] T041 [US4] Add character-deletion historical-link and export/undo regression tests in `rpg_be_local/tests/knowledge.database.test.ts` (pair T042).
-- [ ] T042 [US4] Verify historical knowledge references survive existing physical deletion in `rpg_be_local/src/services/campaigns.ts`; change this service only if retention actually requires it, without blocking deletion or fabricating a live character.
-- [ ] T043 [US3] Add absolute source-offset/supplied-span tests for multiple sections, nonzero offsets and Unicode surrogate pairs in `rpg_be_local/tests/knowledge.test.ts` (pair T044).
-- [ ] T044 [US3] Validate source evidence against identified frozen absolute spans in `rpg_be_local/src/domain/knowledge.ts`; preserve exact original-book validators.
-- [ ] T045 [US3] Carry `sourceSections` absolute start/end and source name in retrieval results in `rpg_be_local/src/store.ts`; keep source ID/version/text unchanged for existing consumers.
-- [ ] T046 [US3] Preserve pinned/retrieved source-span metadata in frozen user context in `rpg_be_local/src/domain/context.ts` (after T045).
-- [ ] T047 [US4] Add source deletion, retained quote and historical source-ID remapping coverage across records/snapshots/frozen session metadata in `rpg_be_local/tests/library.test.ts`.
-- [ ] T048 [US4] Add legacy/new archive, attribution/remapping and template tests in `rpg_be_local/tests/library.test.ts` (pair T049).
-- [ ] T049 [US4] Implement v4 archive/session validation/remapping, legacy defaults, historical character/source-link acceptance and template timeline exclusion in `rpg_be_local/src/services/library.ts`.
-- [ ] T050 [US4] Verify the complete migrate/new save/export/self-import activation flow and immutable root metadata in `rpg_be_local/tests/knowledge.database.test.ts`; empty registries/envelope-only turns must round-trip too.
-- [ ] T051 [US4] Enable v4 archive export and new-turn response defaults in `rpg_be_local/src/domain/versions.ts` (after T049, T050 and all adapter gates); activate instruction-envelope output and knowledge initialization in the same compatible release.
-- [ ] T052 [US4] Publish the enums/labels owned by `domain/knowledge.ts` through the existing backend option catalog in `rpg_be_local/src/domain/options.ts`; no frontend-owned enum copies.
-- [ ] T053 [US4] Reflect backend registry metadata in `rpg_fe_local/src/services/types.ts`; no dedicated view or local closed-value fallback.
-- [ ] T054 [US4] Verify existing chat changes and ongoing draft/loading behavior with knowledge changes in `rpg_fe_local/tests/turn.test.tsx`.
-- [ ] T055 [US4] Verify legacy retry/new v4 archive interaction in `rpg_be_local/tests/ruleArchiveCompatibility.test.ts`.
+- [x] T041 [US4] Add character-deletion historical-link and export/undo regression tests in `rpg_be_local/tests/knowledge.database.test.ts` (pair T042).
+- [x] T042 [US4] Verify historical knowledge references survive existing physical deletion in `rpg_be_local/src/services/campaigns.ts`; change this service only if retention actually requires it, without blocking deletion or fabricating a live character.
+- [x] T043 [US3] Add absolute source-offset/supplied-span tests for multiple sections, nonzero offsets and Unicode surrogate pairs in `rpg_be_local/tests/knowledge.test.ts` (pair T044).
+- [x] T044 [US3] Validate source evidence against identified frozen absolute spans in `rpg_be_local/src/domain/knowledge.ts`; preserve exact original-book validators.
+- [x] T045 [US3] Carry `sourceSections` absolute start/end and source name in retrieval results in `rpg_be_local/src/store.ts`; keep source ID/version/text unchanged for existing consumers.
+- [x] T046 [US3] Preserve pinned/retrieved source-span metadata in frozen user context in `rpg_be_local/src/domain/context.ts` (after T045).
+- [x] T047 [US4] Add source deletion, retained quote and historical source-ID remapping coverage across records/snapshots/frozen session metadata in `rpg_be_local/tests/library.test.ts`.
+- [x] T048 [US4] Add legacy/new archive, attribution/remapping and template tests in `rpg_be_local/tests/library.test.ts` (pair T049).
+- [x] T049 [US4] Implement v4 archive/session validation/remapping, legacy defaults, historical character/source-link acceptance and template timeline exclusion in `rpg_be_local/src/services/library.ts`.
+- [x] T050 [US4] Verify the complete migrate/new save/export/self-import activation flow and immutable root metadata in `rpg_be_local/tests/knowledge.database.test.ts`; empty registries/envelope-only turns must round-trip too.
+- [x] T051 [US4] Enable v4 archive export and new-turn response defaults in `rpg_be_local/src/domain/versions.ts` (after T049, T050 and all adapter gates); activate instruction-envelope output and knowledge initialization in the same compatible release.
+- [x] T052 [US4] Publish the enums/labels owned by `domain/knowledge.ts` through the existing backend option catalog in `rpg_be_local/src/domain/options.ts`; no frontend-owned enum copies.
+- [x] T053 [US4] Reflect backend registry metadata in `rpg_fe_local/src/services/types.ts`; no dedicated view or local closed-value fallback.
+- [x] T054 [US4] Verify existing chat changes and ongoing draft/loading behavior with knowledge changes in `rpg_fe_local/tests/provider-refresh.test.tsx` and lazy inspection in `rpg_fe_local/tests/journal-context.test.tsx`.
+- [x] T055 [US4] Verify legacy retry/new v4 archive interaction in `rpg_be_local/tests/ruleArchiveCompatibility.test.ts`.
 
 **Checkpoint:** root `npm run typecheck`, `npm run lint`, `npm test`, `npm run build` and frontend `npm run test:e2e --workspace rpg-fe-local` pass.
 
 ### Phase 6 — Native verification and documentation
 
-- [ ] T056 Record successful Windows Codex and Antigravity multi-turn fact recall/dice/rules evidence, cancellation and saved-face recovery in `docs/reviews/campaign-knowledge-native.md`; use a disposable campaign, not the user's active game.
-- [ ] T057 Evaluate Antigravity MCP-only schema discovery in `rpg_be_local/tests/antigravityMcp.native.test.ts`; removing the textual schema block is conditional on demonstrated success.
-- [ ] T058 If T057 passes, remove textual schema duplication in `rpg_be_local/src/providers/antigravityMcpBook.ts`; otherwise document the smallest required guidance and native evidence.
-- [ ] T059 Document v4 schemas, knowledge tools, no-editor scope and compatibility in `rpg_be_local/docs/api-contract.md`.
-- [ ] T060 Update actual behavior, deferred Claude live gate and knowledge persistence guidance in `README.md`.
-- [ ] T061 Record backend checks and remaining live gates in `rpg_be_local/IMPLEMENTATION.md`.
-- [ ] T062 Record frontend checks and unchanged UI scope in `rpg_fe_local/IMPLEMENTATION.md`.
+- [x] T056 Record successful Windows Codex and Antigravity multi-turn fact recall/dice/rules evidence, cancellation and saved-face recovery in `docs/reviews/campaign-knowledge-native.md`; use a disposable campaign, not the user's active game.
+- [x] T057 Evaluate Antigravity MCP-only schema discovery with the v4 no-library/book probes in `rpg_be_local/tests/knowledge.native.test.ts`; removing the textual schema block is conditional on demonstrated success.
+- [x] T058 If T057 passes, remove textual schema duplication in `rpg_be_local/src/providers/antigravityMcpBook.ts`; otherwise document the smallest required guidance and native evidence.
+- [x] T059 Document v4 schemas, knowledge tools, no-editor scope and compatibility in `rpg_be_local/docs/api-contract.md`.
+- [x] T060 Update actual behavior, deferred Claude live gate and knowledge persistence guidance in `README.md`.
+- [x] T061 Record backend checks and remaining live gates in `rpg_be_local/IMPLEMENTATION.md`.
+- [x] T062 Record frontend checks and unchanged UI scope in `rpg_fe_local/IMPLEMENTATION.md`.
 
 **Checkpoint:** root `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`, `npm run build`; migrated isolated DB tests; Windows Codex/Antigravity native scenarios. Claude mocked transport coverage must pass; Claude live acceptance is explicitly deferred, not claimed verified.
 
@@ -555,6 +555,30 @@ check. Code review of this plan does not establish actual CLI/cache behavior or
 prove every semantic claim is true.
 
 Review completed: six round-1 corrections and two round-2 corrections recorded.
-No application or database changes were made. All tasks remain unchecked. Claude
+At the time of these planning reviews, no application or database changes had been made. The implementation checklist above was completed afterward. Claude
 live verification and the optional Antigravity MCP-schema optimization remain the
 explicit environment/runtime gates already described above.
+
+
+## Implementation handoff — 2026-10-03
+
+All 62 tasks are completed, with conditional T058 resolved by retaining the single
+registry-derived Antigravity schema block after both MCP-only experiments failed.
+Native Codex/Antigravity creation, next-action lookup, book evidence, cancellation,
+saved-face cross-provider recovery and undo passed. Claude live validation remains
+user-deferred; mocked adapter acceptance passed. See
+[`campaign-knowledge-native.md`](../reviews/campaign-knowledge-native.md) for exact evidence.
+
+Test placement follows the implemented boundaries: mixed atomic changes in
+`knowledge.test.ts`, real service compaction in `knowledge.database.test.ts`, and
+existing chat/lazy inspection in frontend component tests. Root metadata is read
+on demand through the existing context inspection rather than copied into every
+campaign response. Memory calls receive only records associated with the compacted
+batch, not the lifetime registry.
+
+Migration 0008 was initially absent from the user's running development database
+while hot reload activated the new backend. This caused a pre-CLI failure with no
+game mutation. All 0001–0008 migrations were then applied and verified with no
+pending files. Missing-column failures now explicitly instruct running
+`setup-database.cmd` before any CLI call; a disposable-DB regression covers it.
+The user deleted the affected campaign; it was not restored.

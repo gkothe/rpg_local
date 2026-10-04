@@ -18,7 +18,7 @@ export default function FlowInspector({
           Back to explorer ↑
         </button>
       )}
-      <div className="flow-kicker">Inside this boundary</div>
+      <div className="flow-kicker">How this part works</div>
       <h2 tabIndex={-1}>{item.label}</h2>
       <p>{item.summary}</p>
       <dl>
@@ -26,19 +26,19 @@ export default function FlowInspector({
         <dd>{item.timing}</dd>
         <dt>Receives</dt>
         <dd>{item.input}</dd>
-        <dt>Sends onward</dt>
+        <dt>Returns or sends</dt>
         <dd>{item.output}</dd>
-        <dt>Reads / writes / retention</dt>
+        <dt>What it reads and saves</dt>
         <dd>{item.storage}</dd>
       </dl>
       {item.detail && (
         <details>
-          <summary>Guarantees and limits</summary>
+          <summary>Checks and limits</summary>
           <p>{item.detail}</p>
         </details>
       )}
       <details>
-        <summary>Implementation evidence</summary>
+        <summary>Source code and documentation</summary>
         <button onClick={() => onSection(item.section)}>
           Read document section {item.section}
         </button>

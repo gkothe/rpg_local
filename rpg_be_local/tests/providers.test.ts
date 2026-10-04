@@ -138,7 +138,7 @@ test('Codex/Antigravity machine outputs are parsed, malformed output rejected', 
   );
   assert.throws(
     () => parseProviderOutput('claude', '{"is_error":true,"result":"login"}'),
-    /CLI reported/
+    (error: unknown) => (error as { code: string }).code === 'provider_auth'
   );
   assert.throws(() => parseProviderOutput('agy', 'not json'), /JSON/);
 });

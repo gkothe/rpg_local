@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { tools } from './content';
 import { citation } from './examples';
 const traceDetails = [
-  'The LLM emits an allowed tool name and structured arguments; it has not run SQL or generated trusted dice itself.',
-  'The owned registry validates the tool schema, serializes dispatch and checks turn activity. Unknown tools are rejected.',
-  'The app service performs the permitted operation. Each path below has a different persistence boundary.',
-  'The app returns a bounded result through HTTP MCP (Claude/Antigravity) or stdio dynamic calls (Codex). The model resumes reasoning.',
-  'The final v4 proposal references recorded rolls or text receipts. Gameplay changes still require separate validation and atomic commit.',
+  'The model requests an allowed tool and supplies its arguments. The app will run the request; the model has not queried the database or generated trusted dice itself.',
+  'The tool registry checks the arguments and confirms that the turn is still active. It rejects unknown tools and runs accepted calls one at a time.',
+  'The app service carries out the request. The examples below show which calls use the database and which use the fixed copy in memory.',
+  'The app sends the result back through local HTTP MCP for Claude and Antigravity, or stdio tool calls for Codex. The model can then continue its response.',
+  'The final v4 proposal refers to saved rolls or rule-read receipts. The app still needs to check and save the gameplay changes in a separate transaction.',
 ];
 export default function ToolExplorer({
   selected,
@@ -22,11 +22,11 @@ export default function ToolExplorer({
   const knowledge = tool.id.startsWith('campaign_knowledge');
   return (
     <section className="flow-card" aria-label="Tool explorer">
-      <h2>The model asks. The app executes.</h2>
+      <h2>How the model uses tools</h2>
       <p>
-        Can the LLM consult our DB? It can request allowed information through app-owned tools. It
-        receives no arbitrary SQL tool or database connection. The backend prepares context and
-        controls each service call.
+        The model can ask the app for information through the allowed tools. The backend prepares
+        the context and handles every service call, including database access. The model has no
+        direct database connection or tool for running arbitrary SQL.
       </p>
       <label>
         <input
@@ -40,9 +40,7 @@ export default function ToolExplorer({
         Enable book tools
       </label>
       <p>
-        {bookEnabled
-          ? '7 available tools'
-          : '3 available tools — four book tools require book mode'}
+        {bookEnabled ? '7 available tools' : '3 available tools. The other four require book mode.'}
       </p>
       <div className="flow-tool-list">
         {tools.map((t) => (
@@ -62,17 +60,17 @@ export default function ToolExplorer({
       </div>
       <h3 style={{ marginTop: '1.5rem' }}>
         {knowledge
-          ? 'Frozen knowledge trace'
+          ? 'How knowledge lookup works'
           : tool.id === 'roll_dice'
-            ? 'Persisted dice trace'
-            : 'Original book trace'}
+            ? 'How a dice roll is recorded'
+            : 'How the model reads a rulebook'}
       </h3>
       <div className="flow-edges" aria-label="Tool trace stages">
         {[
           'LLM request',
-          'Validate / dispatch',
-          'Service boundary',
-          'Return / resume',
+          'Check the request',
+          'Run the tool',
+          'Return the result',
           'Final proposal',
         ].map((label, i) => (
           <button key={label} aria-pressed={trace === i} onClick={() => setTrace(i)}>
@@ -85,62 +83,67 @@ export default function ToolExplorer({
         {knowledge ? (
           <>
             <li>
-              Context preparation reads campaign knowledge from PostgreSQL and clones the complete
-              registry into the session.
+              Before calling the model, the app reads campaign knowledge from PostgreSQL and copies
+              the complete set of records into the turn's session.
             </li>
             <li>
-              Search/get consult that frozen registry. No SQL is executed by this recall call; edits
-              made later do not change its answers.
+              Search and get use that fixed copy in memory. They do not query PostgreSQL again, so
+              edits made after the turn starts do not change their answers.
             </li>
             <li>
-              Search defaults to active records; explicit status/get can retrieve older resolved or
-              retracted information.
+              Search returns active records by default. An explicit status filter or a get request
+              can retrieve resolved or retracted records too.
             </li>
             <li>
-              New or updated facts go in final knowledgeChanges, preserving origin, certainty,
-              lifecycle and attribution.
+              The model proposes new or updated facts in the final knowledgeChanges field. Each
+              record keeps its origin, certainty, status, and attribution history.
             </li>
           </>
         ) : tool.id === 'roll_dice' ? (
           <>
-            <li>The app validates the next slot and dice specification.</li>
+            <li>The app checks the next roll slot and which dice the model requested.</li>
             <li>
-              Cryptographic faces are generated and persisted in PostgreSQL before the tool reveals
-              them.
+              The app uses a cryptographic random generator and saves the dice results in PostgreSQL
+              before showing them to the model.
             </li>
-            <li>A matching replay reuses recorded faces. A changed specification is rejected.</li>
             <li>
-              The final response must interpret exactly every recorded roll ID. Narrative arithmetic
-              remains the model’s responsibility.
+              A repeated request with the same dice specification reuses the saved results. The app
+              rejects a changed specification.
+            </li>
+            <li>
+              The final response must explain each recorded roll ID exactly once. The model is still
+              responsible for getting the story's arithmetic right.
             </li>
           </>
         ) : (
           <>
             <li>
-              Map/search/list locate a candidate path; navigation, snippets and extracted fields are
-              not citable ruling authority.
+              Map, search, and list help the model find a rulebook section. Section lists, snippets,
+              and extracted fields help with navigation; the model must read the original text
+              before citing a rule.
             </li>
             <li>
-              rules_get with view:text reads original book text through the backend’s captured rule
-              system.
+              A rules_get call with view:text asks the backend for original text from the rule
+              system selected for this turn.
             </li>
             <li>
-              A current-turn receipt persists the text range, rule identity/revision/hash and page
-              provenance.
+              The app saves a read receipt for this turn. It records the text range, rule system ID,
+              version, content hash, and page information.
             </li>
             <li>
-              The final citation quotes an exact UTF-16 substring with matching receipt identity and
-              page coverage. It proves the quote, not its interpretation.
+              The final citation must quote an exact part of that text, with matching receipt and
+              page information. Positions use UTF-16 offsets, as JavaScript strings do. The app
+              verifies the quote but does not judge how the model interpreted it.
             </li>
           </>
         )}
       </ol>
       <details>
-        <summary>Example arguments and model-visible result</summary>
+        <summary>Example arguments and result sent to the model</summary>
         <p>
-          Complete synthetic examples. Each independent book example uses the same illustrative
-          receipt ID; a real call has its own persisted receipt. Search locators are opaque session
-          tokens; the displayed locator is synthetic.
+          These are complete, made-up examples. The book examples reuse one receipt ID for
+          readability; real calls each have a saved receipt. A search locator is a token for finding
+          text within the session. The locator shown here is also made up.
         </p>
         <h4>Arguments</h4>
         <pre>{JSON.stringify(tool.args, null, 2)}</pre>
@@ -154,17 +157,35 @@ export default function ToolExplorer({
         )}
       </details>
       <details>
-        <summary>Process and transport limits</summary>
+        <summary>How a model corrects a tool request</summary>
         <p>
-          These sessions disable native ambient tools. The CLI still uses provider authentication
-          and a filtered inherited process environment; this is not a proof that the process has no
-          credentials. The model interface exposes only the allowed application tools.
+          Codex can receive an unsuccessful tool result for an invalid dice request, invalid
+          argument format, missing knowledge record, or invalid search cursor. The model can correct
+          the request within the same conversation using a new call ID. This does not erase saved
+          dice or restart the outer response-repair counter.
         </p>
         <p>
-          Tool dispatch is sequential. Rule SQL budgets are cumulative (12 calls / 8192 bytes); a
-          service’s per-call check does not by itself prove remaining cumulative allowance. HTTP MCP
-          limits arguments to 1024 bytes, including dice arguments, despite the larger dice domain
-          cap. Repairs keep cumulative tool transcript limits.
+          Antigravity must call the native call_mcp_tool gateway with ServerName:local_rpg, a
+          registered ToolName, and an Arguments object. The adapter adds these instructions to the
+          model prompt. Calling an allowed tool directly or sending malformed arguments is rejected
+          before the tool runs and can trigger an outer repair. A completion must match a request
+          the app already accepted. External tool names, changed request identities, and lost
+          ownership still stop the attempt.
+        </p>
+      </details>
+      <details>
+        <summary>Tool access and request limits</summary>
+        <p>
+          The session disables other native tools and exposes only the app's allowed tools to the
+          model. The provider's command-line process still uses authentication and inherits a
+          filtered set of environment values. Restricting model tools does not remove those
+          credentials from the process.
+        </p>
+        <p>
+          The app runs tool calls one at a time. Rule calls share a cumulative SQL budget of 12
+          calls and 8192 bytes; a per-call check alone does not verify how much remains. HTTP MCP
+          limits arguments to 1024 bytes, including dice arguments, even though the dice validator
+          allows more. Repair attempts share the accumulated tool transcript limits.
         </p>
       </details>
     </section>

@@ -2,15 +2,17 @@ import { useState } from 'react';
 import { steps } from './content';
 const outcomes: Record<string, string> = {
   success:
-    'The accepted proposal commits only while the turn still owns its lease and campaign revision.',
+    'The app saves an accepted proposal only if the attempt still has permission to finish and the campaign version matches.',
   duplicate:
-    'The same requestId and parsed payload/revision replay the original outcome. A changed payload with the same identity conflicts.',
+    'Sending the same requestId with the same checked data and campaign version returns the original result. Reusing that ID with different data causes a conflict.',
   invalid:
-    'Eligible schema/JSON/reference errors may receive two automatic repair retries (up to three outer calls). The model receives corrective feedback; tool audit remains.',
+    'For some JSON, response-format, or reference errors, the app can ask the model to fix its response up to twice. That allows up to three outer calls. The model receives feedback, and the app keeps the tool records.',
+  operational:
+    'A quota or login problem, missing database migration, full disk, denied file access, or failed prompt-log write needs a local fix. The app reports the problem; asking the model to rewrite its response cannot fix it. If the database is unavailable, saving the failed status can fail too, and lease recovery must mark the turn interrupted later.',
   cancelled:
-    'Lost ownership, lease expiry or a changed campaign/rule revision prevents a stale commit. This is not a semantic narrative repair.',
+    'The app stops a stale result from being saved if the attempt loses permission, its lease expires, or the campaign or rules version changes. It does not ask the model to repair the story in these cases.',
   interrupted:
-    'Recovery marks an expired turn interrupted; it does not restart inference automatically. Explicit retry creates a new turn attempt and reuses an eligible unchanged frozen session.',
+    'Recovery marks an expired turn interrupted and does not restart inference automatically. You can request a retry. If it is eligible, the app starts a new attempt using the unchanged original session.',
 };
 export default function TurnWalkthrough({
   step,
@@ -29,7 +31,10 @@ export default function TurnWalkthrough({
   return (
     <section className="flow-card" aria-label="Guided turn">
       <h2>Follow one action</h2>
-      <p>A scripted example: Mira crosses a damaged bridge. Move at your own pace.</p>
+      <p>
+        In this example, Mira crosses a damaged bridge. Use Next to follow her action through the
+        system, or choose a step below.
+      </p>
       <div className="flow-controls">
         <label>
           Jump to step
@@ -61,7 +66,7 @@ export default function TurnWalkthrough({
         <button onClick={() => onStep(steps[0].id)}>Reset</button>
       </div>
       <details>
-        <summary>Mode and provider boundaries</summary>
+        <summary>How mode and provider change the flow</summary>
         <div className="flow-controls">
           <label>
             <input type="checkbox" checked={book} onChange={(e) => setBook(e.target.checked)} />
@@ -78,24 +83,25 @@ export default function TurnWalkthrough({
         </div>
         <p>
           {book
-            ? 'Seven tools: trusted dice, two knowledge tools and four book tools.'
-            : 'Three tools: trusted dice and two campaign knowledge tools.'}
+            ? 'Book mode has seven tools: dice, two campaign knowledge tools, and four rulebook tools.'
+            : 'Default mode has three tools: dice and two campaign knowledge tools.'}
         </p>
         <p>
           {provider === 'codex'
-            ? 'Codex: stdio app-server with owned dynamic tool calls.'
-            : `${provider === 'claude' ? 'Claude' : 'Antigravity'}: private loopback HTTP MCP for owned tools.`}{' '}
-          The provider model runs through authenticated cloud services.
+            ? 'Codex exchanges tool messages with the app through its app-server using standard input and output (stdio).'
+            : `${provider === 'claude' ? 'Claude' : 'Antigravity'} exchanges tool messages through a private local HTTP MCP server.`}{' '}
+          Each provider uses its authenticated cloud service to generate the response.
         </p>
       </details>
       <details open={outcome !== 'success'}>
-        <summary>Failure, repair and retry branches</summary>
+        <summary>What happens when something goes wrong?</summary>
         <label>
           What if…
           <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
             <option value="success">Success</option>
             <option value="duplicate">Duplicate request</option>
             <option value="invalid">Invalid response</option>
+            <option value="operational">Account, database, or file problem</option>
             <option value="cancelled">Ownership / revision changed</option>
             <option value="interrupted">Interrupted process</option>
           </select>
