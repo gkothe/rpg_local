@@ -33,6 +33,26 @@ export async function findRules(
   return {
     search,
     reads,
+    suppliedOriginals: reads
+      .filter(
+        (read) =>
+          !read.error &&
+          read.view === 'text' &&
+          !read.structural &&
+          typeof read.text === 'string' &&
+          read.text.length > 0
+      )
+      .map((read) => ({
+        receiptId: read.receipt,
+        path: read.path,
+        start: read.start,
+        end: read.end,
+        complete: read.complete,
+        nextRead:
+          typeof read.cursor === 'string'
+            ? { path: read.path, view: 'text', cursor: read.cursor }
+            : null,
+      })),
     unreadPaths: eligible.slice(INITIAL_ORIGINAL_READS).map((hit) => hit.path),
   };
 }

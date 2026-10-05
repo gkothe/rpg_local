@@ -53,6 +53,13 @@ function fixture(): RuleSystem {
   return system;
 }
 
+test('invalid slash paths direct the caller to copy exact tool-returned dotted paths', () => {
+  assert.throws(
+    () => ruleNodeAt(fixture(), 'core_rules/combat/damage_and_healing'),
+    /Copy the exact dotted path returned by rules_find/
+  );
+});
+
 test('book search matches relevant title/text terms without requiring every query word', () => {
   const system = fixture();
   const node = ruleNodeAt(system, 'core_rules.example.deep');

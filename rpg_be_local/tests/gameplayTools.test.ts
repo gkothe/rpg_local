@@ -5,6 +5,48 @@ import { GameplayTools } from '../src/providers/gameplayTools.js';
 import { freezeKnowledge } from '../src/domain/knowledgeRecall.js';
 import { newCampaign } from '../src/domain/campaign.js';
 
+test('combined originals identify supplied receipts and exact continuation arguments without blocking rereads', async () => {
+  const reads: unknown[] = [];
+  const registry = new GameplayTools({
+    book: true,
+    ruleFind: true,
+    assertActive: async () => {},
+    roll: async () => ({ rollId: randomUUID(), slot: 0, groups: [], reused: false }),
+    read: async (tool, input) => {
+      reads.push(input);
+      return tool === 'rules_search'
+        ? { entries: [{ path: 'core_rules.book.damage', readableOriginal: true }] }
+        : {
+            receipt: 'original-receipt',
+            path: 'core_rules.book.damage',
+            view: 'text',
+            structural: false,
+            start: 0,
+            end: 8,
+            text: 'Original',
+            complete: false,
+            cursor: 'next_window',
+          };
+    },
+  });
+  const result = (await registry.call('rules_find', { query: 'damage' }, 'find')) as Record<
+    string,
+    unknown
+  >;
+  assert.deepEqual(result.suppliedOriginals, [
+    {
+      receiptId: 'original-receipt',
+      path: 'core_rules.book.damage',
+      start: 0,
+      end: 8,
+      complete: false,
+      nextRead: { path: 'core_rules.book.damage', view: 'text', cursor: 'next_window' },
+    },
+  ]);
+  await registry.call('rules_get', { path: 'core_rules.book.damage', view: 'text' }, 'reread');
+  assert.equal(reads.length, 3);
+});
+
 test('rules_find combines eligible original reads with stable child identities and native replay', async () => {
   const calls: { tool: string; input: unknown; id: string }[] = [];
   const registry = new GameplayTools({
@@ -83,6 +125,7 @@ test('rules_find preserves read errors and stops constituent reads after cancell
     error: { code: 'rules_cursor_invalid', detail: 'Expired' },
   });
   assert.deepEqual(result.reads, []);
+  assert.deepEqual(result.suppliedOriginals, []);
 });
 test('knowledge tools remain owned without a library and do not consume dice or rules allowance', async () => {
   const c = newCampaign({ name: 'Frozen recall' });

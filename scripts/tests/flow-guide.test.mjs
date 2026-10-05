@@ -39,6 +39,7 @@ import {
 } from '../../rpg_fe_local/src/features/flow/content.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { createCampaignSourceRecall } from '../../rpg_be_local/src/domain/campaignSourceRecall.ts';
+import { findRules } from '../../rpg_be_local/src/providers/rulesFind.ts';
 
 test('illustrated campaign source navigation matches real search and get payloads', () => {
   const lookup = createCampaignSourceRecall({
@@ -57,6 +58,24 @@ test('illustrated campaign source navigation matches real search and get payload
   const get = tools.find((tool) => tool.id === 'campaign_sources_get');
   assert.deepEqual(lookup.search(search.args), search.result);
   assert.deepEqual(lookup.get(get.args, get.result.receiptId), get.result);
+});
+
+test('combined rule lookup example identifies originals already supplied without inventing continuation', async () => {
+  const example = tools.find((tool) => tool.id === 'rules_find');
+  const output = await findRules(
+    async (tool, input) => {
+      if (tool === 'rules_search') {
+        assert.deepEqual(input, example.args);
+        return example.result.search;
+      }
+      assert.deepEqual(input, { path: example.result.reads[0].path, view: 'text' });
+      return example.result.reads[0];
+    },
+    example.args,
+    'illustrated',
+    async () => {}
+  );
+  assert.deepEqual(output, example.result);
 });
 
 test('educational v4 proposal applies its expected-value update without exposing notes', () => {

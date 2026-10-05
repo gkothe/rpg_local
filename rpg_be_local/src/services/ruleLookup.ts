@@ -78,7 +78,11 @@ function digest(value: unknown) {
 export function ruleNodeAt(system: RuleSystem, path: string): RuleNode {
   const parts = path.split('.');
   if (!(RULE_COLUMNS as readonly string[]).includes(parts[0]!) || parts.length < 2)
-    throw new Problem(422, 'rules_path_invalid', 'Invalid rule path');
+    throw new Problem(
+      422,
+      'rules_path_invalid',
+      'Invalid rule path. Copy the exact dotted path returned by rules_find, rules_search, rules_map or rules_list; do not invent slash-separated paths.'
+    );
   let value: unknown = system[parts[0] as keyof RuleSystem];
   for (let index = 1; index < parts.length; index++) {
     const part = parts[index]!;
