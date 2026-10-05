@@ -14,6 +14,13 @@ npm start
 
 Typing works at `http://YOUR_PRIVATE_IPV4:4100`. Open `http://127.0.0.1:4100` on the desktop, go to Settings and create a connection code. Enter the code on the phone. Codes expire after two minutes and work once; device approval lasts twelve hours. Desktop revoke and server restart require pairing again. The phone cannot manage pairing approvals or launch arbitrary commands.
 
+To keep LAN startup across terminal sessions, save `{"host":"YOUR_PRIVATE_IPV4"}` in
+`%LOCALAPPDATA%\LocalRPG\lan.json`. With a saved LAN host (or `RPG_LAN_HOST`), `start.cmd`
+defaults to the built app, builds before starting and prints both desktop and LAN URLs.
+`start.cmd dev` explicitly selects desktop development mode. Without LAN configuration,
+the launcher retains its desktop development default. Update the saved host if the PC's
+address changes; removing the file restores the desktop default.
+
 ## HTTPS for the microphone
 
 Chrome needs a trusted secure origin for recording. Dismissing a certificate warning is insufficient. A local certificate authority is one option; these are deliberate setup steps that change trust on the devices, never automatic application actions.

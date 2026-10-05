@@ -1,4 +1,9 @@
 $ErrorActionPreference = 'Stop'
+$lanSettingsPath = Join-Path $env:LOCALAPPDATA 'LocalRPG\lan.json'
+if (-not $env:RPG_LAN_HOST -and (Test-Path -LiteralPath $lanSettingsPath)) {
+    $lanSettings = Get-Content -LiteralPath $lanSettingsPath -Raw | ConvertFrom-Json
+    if ($lanSettings.host) { $env:RPG_LAN_HOST = [string]$lanSettings.host }
+}
 $settingsPath = Join-Path $env:LOCALAPPDATA 'LocalRPG\database.json'
 if (-not $env:RPG_DATABASE_URL -and (Test-Path -LiteralPath $settingsPath)) {
     $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json

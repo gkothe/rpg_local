@@ -90,7 +90,7 @@ test(
     ]);
     const row = result.rows[0];
     assert.equal(row.kind, RuleSystemKind.ModelKnowledge);
-    assert.equal(row.revision, 1);
+    assert.equal(row.revision, 2);
     assert.equal(
       row.content_hash,
       ruleContentHash({
@@ -116,6 +116,60 @@ test(
       ]),
       /identity is protected/
     );
+  }
+);
+test(
+  'generic instruction migration upgrades edited defaults, preserves libraries and is repeatable',
+  { skip: !enabled },
+  async () => {
+    const migration = await readFile(
+      path.join(appRoot, 'migrationssql/0012_generic_gm_instructions.sql'),
+      'utf8'
+    );
+    await store.transaction(async (client) => {
+      await client.query('SAVEPOINT generic_instruction_upgrade');
+      try {
+        await client.query(
+          "UPDATE rule_systems SET instructions='Prior custom generic instructions', revision=7 WHERE id=$1",
+          [DEFAULT_RULE_SYSTEM_ID]
+        );
+        const libraryId = randomUUID();
+        await client.query(
+          "INSERT INTO rule_systems(id,system_key,system_name,kind,content_hash,instructions) VALUES($1,$2,'Synthetic game','library',$3,'Keep library instructions')",
+          [libraryId, `migration_${libraryId.replaceAll('-', '')}`, 'a'.repeat(64)]
+        );
+        await client.query(migration);
+        const readDefault = async () =>
+          (await client.query('SELECT * FROM rule_systems WHERE id=$1', [DEFAULT_RULE_SYSTEM_ID]))
+            .rows[0];
+        const upgraded = await readDefault();
+        assert.equal(upgraded.instructions, DEFAULT_RULE_INSTRUCTIONS);
+        assert.equal(upgraded.revision, 8);
+        assert.equal(
+          upgraded.content_hash,
+          ruleContentHash({
+            ...emptyRuleColumns(),
+            instructions: upgraded.instructions,
+            sources: [],
+            mapping: {},
+          })
+        );
+        const library = (
+          await client.query('SELECT instructions,revision FROM rule_systems WHERE id=$1', [
+            libraryId,
+          ])
+        ).rows[0];
+        assert.equal(library.instructions, 'Keep library instructions');
+        assert.equal(library.revision, 1);
+        await client.query(migration);
+        const repeated = await readDefault();
+        assert.equal(repeated.revision, upgraded.revision);
+        assert.equal(repeated.content_hash, upgraded.content_hash);
+        assert.deepEqual(repeated.updated_at, upgraded.updated_at);
+      } finally {
+        await client.query('ROLLBACK TO SAVEPOINT generic_instruction_upgrade');
+      }
+    });
   }
 );
 test(
