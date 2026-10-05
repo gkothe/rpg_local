@@ -23,7 +23,7 @@ import type {
   GM_RESPONSE_SCHEMA_VERSION,
 } from './versions.js';
 import type { DiceRecord, DiceSession } from './dice.js';
-import type { RollInterpretation } from './diceResponse.js';
+import type { PlacedRollInterpretation } from './diceResponse.js';
 import type { RuleContext, RuleReference, RuleRead, RuleCitation } from './rules.js';
 
 export type JsonObject = Record<string, unknown>;
@@ -100,7 +100,7 @@ export type Turn = {
   diceSessionId?: string;
   retryOfTurnId?: string;
   rolls?: DiceRecord[];
-  rollInterpretations?: RollInterpretation[];
+  rollInterpretations?: PlacedRollInterpretation[];
   diceRetry?: { available: boolean; reason: string | null };
   id: string;
   campaignId: string;

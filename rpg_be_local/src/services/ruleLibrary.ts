@@ -10,7 +10,7 @@ import {
   type RuleContext,
   type RuleSystem,
 } from '../domain/rules.js';
-import { Problem, conflict } from '../errors.js';
+import { Problem } from '../errors.js';
 import { createHash, randomUUID } from 'node:crypto';
 type BookPreview = { baseRevision: number; book: ParsedRuleBook };
 export class RuleLibrary {
@@ -22,8 +22,6 @@ export class RuleLibrary {
     const current = await this.rules.get(id);
     if (current.kind !== RuleSystemKind.Library)
       throw new Problem(422, 'rules_default_protected', 'Default accepts instructions only');
-    if (current.revision !== revision)
-      throw conflict('Rule system changed; reload before importing');
     let book: ParsedRuleBook;
     try {
       book = parseRuleBook(files);
@@ -89,8 +87,6 @@ export class RuleLibrary {
       if (replay) return replay;
       if (!preview)
         throw new Problem(404, 'rules_preview_missing', 'Preview expired or was consumed');
-      if (current.revision !== input.revision || preview.baseRevision !== input.revision)
-        throw conflict('Rule system changed; create a new preview');
       const published = await this.rules.write(
         current,
         this.replace(current, preview.book),
@@ -121,8 +117,6 @@ export class RuleLibrary {
       const current = await this.rules.get(id, client, 'update');
       const replay = await this.rules.confirmation(id, requestId, identity, client);
       if (replay) return replay;
-      if (current.revision !== revision)
-        throw conflict('Rule system changed; reload before saving');
       const result = await this.rules.write(
         current,
         { ...ruleContent(current), instructions },

@@ -330,7 +330,7 @@ test(
   }
 );
 test(
-  'editing resume rejects changed campaign context without rerunning any provider',
+  'editing resumes after campaign edits without rerunning gameplay',
   { skip: !enabled },
   async () => {
     const f = await begin();
@@ -342,14 +342,14 @@ test(
       await store.save(campaign, client);
     });
     f.allowEditor();
-    await assert.rejects(
-      () =>
-        f.service.resumeEditing(f.campaign.id, f.turn.id, { revision: 1, requestId: randomUUID() }),
-      /changed|context/i
-    );
+    await f.service.resumeEditing(f.campaign.id, f.turn.id, {
+      revision: 0,
+      requestId: randomUUID(),
+    });
+    assert.equal((await terminal(f.campaign.id, f.turn.id)).status, TurnStatus.Completed);
     assert.equal(f.counts.gm, 1);
-    assert.equal(f.counts.editor, 1);
-    assert.equal((await store.turn(f.campaign.id, f.turn.id)).narrative, null);
+    assert.equal(f.counts.editor, 2);
+    assert.ok((await store.turn(f.campaign.id, f.turn.id)).narrative);
   }
 );
 test(
@@ -403,7 +403,7 @@ test(
 );
 
 test(
-  'editing resume rejects a changed authoritative rule head without another CLI call',
+  'editing resumes after rule revisions change without rerunning gameplay',
   { skip: !enabled },
   async () => {
     const f = await begin();
@@ -413,13 +413,13 @@ test(
       failed.ruleContext.systemId,
     ]);
     f.allowEditor();
-    await assert.rejects(
-      () =>
-        f.service.resumeEditing(f.campaign.id, f.turn.id, { revision: 0, requestId: randomUUID() }),
-      /Rule (system|library) changed/i
-    );
+    await f.service.resumeEditing(f.campaign.id, f.turn.id, {
+      revision: 0,
+      requestId: randomUUID(),
+    });
+    assert.equal((await terminal(f.campaign.id, f.turn.id)).status, TurnStatus.Completed);
     assert.equal(f.counts.gm, 1);
-    assert.equal(f.counts.editor, 1);
-    assert.equal((await store.turn(f.campaign.id, f.turn.id)).narrative, null);
+    assert.equal(f.counts.editor, 2);
+    assert.ok((await store.turn(f.campaign.id, f.turn.id)).narrative);
   }
 );

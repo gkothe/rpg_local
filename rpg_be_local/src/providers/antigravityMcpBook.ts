@@ -324,6 +324,16 @@ export async function generateAntigravityMcpBook(
                 response?: string;
                 usage?: { input_tokens?: number };
               };
+              const unclaimedCalls = pending.filter((entry) => !entry.claimed).length;
+              await traceEvent(trace, 'native_completion', {
+                initialized,
+                alreadyCompleted: completed,
+                success: result.status === 'SUCCESS',
+                reportedTurns: Number.isInteger(result.num_turns) ? result.num_turns : null,
+                hasResponse: typeof result.response === 'string',
+                responseCharacters: typeof result.response === 'string' ? result.response.length : null,
+                unclaimedCalls,
+              });
               if (initialized && !completed && result.status !== 'SUCCESS')
                 throw cliFailure(typeof result.response === 'string' ? result.response : '');
               if (
@@ -332,13 +342,24 @@ export async function generateAntigravityMcpBook(
                 result.status !== 'SUCCESS' ||
                 result.num_turns !== 1 ||
                 typeof result.response !== 'string' ||
-                pending.some((entry) => !entry.claimed)
+                unclaimedCalls > 0
               )
+              {
+                const reason = !initialized
+                  ? 'its private agent was not initialized'
+                  : completed
+                    ? 'it sent a duplicate completion'
+                    : result.num_turns !== 1
+                      ? `it reported ${Number.isInteger(result.num_turns) ? result.num_turns : 'no'} completed turns instead of one`
+                      : typeof result.response !== 'string'
+                        ? 'its final response was missing'
+                        : 'a tool request was not dispatched';
                 throw new Problem(
                   502,
                   'dice_isolation',
-                  'Antigravity did not complete one bounded private MCP turn'
+                  `Antigravity did not complete the turn: ${reason}`
                 );
+              }
               const text = result.response.trim();
               try {
                 await logPrompt('antigravityFinalResponse', settings, text);

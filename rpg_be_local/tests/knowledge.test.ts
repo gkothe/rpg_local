@@ -135,7 +135,7 @@ test('v4 stages NPC aliases and mixed provenance with state atomically, undo res
     /duplicate/
   );
 });
-test('rumor stays explicit; immutable creation origin and audit append; stale revision fails; touched undo conflicts', () => {
+test('rumor stays explicit; immutable creation origin and audit append; stale revision is informational; touched undo conflicts', () => {
   const c = newCampaign({ name: 'Test' });
   const turn = randomUUID();
   const first = applyResponse(
@@ -160,10 +160,8 @@ test('rumor stays explicit; immutable creation origin and audit append; stale re
     undoSnapshot(second.campaign, second.snapshot).knowledge,
     first.campaign.knowledge
   );
-  assert.throws(
-    () => applyResponse(second.campaign, response([update]), randomUUID()),
-    /prior revision/
-  );
+  const third = applyResponse(second.campaign, response([update]), randomUUID());
+  assert.equal(third.campaign.knowledge![0]!.revision, 3);
   second.campaign.knowledge![0]!.text = 'External change';
   assert.throws(() => undoSnapshot(second.campaign, second.snapshot), /Knowledge changed/);
   const legacy = applyResponse(

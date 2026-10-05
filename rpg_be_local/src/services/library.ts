@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { Store } from '../store.js';
 import { newCampaign } from '../domain/campaign.js';
 import type { Campaign, Archive, Snapshot, Memory } from '../domain/types.js';
-import { Problem, conflict } from '../errors.js';
+import { Problem } from '../errors.js';
 import { sourceSections } from '../domain/sourceSections.js';
 import {
   ARCHIVE_TURN_STATUSES,
@@ -53,7 +53,11 @@ import {
 import { RuleStore } from './ruleStore.js';
 import { validateRuleCitations } from '../domain/ruleResponse.js';
 import { DICE_LIMITS, diceRecordSchema, diceSessionSchema } from '../domain/dice.js';
-import { rollInterpretationSchema, validateRollInterpretations } from '../domain/diceResponse.js';
+import {
+  placedRollInterpretationSchema,
+  validateRollInterpretations,
+  validateRollPlacement,
+} from '../domain/diceResponse.js';
 import { diceDigest } from './dice.js';
 import {
   knowledgeRecordSchema,
@@ -185,7 +189,7 @@ const turn = z
     diceSessionId: uuid.optional(),
     retryOfTurnId: uuid.optional(),
     rolls: z.array(diceRecordSchema).max(DICE_LIMITS.slots).optional(),
-    rollInterpretations: z.array(rollInterpretationSchema).max(DICE_LIMITS.slots).optional(),
+    rollInterpretations: z.array(placedRollInterpretationSchema).max(DICE_LIMITS.slots).optional(),
     id: uuid,
     campaignId: uuid,
     requestId: uuid,
@@ -962,7 +966,11 @@ export function remapArchive(raw: unknown): Archive {
           'Turn dice must match its canonical session prefix'
         );
     }
-    if (turn.status === TurnStatus.Completed && turn.diceSessionId)
+    if (turn.status === TurnStatus.Completed && turn.diceSessionId) {
+      validateRollPlacement({
+        narrative: turn.narrative ?? '',
+        rollInterpretations: turn.rollInterpretations ?? [],
+      });
       validateRollInterpretations(
         {
           version: DICE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
@@ -972,6 +980,7 @@ export function remapArchive(raw: unknown): Archive {
         },
         (turn.rolls ?? []).map((record) => record.id)
       );
+    }
     if (
       (turn.rollInterpretations ?? []).some(
         (entry) => !(turn.rolls ?? []).some((record) => record.id === entry.rollId)
@@ -1188,7 +1197,6 @@ export class LibraryService {
   }) {
     return this.store.transaction(async (client) => {
       const c = await this.store.campaign(input.campaignId, client, true);
-      if (c.revision !== input.revision) throw conflict('Campaign changed');
       const character = c.characters.find((character) => character.id === input.characterId);
       if (!character) throw new Problem(404, 'not_found', 'Character not found');
       const template = {
@@ -1407,11 +1415,9 @@ export class LibraryService {
       return archive.campaign;
     });
   }
-  async template(name: string, campaignId: string, revision: number) {
+  async template(name: string, campaignId: string, _revision: number) {
     return this.store.transaction(async (client) => {
       const c = await this.store.campaign(campaignId, client, true);
-      if (c.revision !== revision)
-        throw conflict('Campaign changed; refresh before saving template');
       await this.store.assertIdle(c.id, client);
       const setup = {
         ruleSystemId: null,

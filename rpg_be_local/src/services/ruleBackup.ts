@@ -162,11 +162,7 @@ export class RuleBackup {
         client
       );
       if (prior) return prior;
-      if (
-        !staged ||
-        staged.systemId !== input.systemId ||
-        staged.base?.revision !== (input.revision ?? undefined)
-      )
+      if (!staged || staged.systemId !== input.systemId)
         throw conflict('Restore preview expired or does not match confirmation');
       if (staged.base && !input.replace)
         throw conflict('Explicitly confirm replacement of the existing system');
@@ -185,12 +181,7 @@ export class RuleBackup {
           throw conflict('System key appeared after preview; review a new restore preview');
       }
       const current = await this.rules.get(input.systemId, client, 'update');
-      if (
-        staged.base &&
-        (current.revision !== staged.base.revision ||
-          current.contentHash !== staged.base.contentHash ||
-          current.kind !== staged.backup.system.kind)
-      )
+      if (staged.base && current.kind !== staged.backup.system.kind)
         throw conflict('System changed after restore preview');
       const published = await this.rules.write(
         current,

@@ -27,6 +27,22 @@ function voiceRuntime() {
   );
   return speech;
 }
+it('inline results preserve narration-only playback and highlighting offsets after a roll', () => {
+  const speech = voiceRuntime();
+  const text = 'Mira charges.\n\nThe guard falls.';
+  const view = render(
+    <NarratedText
+      text={text}
+      readable
+      afterParagraph={new Map([[1, <div key="roll">Roll result</div>]])}
+    />
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Read' }));
+  const utterance = speech.speak.mock.calls[0][0];
+  expect(utterance.text).toBe(text);
+  act(() => utterance.onboundary({ charIndex: text.indexOf('The guard') }));
+  expect(view.container.querySelector('mark')).toHaveTextContent('The guard falls.');
+});
 it('highlights the spoken sentence using original offsets and clears stale events on stop', () => {
   const speech = voiceRuntime();
   const text = 'Mira waits.\n\n🐉 The gate opens. What do you do?';

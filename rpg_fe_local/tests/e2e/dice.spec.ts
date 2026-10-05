@@ -62,11 +62,12 @@ test('terminal dice stay visible, retry preserves drafts and undo retains the au
       retry = {
         ...retry,
         status: 'completed',
-        narrative: 'The rope helps you reach the ledge.',
+        narrative: 'The rope helps you reach the ledge.\n\nYou look across the valley.',
         rolls: [roll],
         rollInterpretations: [
           {
             rollId: roll.id,
+            afterParagraph: 1,
             explanation: 'Total 11; failure',
             corrections: [{ explanation: 'Rope bonus brings the total to 13; success' }],
           },
@@ -129,6 +130,19 @@ test('terminal dice stay visible, retry preserves drafts and undo retains the au
   await page.getByLabel('Your action').fill('Keep this unsent draft');
   await page.getByRole('button', { name: 'Retry with saved dice' }).click();
   await expect(page.getByText('GM interpretation: Total 11; failure')).toBeVisible();
+  const result = page
+    .getByLabel('Trusted dice results')
+    .filter({ hasText: 'GM interpretation: Total 11; failure' });
+  await expect(result.locator('..')).toHaveClass('gm-message');
+  await expect(result.locator('xpath=preceding-sibling::div[1]')).toHaveText(
+    'The rope helps you reach the ledge.'
+  );
+  await expect(result.locator('xpath=following-sibling::div[1]')).toHaveText(
+    'You look across the valley.'
+  );
+  await page.getByLabel('Show debug info').uncheck();
+  await expect(result).toBeVisible();
+  await expect(result).toHaveCSS('border-top-width', '0px');
   await expect(
     page.getByText('Correction: Rope bonus brings the total to 13; success')
   ).toBeVisible();

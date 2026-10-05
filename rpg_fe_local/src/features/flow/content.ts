@@ -27,7 +27,7 @@ export const nodes: FlowItem[] = [
   item(
     'browser',
     'Browser',
-    'You enter an action in the journal. Once the app accepts the result, the journal shows the story and any saved changes.',
+    'You enter an action in the journal. Once the app accepts the result, the journal shows the story and any saved changes. Trusted rolls follow their linked narrative paragraph; rolls without placement append to the same GM message.',
     'When you submit an action and when the app reports progress.',
     'Your action, the current campaign version (revision), and a request ID that identifies this submission.',
     'The browser sends a POST request to the turn API. It then receives progress events (SSE) and checks the backend for the saved result.',
@@ -51,12 +51,12 @@ export const nodes: FlowItem[] = [
     'TurnService',
     'TurnService manages one attempt to resolve your action. It checks the campaign version and prevents competing turns. If the same request arrives again, it returns the original result.',
     'After the access checks, throughout the turn, and when saving the result.',
-    'The checked action, its requestId, and the campaign revision it was based on.',
+    'The checked action, its requestId, and an informational campaign revision.',
     'The turn moves from pending to running, then finishes as completed, failed, cancelled, or interrupted.',
     'PostgreSQL stores the turn and its temporary permission to run, called a lease. A campaign lock prevents competing turns.',
     '2.2',
     ['rpg_be_local/src/services/turns.ts'],
-    'Required narrative editing is a separate stage: resume it without replaying gameplay or rolling again. A pending turn has a 45-second lease. Every 10 seconds, a heartbeat checks that the attempt still has permission to run. Recovery checks for expired leases every 15 seconds and marks those turns interrupted. You must request a retry to run the AI again.'
+    'Required narrative editing is a separate stage: resume it without replaying gameplay or rolling again. A pending turn has a 45-second lease. Every 10 seconds, a heartbeat checks cancellation and ownership. Revision changes do not interrupt the attempt, and rule lookups use current system rows. Recovery checks for expired leases every 15 seconds and marks those turns interrupted. You must request a retry to run the AI again.'
   ),
   item(
     'context',
@@ -344,7 +344,7 @@ export const tools: FlowTool[] = [
       'During the GM action.',
       'A query, optional source ID and cursor.',
       'Ranked original section matches with titles, source version, exact offsets and alreadySupplied status.',
-      'Searches meaningful whole tokens and phrases in the frozen confirmed-source snapshot. Snippets point at matching terms. Use the titled catalog and reuse complete supplied sections; repeated reads remain available. Every accepted request has a persisted read receipt.',
+      'Searches meaningful whole tokens and phrases in the frozen confirmed-source snapshot. Snippets point at matching terms. The catalog and lookup agree on complete sections supplied through seeds, pins or retrieval; partial sections remain unread in full. Reuse supplied sections; repeated reads remain available. Every accepted request has a persisted read receipt.',
       '2.3',
       [
         'rpg_be_local/src/domain/campaignSourceRecall.ts',

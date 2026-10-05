@@ -11,7 +11,6 @@ export function DiceRolls({
   if (!terminal || !turn.rolls?.length) return null;
   return (
     <section className="dice-rolls" aria-label="Trusted dice results">
-      <h3>Trusted dice</h3>
       {turn.retryOfTurnId && <p className="muted">Original rolls were preserved for this retry.</p>}
       {turn.rolls.map((roll) => {
         const interpretation = turn.rollInterpretations?.find((entry) => entry.rollId === roll.id);

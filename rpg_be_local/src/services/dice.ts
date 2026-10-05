@@ -89,7 +89,7 @@ export class DiceService {
     });
   }
   private async assertOwned(turn: Turn, client: PoolClient): Promise<void> {
-    const campaign = await this.store.campaign(turn.campaignId, client, true);
+    await this.store.campaign(turn.campaignId, client, true);
     const result = await client.query(
       'SELECT owner,status,lease_until,document FROM turns WHERE id=$1 AND campaign_id=$2 FOR UPDATE',
       [turn.id, turn.campaignId]
@@ -102,12 +102,7 @@ export class DiceService {
       new Date(row.lease_until).getTime() <= Date.now()
     )
       throw new Problem(409, 'dice_inactive', 'Dice attempt is no longer active');
-    if (campaign.revision !== turn.context?.revision)
-      throw new Problem(409, 'dice_context', 'Campaign changed during the dice attempt');
-    if (
-      row.document.context?.prompt !== turn.context?.prompt ||
-      row.document.context?.revision !== turn.context?.revision
-    )
+    if (row.document.context?.prompt !== turn.context?.prompt)
       throw new Problem(409, 'dice_context', 'Dice requests must use the active attempt context');
   }
   async records(sessionId: string, client?: PoolClient): Promise<DiceRecord[]> {

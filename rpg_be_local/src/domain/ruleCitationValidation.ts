@@ -23,9 +23,7 @@ export function validateRuleCitations<T extends Pick<RuleResponse, 'ruleCitation
       read.campaignId !== campaignId ||
       read.turnId !== turnId ||
       read.tool !== 'rules_get' ||
-      read.context.systemId !== context.systemId ||
-      read.context.revision !== context.revision ||
-      read.context.contentHash !== context.contentHash
+      read.context.systemId !== context.systemId
     )
       invalid();
     const receipt = read!;
@@ -39,8 +37,8 @@ export function validateRuleCitations<T extends Pick<RuleResponse, 'ruleCitation
       citation.path !== payload.path ||
       citation.source !== payload.source ||
       citation.systemId !== context.systemId ||
-      citation.revision !== context.revision ||
-      citation.contentHash !== context.contentHash ||
+      citation.revision !== receipt.context.revision ||
+      citation.contentHash !== receipt.context.contentHash ||
       citation.start < payload.start ||
       citation.end > payload.end ||
       payload.text.slice(citation.start - payload.start, citation.end - payload.start) !==

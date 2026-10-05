@@ -6,6 +6,25 @@ import {
   validateHumanizedNarrative,
 } from '../src/domain/narrativeHumanizer.js';
 
+test('inline roll links protect paragraph boundaries during editing', () => {
+  const text = 'Mira charges.\n\nThe guard falls.';
+  assert.match(narrativeHumanizerPrompt(text, '', true), /same blank-line-separated paragraphs/);
+  assert.equal(
+    validateHumanizedNarrative(
+      text,
+      { narrative: 'Mira rushes forward.\n\nThe guard collapses.' },
+      [],
+      true
+    ),
+    'Mira rushes forward.\n\nThe guard collapses.'
+  );
+  assert.throws(
+    () =>
+      validateHumanizedNarrative(text, { narrative: 'Mira charges. The guard falls.' }, [], true),
+    /paragraph/i
+  );
+});
+
 test('editor prompt has only final prose, instructions and narrative schema', () => {
   const text = 'Mira waits by the gate. Hunger is 2.\n\nWhat do you do?';
   const prompt = narrativeHumanizerPrompt(text);

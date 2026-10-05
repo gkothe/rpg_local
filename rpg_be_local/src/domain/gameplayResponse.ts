@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { prepareCitationInput, citationWireSchema } from './citationInput.js';
 import { responseSchema, operationSchema } from './schemas.js';
-import { diceResponseSchema } from './diceResponse.js';
+import { diceResponseSchema, placedRollInterpretationSchema } from './diceResponse.js';
+import { DICE_LIMITS } from './dice.js';
 import { ruleResponseSchema } from './ruleResponse.js';
 import { ruleCitationSchema } from './rules.js';
 import {
@@ -33,6 +34,7 @@ export type GameplayResponse = z.infer<typeof gameplayResponseSchema>;
 export const gameplayResponseV5Schema = gameplayResponseSchema
   .extend({
     version: z.literal(AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION),
+    rollInterpretations: z.array(placedRollInterpretationSchema).max(DICE_LIMITS.slots),
     operations: z.array(
       z.discriminatedUnion('op', [
         operationSchema.options[0].extend({ introduction: knowledgeProvenanceV5Schema }).strict(),

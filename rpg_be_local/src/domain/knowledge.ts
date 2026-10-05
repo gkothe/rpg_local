@@ -258,8 +258,7 @@ export function applyKnowledgeChanges(
       validateKnowledgeEvidence(op, context);
       const now = new Date().toISOString();
       const current = op.op === 'update' ? records.find((r) => r.id === op.id) : undefined;
-      if (op.op === 'update' && (!current || current.revision !== op.expectedRevision))
-        invalid('Knowledge expected prior revision does not match');
+      if (op.op === 'update' && !current) invalid('Knowledge record not found');
       const modern = version === 5 ? (op as KnowledgeChangeV5) : undefined;
       const requestedVisibility =
         modern?.op === 'create'

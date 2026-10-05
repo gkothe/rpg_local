@@ -59,6 +59,7 @@ import { DiceService, gameplayDigest } from './dice.js';
 import {
   diceResponseSchema,
   validateRollInterpretations,
+  validateRollPlacement,
   type DiceResponse,
 } from '../domain/diceResponse.js';
 import { GM_RESPONSE_SCHEMA_VERSION } from '../domain/versions.js';
@@ -145,8 +146,6 @@ export class TurnService {
           throw conflict('Request ID was already used with different input; generate a new ID');
         return this.store.turn(campaignId, existing.rows[0].document.id, client);
       }
-      if (c.revision !== input.revision)
-        throw conflict('Campaign changed; refresh before submitting');
       await this.store.assertIdle(campaignId, client);
       const settings = input.settings ?? c.settings;
       const system = await new RuleStore(this.store).resolve(c, client);
@@ -234,8 +233,6 @@ export class TurnService {
       ![TurnStatus.Pending, TurnStatus.Running].includes(turn.status as TurnStatus)
     )
       throw new Problem(409, 'cancelled', 'Turn is no longer active');
-    if (campaign.revision !== t.context!.revision)
-      throw conflict('Campaign was edited during generation; output was discarded');
     if (t.ruleContext) await new RuleStore(this.store).guard(t.ruleContext, client);
     return { campaign, turn };
   }
@@ -270,8 +267,6 @@ export class TurnService {
           throw conflict('Request ID was reused with different retry input');
         return duplicate.rows[0].document as Turn;
       }
-      if (campaign.revision !== input.revision)
-        throw conflict('Campaign changed; refresh before retrying');
       await this.store.assertIdle(campaignId, client);
       const previous = await this.store.turn(campaignId, turnId, client, true);
       if (
@@ -304,17 +299,7 @@ export class TurnService {
         [previous.diceSessionId, campaignId]
       );
       const saved = session.rows[0];
-      if (
-        !saved ||
-        saved.imported ||
-        saved.context_digest !==
-          gameplayDigest(
-            campaign,
-            await this.store.activeTurns(campaignId, client),
-            previous.ruleContext,
-            saved.digest_version ?? LEGACY_GAMEPLAY_DIGEST_VERSION
-          )
-      )
+      if (!saved || saved.imported)
         throw conflict(
           'Game context changed or this archive session is non-executable; start a new action'
         );
@@ -379,21 +364,18 @@ export class TurnService {
   ): Promise<Turn> {
     let launch = false;
     const turn = await this.store.transaction(async (client) => {
-      const campaign = await this.store.campaign(campaignId, client, true);
+      await this.store.campaign(campaignId, client, true);
       const t = await this.store.turn(campaignId, turnId, client, true);
       const existing = await client.query(
         'SELECT candidate_digest FROM narrative_edit_requests WHERE turn_id=$1 AND request_id=$2',
         [turnId, input.requestId]
       );
       if (existing.rows.length) return t;
-      if (campaign.revision !== input.revision)
-        throw conflict('Campaign changed; refresh before resuming');
       if (!t.editingPending || !t.editingResume?.available)
         throw conflict(t.editingResume?.reason ?? 'No pending narrative editing is available');
       const repository = new NarrativeCandidateRepository(this.store.pool);
       const candidate = await repository.load(turnId, client);
-      if (!candidate || candidate.campaignRevision !== campaign.revision)
-        throw conflict('Saved narrative context changed');
+      if (!candidate) throw conflict('Saved narrative context changed');
       if (t.ruleContext) await new RuleStore(this.store).guard(t.ruleContext, client);
       t.status = TurnStatus.Running;
       t.error = null;
@@ -904,24 +886,27 @@ export class TurnService {
     if (!candidate || candidate.status === 'abandoned')
       throw conflict('No saved narrative is available for editing');
     const campaign = await this.store.campaign(t.campaignId);
+    const savedResponse = gameplayResponseV5Schema.parse(candidate.rawResponse);
     const narrative =
       candidate.editedNarrative ??
       (await humanizeNarrative(this.generator, candidate.settings, candidate.rawNarrative, {
         signal,
         trace,
+        preserveParagraphs: savedResponse.rollInterpretations.some(
+          (entry) => entry.afterParagraph !== undefined
+        ),
         protectedNames: [
           ...campaign.characters.map((character) => character.name),
-          ...gameplayResponseV5Schema
-            .parse(candidate.rawResponse)
-            .operations.flatMap((op) => (op.op === 'create' ? [op.character.name] : [])),
+          ...savedResponse.operations.flatMap((op) =>
+            op.op === 'create' ? [op.character.name] : []
+          ),
         ],
       }));
     await this.store.transaction(async (client) => {
       await this.lockedOwned(t, client);
       await repository.complete(t.id, ownerId, candidate.candidateDigest, narrative, client);
     });
-    const response = gameplayResponseV5Schema.parse(candidate.rawResponse);
-    await this.persistResponse(t, response, response, false, narrative);
+    await this.persistResponse(t, savedResponse, savedResponse, false, narrative);
     await traceEvent(trace, 'committed', { narrative, turnId: t.id });
     if (trace?.trace?.incomplete)
       await this.store.pool.query(
@@ -990,12 +975,16 @@ export class TurnService {
             'dice_replay',
             'Replay every original roll before completing the retry'
           );
-        atResponseField(['rollInterpretations'], () =>
+        atResponseField(['rollInterpretations'], () => {
           validateRollInterpretations(
             diceResponse!,
             records.map((record) => record.id)
-          )
-        );
+          );
+          validateRollPlacement({
+            narrative: editedNarrative ?? diceResponse!.narrative,
+            rollInterpretations: diceResponse!.rollInterpretations,
+          });
+        });
         turn.rollInterpretations = diceResponse.rollInterpretations;
         turn.rolls = records;
         if ('ruleCitations' in diceResponse && t.ruleContext?.kind === RuleSystemKind.Library) {
@@ -1125,10 +1114,9 @@ export class TurnService {
     this.aborts.get(id)?.abort();
     return turn;
   }
-  async undo(campaignId: string, revision: number): Promise<Campaign> {
+  async undo(campaignId: string, _revision: number): Promise<Campaign> {
     return this.store.transaction(async (client) => {
       const c = await this.store.campaign(campaignId, client, true);
-      if (c.revision !== revision) throw conflict('Campaign changed; refresh before undo');
       await this.store.assertIdle(c.id, client);
       const turns = await this.store.activeTurns(c.id, client);
       const last = turns.at(-1);

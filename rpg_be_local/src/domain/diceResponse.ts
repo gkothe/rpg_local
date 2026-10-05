@@ -30,6 +30,25 @@ export const diceResponseJsonSchema = z.toJSONSchema(diceResponseSchema);
 export type DiceResponse = z.infer<typeof diceResponseSchema>;
 export type RollInterpretation = z.infer<typeof rollInterpretationSchema>;
 
+// Stored turns can predate inline placement; versions 2–4 retain their frozen schema.
+export const placedRollInterpretationSchema = rollInterpretationSchema.extend({
+  afterParagraph: z.number().int().positive().optional(),
+});
+export type PlacedRollInterpretation = z.infer<typeof placedRollInterpretationSchema>;
+
+export function validateRollPlacement(response: {
+  narrative: string;
+  rollInterpretations: PlacedRollInterpretation[];
+}): void {
+  const count = response.narrative.trim().split(/\r?\n\s*\r?\n/).length;
+  if (response.rollInterpretations.some((entry) => (entry.afterParagraph ?? 0) > count))
+    throw new Problem(
+      502,
+      'dice_references',
+      'Roll afterParagraph must identify an existing narrative paragraph'
+    );
+}
+
 export function validateRollInterpretations<T extends Pick<DiceResponse, 'rollInterpretations'>>(
   response: T,
   rollIds: readonly string[]

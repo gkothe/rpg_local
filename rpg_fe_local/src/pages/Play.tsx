@@ -17,9 +17,8 @@ import CharacterSheet from '../features/characters/CharacterSheet';
 import SourceManager from '../features/sources/SourceManager';
 import Journal from '../features/journal/Journal';
 import { useTurn } from '../features/play/useTurn';
-import { NarratedText } from '../features/audio/NarratedText';
 import { Dictation } from '../features/audio/Dictation';
-import { DiceRolls } from '../features/play/DiceRolls';
+import { TurnNarrative } from '../features/play/TurnNarrative';
 import RuleSystemPicker from '../features/rules/RuleSystemPicker';
 import RuleEvidence from '../features/rules/RuleEvidence';
 const CHAT_BOTTOM_THRESHOLD_PX = 100;
@@ -307,13 +306,7 @@ export default function PlayPage() {
                       <time className="message-time" dateTime={t.completedAt || t.createdAt}>
                         {new Date(t.completedAt || t.createdAt).toLocaleString()}
                       </time>
-                      <NarratedText
-                        text={t.narrative ?? ''}
-                        readable={!!t.narrative && !t.undone && isCompleted(t, settings.data)}
-                      />
-                    </div>
-                    {showDebug && (
-                      <DiceRolls
+                      <TurnNarrative
                         turn={t}
                         characters={campaign.characters}
                         terminal={
@@ -321,8 +314,9 @@ export default function PlayPage() {
                             (option) => option.id === t.status
                           )?.terminal
                         }
+                        readable={!!t.narrative && !t.undone && isCompleted(t, settings.data)}
                       />
-                    )}
+                    </div>
                     {showDebug && (
                       <RuleEvidence
                         turn={t}

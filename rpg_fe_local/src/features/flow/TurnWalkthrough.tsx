@@ -102,7 +102,7 @@ export default function TurnWalkthrough({
             <option value="duplicate">Duplicate request</option>
             <option value="invalid">Invalid response</option>
             <option value="operational">Account, database, or file problem</option>
-            <option value="cancelled">Ownership / revision changed</option>
+            <option value="cancelled">Cancelled or ownership changed</option>
             <option value="interrupted">Interrupted process</option>
           </select>
         </label>

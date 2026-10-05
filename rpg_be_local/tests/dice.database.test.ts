@@ -342,10 +342,7 @@ test(
       await service.undo(campaign.id, 1);
       assert.deepEqual((await store.campaign(campaign.id)).state, {});
       assert.equal((await store.turn(campaign.id, completed.id)).rolls?.length, 2);
-      await assert.rejects(
-        service.retry(campaign.id, rejected.id, { revision: 2, requestId: randomUUID() }),
-        /context changed/
-      );
+      assert.equal((await store.turn(campaign.id, rejected.id)).diceRetry?.available, true);
       const library = new LibraryService(store);
       const archive = await library.export(campaign.id);
       assert.equal(archive.version, ARCHIVE_FORMAT_VERSION);

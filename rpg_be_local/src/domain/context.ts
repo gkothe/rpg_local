@@ -159,14 +159,7 @@ export function buildContext(
     pinnedRules: pinned,
     ...(sourceContext
       ? {
-          campaignSources: campaignSourceCatalog(frozenSources!, [
-            ...seed.spans,
-            ...pinned.flatMap((span) =>
-              span.start !== undefined && span.end !== undefined && span.name !== undefined
-                ? [{ ...span, start: span.start, end: span.end, name: span.name }]
-                : []
-            ),
-          ]),
+          campaignSources: [] as ReturnType<typeof campaignSourceCatalog>,
           campaignSourceSeeds: seed.spans,
         }
       : {}),
@@ -204,7 +197,6 @@ export function buildContext(
       continue;
     payload.rules.push(rule);
   }
-  const prompt = JSON.stringify(payload);
   const sourceSpans = envelope
     ? [...pinned, ...payload.rules, ...seed.spans].flatMap((span) => {
         const source = c.sources.find((s) => s.id === span.id && s.version === span.version);
@@ -222,6 +214,8 @@ export function buildContext(
         ];
       })
     : undefined;
+  if (sourceContext) base.campaignSources = campaignSourceCatalog(frozenSources!, sourceSpans);
+  const prompt = JSON.stringify(payload);
   return {
     ...(envelope
       ? { systemPrompt, promptContractVersion: sourceContext ? (5 as const) : (4 as const) }

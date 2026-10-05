@@ -689,10 +689,11 @@ hr {
 }
 
 .dice-rolls {
+  white-space: normal;
   margin-block: 1.5rem;
-  padding: 1rem;
-  border: 1px solid var(--line);
-  border-radius: 0.75rem;
+}
+.narrative-paragraph + .narrative-paragraph {
+  margin-top: 1.5em;
 }
 .dice-roll {
   padding-block: 0.5rem;

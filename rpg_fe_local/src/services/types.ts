@@ -168,6 +168,7 @@ export interface Turn {
   }[];
   rollInterpretations?: {
     rollId: string;
+    afterParagraph?: number;
     explanation: string;
     corrections?: { explanation: string }[];
   }[];

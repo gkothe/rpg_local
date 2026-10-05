@@ -57,7 +57,7 @@ The `rpg_be_local` application is a local-first, privacy-respecting Tabletop RPG
 │ 4. Cryptographic Mechanics: Randomness comes from OS crypto, not LLM   │
 │ 5. Verifiable Evidence: Citations require exact UTF-16 quote spans  │
 │ 6. Zero Silent Fallbacks: Failure is visible; no simulated mock turns  │
-│ 7. Strict Sequential I/O: Serialized tools, locks & revision checks  │
+│ 7. Strict Sequential I/O: Serialized tools, locks & expected values  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -429,7 +429,7 @@ Expired leases enable recovery while the server and PostgreSQL are available. Th
      SET lease_until = now() + (45 * interval '1 second')
      WHERE id = $1 AND owner = $2 AND status IN ('pending', 'running')
      ```
-   - If the database disconnects, ownership/lease checks fail, campaign revision diverges or the captured rule context changes, the heartbeat catches the error, records `heartbeatFailure = error`, and triggers `ctl.abort()`, propagating cancellation to the CLI process runner. Shutdown and database failure recording are asynchronous.
+   - If the database disconnects or ownership/lease checks fail, the heartbeat catches the error, records `heartbeatFailure = error`, and triggers `ctl.abort()`, propagating cancellation to the CLI process runner. Revision changes do not interrupt the attempt. Shutdown and database failure recording are asynchronous.
 3. **Store Recovery on Startup (`Store.recover`)**:
    Whenever the server boots or runs its recovery pass, any turns with status `pending` or `running` whose leases expired are updated atomically via PostgreSQL JSONB operations:
    ```sql
@@ -452,9 +452,9 @@ Expired leases enable recovery while the server and PostgreSQL are available. Th
    An eligible interrupted, failed or cancelled local dice turn can be retried (`POST /turns/:id/retry`). Upon retrieval, `Store.hydrateTurns` dynamically computes whether `diceRetry` is available without storing derived state in the database:
    - Verifies the session was not imported (`session.imported === false`).
    - Asserts no subsequent action has superseded this turn (`latest.rows[0].id === turn.id`).
-   - Asserts the rule system has not been modified (`outdatedRules === false`).
-   - Re-computes `gameplayDigest` from current state to verify that game context is identical (`session.context_digest === digest`).
-   - Eligibility is advisory; retry rechecks revision, idle status, latest attempt, rule identity and digest under locks. It creates a new Turn ID sharing the original dice session and frozen prompt. Previously rolled faces remain authoritative.
+   - Checks the selected rule-system identity exists and is resolved; changes to its revision are accepted.
+   - Revision and gameplay-digest changes do not block retry; expected mutation values still validate against current state.
+   - Eligibility is advisory; retry rechecks idle status, latest attempt and rule identity under locks. It creates a new Turn ID sharing the original dice session and frozen prompt. Previously rolled faces remain authoritative.
 
 ---
 
@@ -771,7 +771,7 @@ The database schema evolves through 8 deterministic SQL migrations (`migrationss
    ```sql
    CREATE UNIQUE INDEX one_active_turn ON turns(campaign_id) WHERE status IN ('pending', 'running');
    ```
-   Prevents multiple pending/running database turns per campaign. Locks, revisions and owner/lease checks are still needed; the index alone does not eliminate every race or prevent a stale subprocess from briefly running.
+   Prevents multiple pending/running database turns per campaign. Locks and owner/lease checks are still needed; the index alone does not eliminate every race or prevent a stale subprocess from briefly running.
 2. **Campaign-Rule Mirror Constraint**:
    ```sql
    ALTER TABLE campaigns ADD CONSTRAINT campaign_rule_mirror CHECK (
@@ -827,10 +827,10 @@ Implementation evidence: [ruleStore.ts](../../rpg_be_local/src/services/ruleStor
 - **Periodic Store Recovery Timer** (`server.ts`):
   - Runs `store.recover()` every **15,000ms (15 seconds)** to automatically sweep and mark any abandoned turns whose 45-second lease expired as `interrupted`.
 - **Rule Snapshot Cache** (`ruleStore.ts: snapshotCaches`):
-  - Uses a `WeakMap<Store, Map<string, { system: RuleSystem; bytes: number }>>`, keyed by captured identity/revision/hash/kind.
+  - Uses a `WeakMap<Store, Map<string, { system: RuleSystem; bytes: number }>>`, keyed by the current row identity/revision/hash/kind.
   - Caches up to **4 systems** or **64 MiB** of serialized JSON rule trees.
   - Frozen via `Object.freeze` to guarantee immutability.
-  - Authoritative database revision is always checked via `SELECT ... FOR SHARE` before returning a cached snapshot.
+  - The current database row is locked via `SELECT ... FOR SHARE`; its revision/hash selects fresh cache content without rejecting older turn metadata.
 - **Rule Search Cache** (`ruleLookup.ts: searchCaches`):
   - Retains at most 8 queries or 4096 candidate hits per rule system.
 - **Active Turn Abort Controllers** (`TurnService.aborts`):
@@ -919,7 +919,7 @@ To avoid flooding the model context, dynamic filtering occurs before prompt comp
        ({ notes: _notes, revision: _revision, ...character }) => character
      );
      ```
-     This excludes notes and character revision counters from the retry digest. Character PATCH still increments campaign revision and can abort an active turn; a later retry must supply current revision. Campaign-private notes use a separate `notesRevision`.
+     This excludes notes and character revision counters from the retry digest. Character PATCH still increments the informational campaign revision; revision changes do not abort an active turn or block retry. Campaign-private notes use a separate `notesRevision`.
 
 ---
 
@@ -1134,7 +1134,7 @@ Knowledge records do not exist as isolated strings; they form a rich semantic en
 - **The Creditor / Holder Link (`holderId: string | null`)**: Debts, oaths, bounties, promises, and legal contracts have an explicit _holder_ or _creditor_ (the character holding the leverage or obligation over others).
 - **Automatic Name Denormalization (`characterNames`, `holderName`)**: To prevent repetitive join lookups and ensure clean LLM prompt serialization, `applyKnowledgeChanges()` automatically resolves IDs against campaign characters, populating `characterNames: Record<string, string>` and `holderName: string`.
 - **Optimistic Locking on Model Mutations (`expectedRevision`)**:
-  When the model updates an existing knowledge record via `op: 'update'`, it must supply `expectedRevision: number`. If `current.revision !== op.expectedRevision`, the backend rejects the proposal (`422 knowledge_invalid: 'Knowledge expected prior revision does not match'`), triggering automatic response repair.
+  When the model updates an existing knowledge record via `op: 'update'`, `expectedRevision` remains in the wire contract for compatibility but does not reject the update. The record must exist; changes validate and increment its current audit revision.
 
 ---
 
@@ -1192,6 +1192,7 @@ When validating an undo request, `undoSnapshot()` checks for manual human edits 
 
 Implementation evidence: [dice.ts](../../rpg_be_local/src/domain/dice.ts), [dice.ts](../../rpg_be_local/src/services/dice.ts), [diceResponse.ts](../../rpg_be_local/src/domain/diceResponse.ts), [diceContext.ts](../../rpg_be_local/src/domain/diceContext.ts), [gameplayMcp.ts](../../rpg_be_local/src/providers/gameplayMcp.ts).
 
+- **Inline Roll Display**: Version-5 interpretations can identify their triggering narrative paragraph with `afterParagraph` (1-based, blank-line-separated). The backend validates the index and the narrative editor preserves paragraph count/order. Play inserts trusted results at that paragraph; historical unplaced rolls append to the same GM message. Placement is display metadata and does not add an AI call.
 - **Trusted Structured Roll Audit**: `roll_dice` supplies persisted faces; final roll IDs must match saved records. The prompt forbids invented randomness, but the backend does not parse narrative prose or verify arithmetic, required roll coverage or rules interpretation. A fabricated roll stated only in prose is not necessarily rejected.
 - **Pre-Declaration & Blind Draw**: The model must declare its `reason` (e.g. "Attack roll vs Goblin AC 15") and `declaration` before receiving the random numbers.
 - **Ordered Replay Verification**: On a retry, the model cannot change its previous rolls or request different dice. It must consume existing recorded rolls in sequential slot order ($0, 1, 2, \dots$) before requesting any new rolls.
@@ -1317,7 +1318,7 @@ For new actions, compaction is considered when uncovered completed history excee
 5. **Reversibility**:
    If an undo rolls back past a compacted turn, the milestone is invalidated (`valid: false`) and prior milestones are restored as described above.
 
-Manual memory (`POST /api/campaigns/:id/memory`) is a separate reviewed path: it requires `confirm: true`, an idle campaign, the current revision, a non-empty exact consecutive prefix of active completed turn IDs, and non-empty memory text. The memory budget is a soft generation target: saved and imported checkpoints are preserved even above it. Neither automatic nor manual memory mutates canonical character state or knowledge records.
+Manual memory (`POST /api/campaigns/:id/memory`) is a separate reviewed path: it requires `confirm: true`, an idle campaign, a non-empty exact consecutive prefix of active completed turn IDs, and non-empty memory text. The memory budget is a soft generation target: saved and imported checkpoints are preserved even above it. Neither automatic nor manual memory mutates canonical character state or knowledge records.
 
 ---
 
@@ -1346,8 +1347,7 @@ not call the turn/tool APIs, query campaign data, change PostgreSQL or consume A
 application still performs its LAN status request and enforces pairing. The backend fixture test
 checks the illustrated prompt variants, instruction envelopes, proposal application, knowledge
 recall and citation evidence against real contracts; it does not establish live provider behavior.
-Simulating a stale `expected` value illustrates rejection. A real concurrent edit may instead
-cause revision conflict/cancellation and is not automatically repaired.
+Simulating a stale `expected` value illustrates rejection. A real concurrent edit can still conflict with an expected mutation value, but an older revision number alone never rejects work.
 
 **Implementation evidence:** [Flow route](../../rpg_fe_local/src/pages/Flow.tsx),
 [educational content](../../rpg_fe_local/src/features/flow/content.ts),
@@ -1366,9 +1366,9 @@ A separate ordinary CLI invocation receives the whole final narrative, a fixed e
 
 Gameplay response repair and narrative repair are separate loops. A malformed edit can be corrected automatically; quota, cancellation or unavailable-provider failures stop rather than retry indefinitely. There is no original-narrative fallback. An editing failure keeps the validated candidate private, preserves the saved dice and blocks another action until the player resumes editing or cancels that pending turn.
 
-`POST /api/campaigns/:id/turns/:turnId/resume-editing` accepts `{revision,requestId}` and returns 202 for the **same logical turn**. The persisted request identity handles lost acknowledgements. Resume claims an execution lease, checks the latest campaign/rule context and reuses an already saved completed edit after a crash. It never calls the GM again, resets dice slots or draws replacement faces. Cancellation abandons the candidate and releases the pending-stage block. Changed context requires cancelling the outdated pending candidate; it cannot silently apply an old proposal.
+`POST /api/campaigns/:id/turns/:turnId/resume-editing` accepts `{revision,requestId}` and returns 202 for the **same logical turn**. The persisted request identity handles lost acknowledgements. Resume claims an execution lease and reuses an already saved completed edit after a crash. Revision changes do not prevent resume. It never calls the GM again, resets dice slots or draws replacement faces. Cancellation abandons the candidate and releases the pending-stage block. Expected mutation values still validate against current state before applying the saved proposal.
 
-After editing succeeds, ownership, revision, current rules and proposed changes are checked again. The edited narrative, campaign changes and undo snapshot commit atomically. No database transaction is held open while either CLI runs. Historical v1–v4 retries retain their saved contracts and behavior.
+After editing succeeds, ownership and proposed changes are checked again. Rule lookups use current available system rows; revisions are audit metadata, not blocking checks. The edited narrative, campaign changes and undo snapshot commit atomically. No database transaction is held open while either CLI runs. Historical v1–v4 retries retain their saved contracts and behavior.
 
 Implementation: [turns.ts](../../rpg_be_local/src/services/turns.ts), [narrativeHumanizer.ts](../../rpg_be_local/src/services/narrativeHumanizer.ts), [editor prompt and checks](../../rpg_be_local/src/domain/narrativeHumanizer.ts), [useTurn.ts](../../rpg_fe_local/src/features/play/useTurn.ts).
 
@@ -1391,7 +1391,7 @@ Logs retain the `YYYYMMdd__HHmmss__{action}` prefix, with collision-safe suffixe
 
 ### 4.6 Campaign source reachability, justified changes and private GM continuity
 
-Every v5 prompt includes a catalog of confirmed campaign sources with a section index, Markdown heading labels (or Section N), and `supplied` flags for complete sections already included in mandatory seeds or pins. Chunk boundaries and original text stay unchanged; a heading may carry into later chunks. Optional selected spans are also recognized by the lookup engine. An opening action means there are no completed non-undone turns; it does not depend on the player typing a particular word. Deterministic first sections seed campaign preparation, while character-purpose documents are excluded from opening preparation seeds. Retrieval targets guide optional selection, not a hard rejection. Selection diagnostics explain no sources, no keyword match or optional omissions; all catalogued documents remain reachable through tools.
+Every v5 prompt includes a catalog of confirmed campaign sources with a section index, Markdown heading labels (or Section N), and `supplied` flags for complete sections already included in mandatory seeds, pins or retrieved spans. The catalog and lookup engine use the same final supplied spans; partially supplied sections remain false. Chunk boundaries and original text stay unchanged; a heading may carry into later chunks. An opening action means there are no completed non-undone turns; it does not depend on the player typing a particular word. Deterministic first sections seed campaign preparation, while character-purpose documents are excluded from opening preparation seeds. Retrieval targets guide optional selection, not a hard rejection. Selection diagnostics explain no sources, no keyword match or optional omissions; all catalogued documents remain reachable through tools.
 
 `campaign_sources_search` searches the frozen originals by query, with an optional source filter and query-scoped cursor. Ranking uses distinct whole tokens, suppresses common English/Portuguese navigation words when meaningful terms exist, and rewards contiguous phrases. All-common-word queries retain a whole-token fallback. Snippets center on matching terms and keep original Unicode offsets, rather than locating the first common word. Search remains lexical and may need a different query. Results include section titles and `alreadySupplied`. `campaign_sources_get` reads `{sourceId,version,sectionIndex}` and returns a persisted receipt ID plus `{id,version,name,text,start,end}`. Offsets are UTF-16 indices in the original text. These sources describe campaign/character material; published rulebooks remain the authority for covered mechanics through the existing rule tools. Bootstrap and tool-read spans both support provenance validation. A section is already supplied only when an exact original span covers it completely; snippets alone do not count. Each lookup starts with actual context spans, without loading prior-attempt receipts. After successful transaction COMMIT, delivered get text (including stable receipt replay) becomes supplied in that execution. Repeated gets still return complete originals and their stored payloads never change. Guidance encourages index navigation, search when uncertain, original-text reads and reuse; no tool-call cap is added.
 

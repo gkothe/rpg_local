@@ -56,7 +56,7 @@ export default function RuleSystemPicker({
     <section className="stack rule-system-selection" aria-label="Rule system selection">
       <Field
         label="System rules"
-        hint="The next new action uses the latest published instructions and books. An update ends an older attempt and blocks its retry."
+        hint="New actions use current instructions and books. Rule lookups use the current available books; updates do not interrupt an attempt or block retry."
       >
         <select
           aria-label="System rules"

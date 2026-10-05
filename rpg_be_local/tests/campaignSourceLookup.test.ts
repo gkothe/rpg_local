@@ -150,12 +150,19 @@ test('a complete supplied context span avoids redundant reads; partial context d
     );
   }
 });
-test('cancelled, stale, expired and foreign-owner reads cannot persist or reveal source text', async () => {
-  for (const kind of ['cancel', 'revision', 'lease', 'owner', 'prompt'] as const) {
+test('campaign revision changes do not block source reads', async () => {
+  const f = fixture();
+  f.campaign.revision++;
+  const result = await f.lookup.read(f.turn, CAMPAIGN_SOURCE_GET_TOOL_NAME, f.args, 'revised');
+  assert.ok(result.sourceSpan);
+  assert.equal(f.reads.size, 1);
+});
+
+test('cancelled, expired and foreign-owner reads cannot persist or reveal source text', async () => {
+  for (const kind of ['cancel', 'lease', 'owner', 'prompt'] as const) {
     const f = fixture();
     const signal = new AbortController();
     if (kind === 'cancel') signal.abort();
-    if (kind === 'revision') f.campaign.revision++;
     if (kind === 'lease') f.row.lease_until = new Date(0).toISOString();
     if (kind === 'owner') f.row.owner = randomUUID();
     if (kind === 'prompt') f.row.document.context!.prompt = 'different';

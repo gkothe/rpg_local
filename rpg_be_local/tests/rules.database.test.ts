@@ -55,7 +55,7 @@ after(async () => {
   await store.close();
 });
 test(
-  'revision cache shares immutable snapshots across registry stores and rejects stale heads before reuse',
+  'revision cache shares current immutable rows and refreshes after edits',
   { skip: !enabled },
   async () => {
     const library = new RuleStore(store);
@@ -74,10 +74,8 @@ test(
       ...ruleContent(current),
       instructions: 'New authoritative instructions',
     }));
-    await assert.rejects(
-      store.transaction((client) => library.guard(created, client)),
-      /changed/
-    );
+    const fromOldContext = await store.transaction((client) => library.guard(created, client));
+    assert.equal(fromOldContext.instructions, 'New authoritative instructions');
     const latest = await store.transaction((client) => library.guard(changed, client));
     assert.notEqual(latest, first);
     assert.equal(latest.instructions, 'New authoritative instructions');
@@ -228,7 +226,7 @@ function bookFiles(slug: string, body: string): RuleUpload[] {
 }
 
 test(
-  'publication racing session creation or a dice draw rejects under the shared rule lock before any new session/face',
+  'publication racing session creation or a dice draw continues with the current rule row',
   { skip: !enabled },
   async () => {
     const rules = new RuleStore(store);
@@ -289,7 +287,7 @@ test(
                 declaration: 'No modifiers',
                 groups: [{ label: 'Original', sides: 6, count: 1 }],
               });
-        const rejected = assert.rejects(pending, /Rule system changed/);
+        const completed = pending;
         let waiting = false;
         for (let index = 0; index < 100 && !waiting; index++) {
           waiting = (
@@ -314,7 +312,7 @@ test(
           [head.systemId, changed.instructions, ruleContentHash(changed)]
         );
         await publisher.query('COMMIT');
-        await rejected;
+        await completed;
         assert.equal(
           (
             await store.pool.query(
@@ -322,7 +320,7 @@ test(
               [campaign.id]
             )
           ).rows[0].count,
-          0
+          mode === 'roll' ? 1 : 0
         );
         assert.equal(
           (
@@ -331,7 +329,7 @@ test(
               [campaign.id]
             )
           ).rows[0].count,
-          mode === 'roll' ? 1 : 0
+          1
         );
         if (mode === 'roll')
           assert.equal(
@@ -340,7 +338,7 @@ test(
                 turn.id,
               ])
             ).rows[0].requests,
-            0
+            1
           );
       } finally {
         await publisher.query('ROLLBACK');
@@ -428,7 +426,7 @@ test(
       ...system,
       instructions: 'Changed default instructions',
     }));
-    await assert.rejects(rules.read(turn, 'rules_map', {}, 'map-first', lookup), /changed/);
+    assert.equal((await rules.read(turn, 'rules_map', {}, 'map-first', lookup)).id, first.id);
     await store.pool.query('UPDATE turns SET status=$2 WHERE id=$1', [
       turn.id,
       TurnStatus.Cancelled,
@@ -613,13 +611,15 @@ test(
         bookFiles('book-a', 'Stale')
       );
       await library.instructions(head.systemId, head.revision, 'Updated instructions');
-      await assert.rejects(
-        library.confirm(head.systemId, {
-          revision: head.revision,
-          requestId: randomUUID(),
-          previewId: stale.previewId,
-        }),
-        /changed/
+      await library.confirm(head.systemId, {
+        revision: 0,
+        requestId: randomUUID(),
+        previewId: stale.previewId,
+      });
+      assert.equal((await rules.get(head.systemId)).instructions, 'Updated instructions');
+      assert.equal(
+        (await rules.get(head.systemId)).core_rules['book-a']!.children.check!.text,
+        'Stale'
       );
     } finally {
       await previews.close();
@@ -707,12 +707,7 @@ test(
       restored.revision,
       'Changed local instructions'
     );
-    await assert.rejects(
-      backups.confirm({ ...old, requestId: randomUUID(), replace: true }),
-      /changed after/
-    );
-    const current = await backups.preview(Buffer.from(JSON.stringify(copied)));
-    const replaced = await backups.confirm({ ...current, requestId: randomUUID(), replace: true });
+    const replaced = await backups.confirm({ ...old, requestId: randomUUID(), replace: true });
     assert.equal(replaced.revision, edited.revision + 1);
     assert.equal(replaced.contentHash, restored.contentHash);
     const identical = await backups.preview(Buffer.from(JSON.stringify(copied)));
@@ -1016,10 +1011,11 @@ test(
       campaigns.bindRules(campaign.id, { ...identity, systemId: null }),
       /identity reused/
     );
-    await assert.rejects(
-      campaigns.bindRules(campaign.id, { ...identity, requestId: randomUUID() }),
-      /Campaign changed/
-    );
+    const rebound = await campaigns.bindRules(campaign.id, {
+      ...identity,
+      requestId: randomUUID(),
+    });
+    assert.equal(rebound.ruleSystemId, published.systemId);
     const selected = await store.campaign(campaign.id);
     assert.deepEqual(selected.state, campaign.state);
     assert.deepEqual(selected.memory, campaign.memory);

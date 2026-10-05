@@ -4,7 +4,7 @@ Read `../CLAUDE.md`, `../AGENTS.md` and `../docs/documentation/api-contract.md` 
 
 - Node/TypeScript ESM with compiled `.js` import extensions, Express and PostgreSQL. Keep transport routing thin and domain behavior in services/modules.
 - Validate every public input and structured CLI result. Use problem-detail errors; never return raw SQL, credentials or arbitrary internal exception objects.
-- Parameterize SQL; perform revision checks and writes under database locks. Run external CLI, extraction, transcription and network work outside transactions.
+- Parameterize SQL; perform writes and expected-value checks under database locks. Run external CLI, extraction, transcription and network work outside transactions.
 - Applied SQL migrations are immutable. Use a separately configured isolated local database for integration tests; never fall back to an existing production database.
 - Serve canonical options, labels, defaults, ordering and capabilities from backend constants. Contract tests verify advertised choices and defaults.
 - CLI availability is separate from verified isolation and model configuration. Unsupported adapters fail closed. Never read another app's provider tokens or silently simulate a game turn.

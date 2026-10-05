@@ -38,11 +38,9 @@ export function bindResponseCitations(
         read.turnId !== context.turnId ||
         read.tool !== 'rules_get' ||
         read.context.systemId !== captured.systemId ||
-        read.context.revision !== captured.revision ||
-        read.context.contentHash !== captured.contentHash ||
         citation.systemId !== captured.systemId ||
-        citation.revision !== captured.revision ||
-        citation.contentHash !== captured.contentHash ||
+        citation.revision !== read.context.revision ||
+        citation.contentHash !== read.context.contentHash ||
         read.payload.view !== 'text' ||
         read.payload.structural ||
         read.payload.path !== citation.path ||

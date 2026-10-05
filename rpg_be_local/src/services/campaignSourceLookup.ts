@@ -25,7 +25,7 @@ export class CampaignSourceLookup {
     signal?: AbortSignal
   ): Promise<Record<string, unknown>> {
     const payload = await this.store.transaction(async (client) => {
-      const campaign = await this.store.campaign(turn.campaignId, client, true);
+      await this.store.campaign(turn.campaignId, client, true);
       const active = await client.query(
         'SELECT owner,status,lease_until,document FROM turns WHERE id=$1 AND campaign_id=$2 FOR UPDATE',
         [turn.id, turn.campaignId]
@@ -39,10 +39,7 @@ export class CampaignSourceLookup {
         new Date(row.lease_until).getTime() <= Date.now()
       )
         throw new Problem(409, 'campaign_source_inactive', 'Source attempt is no longer active');
-      if (
-        campaign.revision !== turn.context?.revision ||
-        row.document.context?.prompt !== turn.context?.prompt
-      )
+      if (row.document.context?.prompt !== turn.context?.prompt)
         throw conflict('Campaign changed during source lookup');
       if (!turn.diceSessionId)
         throw new Problem(

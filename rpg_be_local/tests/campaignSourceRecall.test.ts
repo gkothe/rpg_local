@@ -14,7 +14,58 @@ import {
   CAMPAIGN_SOURCE_SEARCH_TOOL_NAME,
 } from '../src/domain/campaignSourceRecall.js';
 import { buildContext } from '../src/domain/context.js';
+import { sourceSections } from '../src/domain/sourceSections.js';
 import { GameplayTools } from '../src/providers/gameplayTools.js';
+
+test('v5 catalog and lookup agree on retrieved, partial, pinned and seeded originals', () => {
+  const c = newCampaign({ name: 'Supplied context' });
+  const retrieved = textSource('Retrieved', 'background '.repeat(900));
+  const partial = textSource('Partial', 'A partial original remains unread in full.');
+  const pinned = textSource('Pinned', 'A complete pinned original.');
+  const seeded = textSource('Seeded', 'Opening campaign preparation.');
+  retrieved.purpose = partial.purpose = pinned.purpose = SourcePurpose.Character;
+  seeded.purpose = SourcePurpose.Campaign;
+  c.sources = [retrieved, partial, pinned, seeded];
+  c.pinnedSourceIds = [pinned.id];
+  const section = sourceSections(retrieved)[0]!;
+  const rules = [
+    { ...section, id: retrieved.id, name: retrieved.name },
+    {
+      id: partial.id,
+      version: partial.version,
+      name: partial.name,
+      start: 0,
+      end: 9,
+      text: partial.text.slice(0, 9),
+    },
+  ];
+  const context = buildContext(c, [], 'look', rules, 1, true, undefined, 5);
+  const catalog = JSON.parse(context.prompt).mandatory.campaignSources as ReturnType<
+    typeof campaignSourceCatalog
+  >;
+  const lookup = createCampaignSourceRecall(context.frozenSources!, context.sourceSpans);
+  assert.deepEqual(JSON.parse(context.prompt).rules, rules);
+  assert.deepEqual(
+    catalog.map((source) => source.sections.map((entry) => entry.supplied)),
+    [[true, false, false], [false], [true], [true]]
+  );
+  for (const source of catalog) {
+    for (const entry of source.sections) {
+      assert.equal(
+        lookup.get(
+          { sourceId: source.id, version: source.version, sectionIndex: entry.sectionIndex },
+          randomUUID()
+        ).alreadySupplied,
+        entry.supplied
+      );
+    }
+  }
+  const search = lookup.search({ query: 'background' }).entries as {
+    sectionIndex: number;
+    alreadySupplied: boolean;
+  }[];
+  assert.equal(search.find((entry) => entry.sectionIndex === 0)!.alreadySupplied, true);
+});
 
 test('meaningful whole tokens outrank common words and snippets locate the requested phrase', () => {
   const c = newCampaign({ name: 'Relevance' });

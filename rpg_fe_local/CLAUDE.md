@@ -3,9 +3,9 @@
 Read `../CLAUDE.md`, `../AGENTS.md` and the backend-owned `../docs/documentation/api-contract.md`.
 
 - React/TypeScript/Vite, relative `/api`; development proxy uses loopback port 4100. No application auth or cloud API credentials.
-- Backend owns domain options, labels, defaults, capabilities and revision checks. Client workflow states are separate.
+- Backend owns domain options, labels, defaults and capabilities. Revision fields are informational; older revision numbers do not block saves. Client workflow states are separate.
 - Sequential app I/O. Turn submissions use a synchronous single-flight guard, stable request identity for uncertain retries, and ignore acknowledgements from an obsolete campaign view.
-- Keep drafts separate from refreshed canonical campaign data. A save must use the revision that the edited data came from, not silently borrow a newer revision.
+- Keep drafts separate from refreshed canonical campaign data. Save only the fields the user edited against the current row.
 - Imported source/GM content is rendered as text. No unsanitized HTML. FormData never receives a manually set Content-Type.
 - Microphone access is explicit. Cancellation/unmount discards audio and stops tracks; confirmed transcript goes into the editable composer, never directly into a game turn.
 - Read-aloud offers only `localService` browser voices; no AI call, autoplay or cloud fallback.

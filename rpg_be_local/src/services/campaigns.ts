@@ -44,8 +44,6 @@ export class CampaignService {
           throw conflict('Rule binding request identity reused with changed input');
         return prior.rows[0].result;
       }
-      if (campaign.revision !== input.revision)
-        throw conflict('Campaign changed; refresh before selecting rules');
       await this.store.assertIdle(id, client);
       if (resolving && !campaign.ruleResolution)
         throw conflict('This campaign has no unresolved rule reference');
@@ -106,10 +104,9 @@ export class CampaignService {
       Object.assign(c, patch);
     });
   }
-  async delete(id: string, revision: number) {
+  async delete(id: string, _revision: number) {
     await this.store.transaction(async (client) => {
-      const c = await this.store.campaign(id, client, true);
-      if (c.revision !== revision) throw conflict('Campaign changed');
+      await this.store.campaign(id, client, true);
       await this.store.assertIdle(id, client);
       await client.query('DELETE FROM campaigns WHERE id=$1', [id]);
     });
@@ -117,8 +114,6 @@ export class CampaignService {
   async notes(id: string, input: { notes: string; notesRevision: number }) {
     return this.store.transaction(async (client) => {
       const c = await this.store.campaign(id, client, true);
-      if (c.notesRevision !== input.notesRevision)
-        throw conflict('Notes changed; refresh before saving');
       c.notes = input.notes;
       c.notesRevision++;
       await this.store.save(c, client);

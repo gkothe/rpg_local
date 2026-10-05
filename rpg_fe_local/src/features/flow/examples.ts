@@ -51,6 +51,10 @@ export const proposal = {
 export const proposalV5 = {
   ...proposal,
   version: 5 as const,
+  rollInterpretations: proposal.rollInterpretations.map((entry) => ({
+    ...entry,
+    afterParagraph: 1,
+  })),
   operationExplanations: [
     {
       operationIndex: 0,

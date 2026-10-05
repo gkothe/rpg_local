@@ -36,7 +36,7 @@ after(async () => {
 });
 
 test(
-  'a publication during no-tools compaction preserves the captured head and rejects memory/rebuilt gameplay before session creation',
+  'an instruction publication during compaction permits memory and gameplay using current rules',
   { skip: !enabled },
   async () => {
     const rules = new RuleStore(store);
@@ -80,7 +80,12 @@ test(
       },
       generateGameplay: async () => {
         gameplay++;
-        throw new Error('Outdated rebuilt gameplay must never run');
+        return {
+          version: 2,
+          narrative: 'Current gameplay completes.',
+          operations: [],
+          rollInterpretations: [],
+        };
       },
     });
     const submitted = await service.submit(campaign.id, {
@@ -91,19 +96,19 @@ test(
     let terminal: Turn | undefined;
     for (let index = 0; index < 400; index++) {
       const turn = await store.turn(campaign.id, submitted.id);
-      if (turn.status === TurnStatus.Failed) {
+      if (![TurnStatus.Running, TurnStatus.Pending].includes(turn.status as TurnStatus)) {
         terminal = turn;
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    assert.ok(terminal, 'Outdated compaction must finish as a failed attempt');
-    assert.match(terminal.error!, /Rule system changed/);
+    assert.ok(terminal);
+    assert.equal(terminal.status, TurnStatus.Completed, terminal.error ?? 'Expected completion');
     assert.equal(terminal.ruleContext?.revision, head.revision);
-    assert.equal(terminal.context?.ruleContext?.revision, head.revision);
+    assert.equal(terminal.context?.ruleContext?.revision, head.revision + 1);
     assert.equal(compactions, 1);
-    assert.equal(gameplay, 0);
-    assert.equal((await store.campaign(campaign.id)).memory, null);
+    assert.equal(gameplay, 1);
+    assert.ok((await store.campaign(campaign.id)).memory);
     assert.equal(
       (
         await store.pool.query(
@@ -111,12 +116,12 @@ test(
           [campaign.id]
         )
       ).rows[0].count,
-      0
+      1
     );
   }
 );
 test(
-  'book gameplay persists rule→dice→rule evidence, rejects late changed-head final/retry and accepts a new action at the latest head',
+  'book gameplay persists evidence, survives instruction edits and uses latest rules for a new action',
   { skip: !enabled },
   async () => {
     const rules = new RuleStore(store);
@@ -162,10 +167,14 @@ test(
       generateBookGameplay: async (_settings, prompt, _schema, dispatch) => {
         assert.ok(prompt.includes('ruleCitations'));
         assert.equal(prompt.includes('Original authority.'), false);
-        const read = await dispatch(
+        let read = await dispatch(
           'rules_get',
           { path: 'core_rules.original.check', view: 'text' },
           'read-before'
+        );
+        assert.equal(
+          (read as { text: string }).text,
+          mode === 'change' ? 'Original authority.' : 'Updated authority.'
         );
         const rolled = await dispatch(
           'roll_dice',
@@ -187,7 +196,25 @@ test(
           await rules.publish(active.systemId, active.revision, (current) => ({
             ...ruleContent(current),
             instructions: 'Updated B instructions',
+            core_rules: {
+              ...current.core_rules,
+              original: {
+                ...current.core_rules.original!,
+                children: {
+                  check: {
+                    ...current.core_rules.original!.children.check!,
+                    text: 'Updated authority.',
+                  },
+                },
+              },
+            },
           }));
+        read = await dispatch(
+          'rules_get',
+          { path: 'core_rules.original.check', view: 'text' },
+          'read-current'
+        );
+        assert.equal((read as { text: string }).text, 'Updated authority.');
         const record = rolled as { rollId: string };
         const receipt = read as {
           receipt: string;
@@ -200,7 +227,13 @@ test(
         return {
           version: 3,
           narrative: 'Complete original narration',
-          operations: [{ op: 'state', expected: {}, value: { result: 'applied' } }],
+          operations: [
+            {
+              op: 'state',
+              expected: mode === 'change' ? {} : { result: 'applied' },
+              value: { result: 'applied' },
+            },
+          ],
           rollInterpretations: [
             { rollId: record.rollId, explanation: 'Original interpretation of genuine dice' },
           ],
@@ -209,9 +242,9 @@ test(
               receiptId: receipt.receipt,
               path: receipt.path,
               source: receipt.source,
-              quote: 'Original authority.',
+              quote: receipt.text,
               start: 0,
-              end: 19,
+              end: receipt.text.length,
               systemId: active.systemId,
               revision: receipt.revision,
               contentHash: receipt.contentHash,
@@ -241,16 +274,12 @@ test(
         })
       ).id
     );
-    assert.equal(first.status, TurnStatus.Failed);
-    assert.match(first.error!, /Rule system changed/);
-    assert.deepEqual((await store.campaign(campaign.id)).state, {});
+    assert.equal(first.status, TurnStatus.Completed, first.error ?? 'Expected completion');
+    assert.deepEqual((await store.campaign(campaign.id)).state, { result: 'applied' });
+    assert.equal(first.ruleCitations![0]!.revision, first.ruleContext!.revision + 1);
     assert.equal(first.rolls?.length, 1);
-    assert.equal(first.ruleReads?.length, 2);
-    assert.equal(first.diceRetry?.available, false);
-    await assert.rejects(
-      service.retry(campaign.id, first.id, { revision: 0, requestId: randomUUID() }),
-      /Rule system changed|Game context changed/
-    );
+    assert.equal(first.ruleReads?.length, 3);
+
     const face = first.rolls![0]!.groups[0]!.faces[0];
     mode = 'valid';
     const next = await finish(
@@ -265,7 +294,7 @@ test(
     assert.equal(next.status, TurnStatus.Completed, next.error ?? 'Expected a complete final');
     assert.equal(next.ruleContext?.revision, first.ruleContext!.revision + 1);
     assert.equal(next.ruleCitations?.length, 1);
-    assert.equal(next.ruleReads?.length, 2);
+    assert.equal(next.ruleReads?.length, 3);
     assert.equal((await store.turn(campaign.id, first.id)).rolls![0]!.groups[0]!.faces[0], face);
     assert.deepEqual((await store.campaign(campaign.id)).state, { result: 'applied' });
   }

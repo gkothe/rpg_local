@@ -1,5 +1,5 @@
 import { Store } from '../store.js';
-import { Problem, conflict } from '../errors.js';
+import { Problem } from '../errors.js';
 import type { Generator } from '../providers/service.js';
 import { parseCharacterSource } from './characterParser.js';
 import { sourceSections } from '../domain/sourceSections.js';
@@ -17,18 +17,14 @@ export class SourceLibrary {
     generator: Generator
   ) {
     const c = await this.store.campaign(id);
-    if (c.revision !== input.revision) throw conflict('Campaign changed');
     const source = c.sources.find(
       (s) => s.id === input.sourceId && s.status === SourceStatus.Confirmed
     );
     if (!source)
       throw new Problem(422, 'source_review', 'Confirm extracted text before AI character parsing');
     const draft = await parseCharacterSource(source.text, c.settings, generator, async () => {
-      if ((await this.store.campaign(id)).revision !== input.revision)
-        throw conflict('Campaign changed during parsing; retry before confirming');
+      await this.store.campaign(id);
     });
-    if ((await this.store.campaign(id)).revision !== input.revision)
-      throw conflict('Campaign changed during parsing; retry before confirming');
     return { draft };
   }
   add(id: string, revision: number, source: Source, original?: Buffer) {

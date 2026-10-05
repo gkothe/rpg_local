@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { generateAntigravityMcpBook } from '../src/providers/antigravityMcpBook.js';
 import { gameplayToolDefinitions } from '../src/providers/gameplayTools.js';
 import { withResponseRetries } from '../src/domain/responseRetry.js';
 import { diceInputSchema } from '../src/domain/dice.js';
+import { PromptTrace } from '../src/providers/promptLog.js';
 import {
   antigravityDiceEnvironment,
   generateAntigravityDice,
@@ -41,6 +42,10 @@ else if(args.includes('/hooks')) {
     if(process.env.RPG_TEST_AGY_MODE==='direct-owned') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:2,state:'ACTIVE',tool_name:'rules_search',tool_info:{name:'rules_search',parameters:{query:'original rules'}}}}));
     if(process.env.RPG_TEST_AGY_MODE==='direct-foreign') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:2,state:'ACTIVE',tool_name:'shell',tool_info:{name:'shell',parameters:{command:'forbidden'}}}}));
     const mode=process.env.RPG_TEST_AGY_MODE;
+    if(['zero-turns','missing-turns'].includes(mode)) {
+      console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:mode==='zero-turns'?0:undefined,response:'PRIVATE_RESPONSE'}}));
+      return;
+    }
     if(['malformed-arguments','array-arguments','null-arguments','orphan-envelope'].includes(mode)) {
       const argumentsValue=mode==='malformed-arguments' ? '{broken' : mode==='array-arguments' ? [] : mode==='null-arguments' ? null : {};
       console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:99,state:mode==='orphan-envelope'?'DONE':'ACTIVE',tool_name:'call_mcp_tool',tool_info:{parameters:{ServerName:'local_rpg',ToolName:'roll_dice',Arguments:argumentsValue}}}}));

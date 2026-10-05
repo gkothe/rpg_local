@@ -13,9 +13,38 @@ import type { GMResponse, Turn, Campaign } from '../src/domain/types.js';
 import { Problem } from '../src/errors.js';
 import { SourceLibrary } from '../src/services/sourceLibrary.js';
 import { textSource } from '../src/services/sources.js';
+import { CampaignService } from '../src/services/campaigns.js';
 const enabled = !!process.env.RPG_TEST_DATABASE_URL && process.env.NODE_ENV === 'test';
 let store: Store;
 const fixtureSchema = `basic_fixture_${randomUUID().replaceAll('-', '')}`;
+test(
+  'campaign saves and notes accept older revision metadata and preserve unrelated current fields',
+  { skip: !enabled },
+  async () => {
+    const campaign = newCampaign({ name: 'Revision policy' });
+    await store.insert(campaign);
+    const service = new CampaignService(store, {
+      capacity: async () => 16000,
+      generate: async () => {
+        throw new Error('This save must not call AI');
+      },
+    });
+    try {
+      await service.patch(campaign.id, 0, { description: 'Latest description' });
+      const saved = await service.patch(campaign.id, 0, { name: 'Updated with older revision' });
+      assert.equal(saved.description, 'Latest description');
+      assert.equal(saved.name, 'Updated with older revision');
+      assert.equal(saved.revision, 2);
+      await service.notes(campaign.id, { notes: 'First note', notesRevision: 0 });
+      const notes = await service.notes(campaign.id, { notes: 'New note', notesRevision: 0 });
+      assert.equal(notes.notes, 'New note');
+      assert.equal(notes.notesRevision, 2);
+      assert.equal(notes.description, 'Latest description');
+    } finally {
+      await store.pool.query('DELETE FROM campaigns WHERE id=$1', [campaign.id]);
+    }
+  }
+);
 before(async () => {
   if (!enabled) return;
   const bootstrap = new Store();
@@ -69,7 +98,7 @@ test(
 );
 
 test(
-  'PostgreSQL character parsing requires review, stays bounded and rejects stale drafts without persisting a character',
+  'PostgreSQL character parsing requires review, stays bounded and accepts stale revisions without persisting a character',
   { skip: !enabled },
   async () => {
     const initial = await create();
@@ -135,10 +164,13 @@ test(
           return generator.generate(...args);
         },
       };
-      await assert.rejects(
-        sources.characterDraft(c.id, { revision: c.revision, sourceId: source.id }, staleGenerator),
-        /changed during parsing/
+      const staleDraft = await sources.characterDraft(
+        c.id,
+        { revision: 0, sourceId: source.id },
+        staleGenerator
       );
+      assert.ok(staleDraft.draft);
+      assert.equal((await store.campaign(c.id)).name, 'Edited during parsing');
       assert.deepEqual((await store.campaign(c.id)).characters, []);
     } finally {
       await store.pool.query('DELETE FROM campaigns WHERE id=$1', [initial.id]);
@@ -265,7 +297,7 @@ test(
   }
 );
 test(
-  'PostgreSQL rejects stale provider output and cancellation wins against late output',
+  'PostgreSQL accepts revision changes while cancellation wins against late output',
   { skip: !enabled },
   async () => {
     const c = await create();
@@ -274,15 +306,16 @@ test(
     const t = await service.submit(c.id, { revision: 0, requestId: randomUUID(), action: 'Look' });
     await fixture.ready;
     await store.edit(c.id, 0, (c) => {
-      c.state = { manual: 'preserved' };
+      c.name = 'Manual edit preserved';
     });
     fixture.resolve({
       version: 1,
       narrative: 'late',
       operations: [{ op: 'state', expected: {}, value: { door: 'open' } }],
     });
-    assert.equal((await wait(c.id, t.id)).status, 'failed');
-    assert.deepEqual((await store.campaign(c.id)).state, { manual: 'preserved' });
+    assert.equal((await wait(c.id, t.id)).status, 'completed');
+    assert.equal((await store.campaign(c.id)).name, 'Manual edit preserved');
+    assert.deepEqual((await store.campaign(c.id)).state, { door: 'open' });
     const second = deferredGenerator();
     const other = new TurnService(store, second.generator);
     const current = await store.campaign(c.id);
@@ -295,7 +328,7 @@ test(
     await other.cancel(c.id, t2.id);
     second.resolve({ version: 1, narrative: 'too late', operations: [] });
     assert.equal((await wait(c.id, t2.id)).status, 'cancelled');
-    assert.deepEqual((await store.campaign(c.id)).state, { manual: 'preserved' });
+    assert.deepEqual((await store.campaign(c.id)).state, { door: 'open' });
   }
 );
 test(

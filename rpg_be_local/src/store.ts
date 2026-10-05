@@ -1,7 +1,4 @@
-import {
-  KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-  LEGACY_GAMEPLAY_DIGEST_VERSION,
-} from './domain/versions.js';
+import { KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from './domain/versions.js';
 import { sourceSections } from './domain/sourceSections.js';
 import pg, { type PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
@@ -9,7 +6,6 @@ import { databaseUrl } from './config.js';
 import { conflict, Problem } from './errors.js';
 import type { Campaign, Turn, Memory, Snapshot } from './domain/types.js';
 import { SourceStatus, TurnStatus } from './domain/options.js';
-import { gameplayDigest } from './domain/diceContext.js';
 import type { DiceRecord } from './domain/dice.js';
 import { DEFAULT_RULE_SYSTEM_ID, type RuleRead } from './domain/rules.js';
 export class Store {
@@ -161,10 +157,6 @@ export class Store {
       'SELECT id FROM turns WHERE campaign_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',
       [campaignId]
     );
-    const history = await db.query(
-      "SELECT document FROM turns WHERE campaign_id=$1 AND status=$2 AND NOT (document->>'undone')::boolean ORDER BY created_at,id",
-      [campaignId, TurnStatus.Completed]
-    );
     const campaign = await this.campaign(campaignId, client);
     const heads = await db.query(
       'SELECT id,revision,kind,content_hash FROM rule_systems WHERE id=$1',
@@ -172,20 +164,10 @@ export class Store {
     );
     for (const turn of failures) {
       const session = sessions.rows.find((row) => row.id === turn.diceSessionId);
-      const digest = gameplayDigest(
-        campaign,
-        history.rows.map((row) => row.document),
-        turn.ruleContext,
-        Number(session?.saved_digest_version ?? LEGACY_GAMEPLAY_DIGEST_VERSION)
-      );
       const head = heads.rows[0];
       const outdatedRules =
         turn.ruleContext &&
-        (!head ||
-          head.id !== turn.ruleContext.systemId ||
-          head.revision !== turn.ruleContext.revision ||
-          head.kind !== turn.ruleContext.kind ||
-          head.content_hash !== turn.ruleContext.contentHash);
+        (!head || head.id !== turn.ruleContext.systemId || head.kind !== turn.ruleContext.kind);
       const reason =
         !session || session.imported
           ? 'Imported dice are preserved for audit and cannot be executed'
@@ -193,9 +175,7 @@ export class Store {
             ? 'A later action superseded this attempt'
             : outdatedRules || campaign.ruleResolution
               ? 'Rule library changed or is unresolved; start a new action after selecting current rules'
-              : session.context_digest !== digest
-                ? 'Game context changed; start a new action'
-                : null;
+              : null;
       if (turn.editingPending) {
         turn.editingResume = { available: reason === null, reason };
         delete turn.diceRetry;
@@ -259,12 +239,11 @@ export class Store {
   }
   async edit(
     id: string,
-    revision: number,
+    _revision: number,
     fn: (c: Campaign, client: PoolClient) => Promise<void> | void
   ): Promise<Campaign> {
     return this.transaction(async (client) => {
       const c = await this.campaign(id, client, true);
-      if (c.revision !== revision) throw conflict('Campaign changed; refresh before saving');
       await fn(c, client);
       c.revision++;
       await this.save(c, client);

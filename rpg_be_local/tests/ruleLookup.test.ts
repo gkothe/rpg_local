@@ -190,7 +190,7 @@ test('search locators reach deep original text; text results preserve Unicode bo
   assert.equal(exact.omitted, true);
   assert.ok(exact.cursor);
 });
-test('cursor rejects changed rules, another path, invalid/restarted tokens and exhausted budgets', () => {
+test('cursor accepts revision changes and rejects another path, invalid/restarted tokens and exhausted budgets', () => {
   const system = fixture();
   const lookup = new RuleLookup();
   const first = lookup.execute(
@@ -208,15 +208,14 @@ test('cursor rejects changed rules, another path, invalid/restarted tokens and e
     1000
   );
   assert.equal(next.start, first.end);
-  assert.throws(
-    () =>
-      lookup.execute(
-        { ...system, revision: 2 },
-        'rules_get',
-        { path: 'core_rules.example.deep', cursor: first.cursor },
-        randomUUID()
-      ),
-    /changed/
+  assert.equal(
+    lookup.execute(
+      { ...system, revision: 2 },
+      'rules_get',
+      { path: 'core_rules.example.deep', cursor: first.cursor },
+      randomUUID()
+    ).start,
+    first.end
   );
   assert.throws(
     () =>

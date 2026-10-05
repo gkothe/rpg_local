@@ -161,11 +161,7 @@ export class RuleLookup {
     const position = this.positions.get(key);
     if (!position)
       throw new Problem(409, 'cursor_expired', 'Paging token expired; restart this lookup');
-    if (
-      position.systemId !== system.systemId ||
-      position.revision !== system.revision ||
-      position.hash !== system.contentHash
-    )
+    if (position.systemId !== system.systemId)
       throw new Problem(409, 'rules_context_changed', 'Rule system changed; restart this lookup');
     if (position.argumentHash !== argumentHash || position.locator !== locator)
       throw new Problem(422, 'rules_cursor_invalid', 'Token does not match this lookup');

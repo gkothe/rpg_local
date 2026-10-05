@@ -16,8 +16,12 @@ export const NARRATIVE_HUMANIZER_INSTRUCTIONS =
   'Use periods, commas or parentheses instead of em or en dashes. Privately draft, audit and revise the prose; ' +
   'return only {"narrative":"edited text"}, without commentary, drafts or other fields. No tools are available.';
 
-export function narrativeHumanizerPrompt(narrative: string, feedback = ''): string {
-  return `${NARRATIVE_HUMANIZER_INSTRUCTIONS}\n${feedback ? `Correction: ${feedback}\n` : ''}${JSON.stringify({ narrative })}\nResponse schema: ${JSON.stringify(narrativeHumanizerJsonSchema)}`;
+export function narrativeHumanizerPrompt(
+  narrative: string,
+  feedback = '',
+  preserveParagraphs = false
+): string {
+  return `${NARRATIVE_HUMANIZER_INSTRUCTIONS}\n${preserveParagraphs ? 'Keep the same blank-line-separated paragraphs in the same order; edit within paragraphs only. Dice results are linked to their paragraph numbers.\n' : ''}${feedback ? `Correction: ${feedback}\n` : ''}${JSON.stringify({ narrative })}\nResponse schema: ${JSON.stringify(narrativeHumanizerJsonSchema)}`;
 }
 
 export function narrativeDigest(value: unknown): string {
@@ -28,9 +32,19 @@ export function narrativeDigest(value: unknown): string {
 export function validateHumanizedNarrative(
   original: string,
   result: unknown,
-  protectedNames: readonly string[] = []
+  protectedNames: readonly string[] = [],
+  preserveParagraphs = false
 ): string {
   const narrative = narrativeHumanizerSchema.parse(result).narrative;
+  if (
+    preserveParagraphs &&
+    original.trim().split(/\r?\n\s*\r?\n/).length !== narrative.trim().split(/\r?\n\s*\r?\n/).length
+  )
+    throw new Problem(
+      502,
+      'narrative_anchors',
+      'Preserve narrative paragraph boundaries for dice placement'
+    );
   const numbers = (text: string) =>
     [...text.matchAll(/\b\d+(?:[.,]\d+)?\b/g)].map((m) => m[0]).sort();
   if (JSON.stringify(numbers(original)) !== JSON.stringify(numbers(narrative)))

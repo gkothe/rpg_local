@@ -114,7 +114,7 @@ test('quote binding deduplicates overlapping spans but rejects ambiguous, unsupp
   ])
     assert.throws(() => bindResponseCitations(parsed, invalid), ResponseFieldProblem);
 });
-test('book citations calculate substring pages from owned receipt and preserve identity checks', () => {
+test('book citations bind newer current-rule receipts without requiring the turn-start revision', () => {
   const systemId = randomUUID(),
     receiptId = randomUUID(),
     contentHash = 'a'.repeat(64);
@@ -134,7 +134,7 @@ test('book citations calculate substring pages from owned receipt and preserve i
     argumentDigest: contentHash,
     resultHash: contentHash,
     createdAt: new Date().toISOString(),
-    context: captured,
+    context: { ...captured, revision: 4, contentHash: 'b'.repeat(64) },
     tool: 'rules_get',
     payload: {
       view: 'text',
@@ -154,8 +154,8 @@ test('book citations calculate substring pages from owned receipt and preserve i
   const citation = {
     receiptId,
     systemId,
-    revision: 3,
-    contentHash,
+    revision: read.context.revision,
+    contentHash: read.context.contentHash,
     path: read.payload.path,
     source: 'original',
     quote,

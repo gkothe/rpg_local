@@ -21,6 +21,7 @@ export async function humanizeNarrative(
     signal?: AbortSignal;
     trace?: PromptTraceContext;
     protectedNames?: readonly string[];
+    preserveParagraphs?: boolean;
   } = {}
 ): Promise<string> {
   if (options.signal?.aborted) throw new Problem(409, 'cancelled', 'Narrative editing cancelled');
@@ -41,7 +42,7 @@ export async function humanizeNarrative(
     try {
       const output = await generator.generate(
         editorSettings,
-        narrativeHumanizerPrompt(originalNarrative, feedback),
+        narrativeHumanizerPrompt(originalNarrative, feedback, options.preserveParagraphs),
         narrativeHumanizerJsonSchema,
         options.signal,
         trace
@@ -49,7 +50,8 @@ export async function humanizeNarrative(
       const narrative = validateHumanizedNarrative(
         originalNarrative,
         output,
-        options.protectedNames
+        options.protectedNames,
+        options.preserveParagraphs
       );
       await traceEvent(trace, 'narrative_selected', {
         originalDigest: narrativeDigest(originalNarrative),

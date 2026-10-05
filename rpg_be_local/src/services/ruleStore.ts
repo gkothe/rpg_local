@@ -135,30 +135,19 @@ export class RuleStore {
     return ruleContext(ruleSystemFromRow(result.rows[0]));
   }
   async guard(expected: RuleContext, client: PoolClient): Promise<RuleSystem> {
-    // Always lock and verify the authoritative head before serving any cached content.
+    // Revisions identify cached content; an older turn never blocks use of the current row.
     const head = await client.query(
       'SELECT revision,content_hash,kind FROM rule_systems WHERE id=$1 FOR SHARE',
       [expected.systemId]
     );
     const row = head.rows[0];
-    if (
-      !row ||
-      row.revision !== expected.revision ||
-      row.content_hash !== expected.contentHash ||
-      row.kind !== expected.kind
-    )
-      throw new Problem(409, 'rules_context_changed', 'Rule system changed during this attempt');
+    if (!row) throw new Problem(404, 'rules_system_missing', 'Rule system not found');
     let cache = snapshotCaches.get(this.store);
     if (!cache) {
       cache = new Map();
       snapshotCaches.set(this.store, cache);
     }
-    const key = JSON.stringify([
-      expected.systemId,
-      expected.revision,
-      expected.contentHash,
-      expected.kind,
-    ]);
+    const key = JSON.stringify([expected.systemId, row.revision, row.content_hash, row.kind]);
     const cached = cache.get(key);
     if (cached) {
       cache.delete(key);
@@ -167,8 +156,6 @@ export class RuleStore {
     }
     const system = await this.get(expected.systemId, client, 'share');
     const bytes = serializedBytes(system);
-    for (const [oldKey, entry] of cache)
-      if (entry.system.systemId === system.systemId) cache.delete(oldKey);
     if (bytes <= SNAPSHOT_CACHE_BYTES) {
       while (
         cache.size >= SNAPSHOT_CACHE_ENTRIES ||
@@ -183,13 +170,11 @@ export class RuleStore {
   }
   async publish(
     id: string,
-    revision: number,
+    _revision: number,
     transform: (current: RuleSystem) => RuleContent
   ): Promise<RuleContext> {
     return this.store.transaction(async (client) => {
       const current = await this.get(id, client, 'update');
-      if (current.revision !== revision)
-        throw conflict('Rule system changed; reload before publishing');
       return this.write(current, transform(current), client);
     });
   }
@@ -207,8 +192,8 @@ export class RuleStore {
       typeof content[key] === 'string' ? content[key] : JSON.stringify(content[key])
     );
     const result = await client.query(
-      `UPDATE rule_systems SET ${contentFields.map((key, index) => `${key}=$${index + 4}`).join(',')},content_hash=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND revision=$3 RETURNING *`,
-      [current.systemId, hash, current.revision, ...values]
+      `UPDATE rule_systems SET ${contentFields.map((key, index) => `${key}=$${index + 3}`).join(',')},content_hash=$2,revision=revision+1,updated_at=now() WHERE id=$1 RETURNING *`,
+      [current.systemId, hash, ...values]
     );
     if (!result.rows[0]) throw conflict('Rule system changed during publication');
     return ruleContext(ruleSystemFromRow(result.rows[0]));
@@ -269,7 +254,7 @@ export class RuleStore {
       .update(canonicalRuleJson({ tool, arguments: raw }))
       .digest('hex');
     return this.store.transaction(async (client) => {
-      const campaign = await this.store.campaign(turn.campaignId, client, true);
+      await this.store.campaign(turn.campaignId, client, true);
       const active = await client.query(
         'SELECT owner,status,lease_until,document FROM turns WHERE id=$1 AND campaign_id=$2 FOR UPDATE',
         [turn.id, turn.campaignId]
@@ -284,9 +269,8 @@ export class RuleStore {
       )
         throw new Problem(409, 'rules_inactive', 'Rule attempt is no longer active');
       if (
-        campaign.revision !== turn.context?.revision ||
         canonicalRuleJson(row.document.ruleContext ?? row.document.context?.ruleContext) !==
-          canonicalRuleJson(expected)
+        canonicalRuleJson(expected)
       )
         throw new Problem(
           409,
@@ -336,7 +320,7 @@ export class RuleStore {
           turn.campaignId,
           turn.id,
           expected.systemId,
-          expected,
+          ruleContext(system),
           tool,
           transportRequestId,
           argumentDigest,
