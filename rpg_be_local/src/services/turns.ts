@@ -44,8 +44,8 @@ import type { Generator } from '../providers/service.js';
 import {
   buildContext,
   compactionBatch,
-  uncovered,
-  uncoveredHistoryTokens,
+  recentGameplayHistory,
+  olderHistoryBytes,
 } from '../domain/context.js';
 import {
   responseSchema,
@@ -76,7 +76,7 @@ import {
 } from '../domain/ruleResponse.js';
 const TURN_LEASE_SECONDS = 45;
 const TURN_HEARTBEAT_INTERVAL_MS = 10_000;
-const AUTO_COMPACTION_HISTORY_THRESHOLD_TOKENS = 6_000;
+const AUTO_COMPACTION_HISTORY_THRESHOLD_BYTES = 6_000;
 export class TurnService {
   private aborts = new Map<string, AbortController>();
   constructor(
@@ -461,10 +461,10 @@ export class TurnService {
       let history = await this.store.activeTurns(c.id);
       const capacity = await this.selectedCapacity(c, t.settings, Infinity);
       let needs =
-        uncoveredHistoryTokens(c, history) > AUTO_COMPACTION_HISTORY_THRESHOLD_TOKENS ||
+        olderHistoryBytes(c, history) > AUTO_COMPACTION_HISTORY_THRESHOLD_BYTES ||
         !t.context?.prompt;
       // Each bounded batch covers a consecutive prefix; never recursively summarizes the full transcript.
-      while (!t.retryOfTurnId && needs && uncovered(c, history).length > 1) {
+      while (!t.retryOfTurnId && needs && recentGameplayHistory(c, history).older.length > 0) {
         const compactionCapacity = await this.generator.capacity(t.settings, c.budgets.compaction);
         const batch = compactionBatch(
           c,
@@ -492,9 +492,9 @@ export class TurnService {
         });
         c = await this.store.campaign(c.id);
         history = await this.store.activeTurns(c.id);
-        needs = uncoveredHistoryTokens(c, history) > AUTO_COMPACTION_HISTORY_THRESHOLD_TOKENS;
+        needs = olderHistoryBytes(c, history) > AUTO_COMPACTION_HISTORY_THRESHOLD_BYTES;
       }
-      // A failure to compact never removes uncovered history. Rebuild must fit or fail explicitly.
+      // Uncovered older turns remain in gameplay history until a summary is committed.
       if (!t.retryOfTurnId)
         await this.store.transaction(async (client) => {
           const { campaign, turn } = await this.lockedOwned(t, client);

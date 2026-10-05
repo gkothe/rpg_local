@@ -6,8 +6,8 @@ import {
   buildContext,
   compactionBatch,
   estimateTokens,
-  uncovered,
-  uncoveredHistoryTokens,
+  recentGameplayHistory,
+  olderHistoryBytes,
 } from '../src/domain/context.js';
 import type { Turn } from '../src/domain/types.js';
 import {
@@ -44,7 +44,7 @@ test('1000-turn synthetic campaign preserves pinned facts and never sends full t
   const turns: Turn[] = [];
   let summaries = 0;
   for (let index = 0; index < 1000; index++) {
-    if (uncoveredHistoryTokens(c, turns) > 5000) {
+    if (olderHistoryBytes(c, turns) > 5000) {
       const batch = compactionBatch(c, turns);
       assert.ok(estimateTokens(batch.prompt) <= 8000);
       assert.ok(batch.turns.length < turns.length || turns.length < 30);
@@ -62,7 +62,11 @@ test('1000-turn synthetic campaign preserves pinned facts and never sends full t
     assert.ok(context.estimatedTokens <= 16000);
     assert.ok(context.prompt.includes('Marta owes you a favor.'));
     assert.ok(context.historyIds.length < 30);
-    assert.equal(context.historyIds.length, uncovered(c, turns).length);
+    assert.equal(context.historyIds.length, recentGameplayHistory(c, turns).history.length);
+    assert.deepEqual(
+      context.historyIds.slice(-3),
+      turns.slice(-3).map((t) => t.id)
+    );
     turns.push({
       id: randomUUID(),
       campaignId: c.id,

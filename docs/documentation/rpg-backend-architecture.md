@@ -256,9 +256,9 @@ sequenceDiagram
     Note over TurnSvc,Runner: Background Asynchronous Microtask starts
 
     TurnSvc->>PG: UPDATE turns SET status='running'
-    TurnSvc->>TurnSvc: Check auto-compaction threshold (>6000 tokens history)
+    TurnSvc->>TurnSvc: Check eligible older history (>6000 UTF-8 bytes; latest 3 turns protected)
     alt History Exceeds Compaction Threshold
-        TurnSvc->>Runner: Generate Memory summary for consecutive turn prefix
+        TurnSvc->>Runner: Generate Memory summary for older consecutive prefix only
         TurnSvc->>PG: INSERT INTO memories; update campaign.memory
     end
 
@@ -863,27 +863,13 @@ To prevent token estimation errors, the standard estimate is deliberately pessim
 - Standard mode: `Buffer.byteLength(text, 'utf8')` (1 token = 1 byte, highly pessimistic upper bound).
 - Book mode: `Math.ceil(Buffer.byteLength(text, 'utf8') / 2)` (2 bytes per token heuristic).
 
-#### Mandatory Payload Preservation: Budgets Guide Optional Retrieval
+#### Mandatory Payload and Recent Conversation Preservation
 
-A critical architectural invariant in `context.ts` is that **mandatory game state is never discarded to satisfy a budget ceiling**:
+`buildContext` preserves mandatory state, prior valid memory and raw conversation without a prompt-size gate. It includes ranked retrieved rules except exact duplicates already supplied by pinned sources.
 
-```ts
-// Budgets guide retrieval and compaction, never rejection or data loss.
-ceiling = Math.max(ceiling, estimate(JSON.stringify(payload)));
-for (const rule of rules) {
-  if (
-    c.pinnedSourceIds.includes(rule.id) ||
-    pinned.some((s) => s.id === rule.id && s.text === rule.text)
-  )
-    continue;
-  const candidate = { ...payload, rules: [...payload.rules, rule] };
-  if (estimate(JSON.stringify(candidate)) <= ceiling) payload.rules.push(rule);
-}
-```
+Gameplay history contains the latest three completed, non-undone player/GM pairs, plus any older uncovered backlog. Entries contain only the player action and final delivered GM narrative. IDs stay in the manifest; dice and tool audit stay in their own records. The separate scene-term heuristic still uses the latest three active turns to select relevant entities.
 
-- The mandatory base (campaign description, state, pinned facts, pinned rules, all player characters, scene-relevant NPCs, action, and JSON schema), active history, and prior valid memory are **always included**. If their combined byte size exceeds the initial `ceiling`, `ceiling` is dynamically elevated to accommodate them.
-- Only dynamically retrieved search rules (`source_chunks`) are pruned if they do not fit within the ceiling.
-- `TurnService.run` considers compaction above 6,000 uncovered-history tokens, a missing prompt or 80% of soft capacity. It runs only for new actions with more than one uncovered turn. The model is instructed to preserve unresolved threads; that is not a lossless-summary guarantee. Provider capacity methods return planning ceilings after availability checks, not a measured native context limit.
+`TurnService.run` considers compaction when eligible older uncovered history exceeds 6,000 UTF-8 bytes, or the prompt is missing. At least one eligible older turn is required; the protected three never compact automatically. It is skipped on manual retry. The model is instructed to preserve unresolved threads, but summarization remains lossy. Provider capacity methods return planning ceilings after availability checks, not a measured native context limit.
 
 ---
 
@@ -927,7 +913,7 @@ To avoid flooding the model context, dynamic filtering occurs before prompt comp
 
 Implementation evidence: [context.ts](../../rpg_be_local/src/domain/context.ts), [gameplayResponse.ts](../../rpg_be_local/src/domain/gameplayResponse.ts), [knowledge.ts](../../rpg_be_local/src/domain/knowledge.ts).
 
-In Schema Versions 4 and 5 (the example below illustrates the legacy v4 shape), natural language directives (`instructions`, `systemInstructions`, `campaignInstructions`) are decoupled from data payloads and formatted into the top-level `systemPrompt` technical envelope (`gameplayInstructionEnvelope`). The JSON user payload contains `mandatory`, `memory`, `history` and `rules`. This schematic example abbreviates the real schema/knowledge record and uses symbolic IDs; it is not a copyable validated response or a complete wire fixture. The actual schema is generated from Zod. `dice`/`interpretations` history fields are omitted when a turn has no rolls; book mode also includes `rulesOverview`.
+In Schema Versions 4 and 5 (the example below illustrates the legacy v4 shape), natural language directives (`instructions`, `systemInstructions`, `campaignInstructions`) are decoupled from data payloads and formatted into the top-level `systemPrompt` technical envelope (`gameplayInstructionEnvelope`). The JSON user payload contains `mandatory`, `memory`, `history` and `rules`. This schematic example abbreviates the real schema/knowledge record and uses symbolic IDs; it is not a copyable validated response or a complete wire fixture. The actual schema is generated from Zod. Gameplay history entries contain only `player` and `gm`; compaction uses a separate event format with IDs and saved dice interpretations. Book mode also includes `rulesOverview`.
 
 ```json
 {
@@ -1013,11 +999,8 @@ In Schema Versions 4 and 5 (the example below illustrates the legacy v4 shape), 
   "memory": "Previous events: The party arrived in Oakhaven after escaping the wolf pack in the woods.",
   "history": [
     {
-      "id": "turn-uuid-1",
       "player": "I ask Garrick if he has seen anything suspicious near the well.",
-      "gm": "Garrick wipes his brow with a greasy rag and frowns. 'Stay away from that well, stranger. Two boys went near it on Tuesday and haven't spoken a word since.'",
-      "dice": [],
-      "interpretations": []
+      "gm": "Garrick wipes his brow with a greasy rag and frowns. 'Stay away from that well, stranger. Two boys went near it on Tuesday and haven't spoken a word since.'"
     }
   ],
   "rules": [
@@ -1300,12 +1283,12 @@ When a player clicks **Undo** (`POST /api/campaigns/:id/undo`):
 
 Implementation evidence: [context.ts](../../rpg_be_local/src/domain/context.ts), [schemas.ts](../../rpg_be_local/src/domain/schemas.ts), [turns.ts](../../rpg_be_local/src/services/turns.ts).
 
-Compaction is lossy model-authored summarization. Original turns remain in PostgreSQL, but covered turn text is replaced by memory in subsequent gameplay prompts. Schema validation establishes a non-empty text field, not completeness or factual fidelity.
+Compaction is lossy model-authored summarization. Original turns remain in PostgreSQL. Covered older turn text is replaced by memory in subsequent gameplay prompts; the latest three completed, non-undone turns always remain verbatim as player/GM text pairs. Schema validation establishes a non-empty text field, not completeness or factual fidelity.
 
-For new actions, compaction is considered when uncovered completed history exceeds 6,000 estimated tokens, or the prompt is missing. Gameplay prompt size no longer triggers summarization. It runs only with more than one uncovered turn and is skipped on manual retry:
+For new actions, compaction is considered when eligible older uncovered history exceeds 6,000 UTF-8 bytes, or the prompt is missing. The latest three completed, non-undone turns are protected and excluded from this measurement. Gameplay prompt size does not trigger summarization. Any nonempty eligible older prefix, including a single turn, can compact; protected-only history never invokes summarization. Manual retries keep their frozen prompt and skip compaction:
 
 1. **Consecutive Prefix Batching (`context.ts: compactionBatch`)**:
-   Selects a consecutive prefix of uncovered completed turns. Its soft ceiling is enlarged to accommodate each individual turn, so the batch can exceed `c.budgets.compaction`. It includes prior valid memory for incremental summarization rather than resending the complete covered transcript.
+   Selects a consecutive prefix of uncovered completed turns preceding the protected three. Its soft ceiling is enlarged to accommodate each individual turn, so the batch can exceed `c.budgets.compaction`. It includes prior valid memory for incremental summarization rather than resending the complete covered transcript.
 2. **Knowledge Attribution Instruction**:
    If campaign knowledge exists, `compactionBatch` filters records linked to or created/updated in the batch's turns, injecting an explicit instruction envelope:
    ```text
@@ -1314,7 +1297,7 @@ For new actions, compaction is considered when uncovered completed history excee
 3. **Memory Record Insertion**:
    The model returns `{ text }`; the backend constructs the Memory ID, timestamp, valid flag and cumulative `coveredTurnIds` (prior valid coverage plus this batch). Each milestone is committed separately before gameplay generation and can survive later turn failure. Generated and manually saved memory have no memory-budget gate.
 4. **Active State Continuity**:
-   Pinned facts, player/scene-relevant character state, selected active knowledge records, prior valid memory and all uncovered turns remain in context. There is no fixed last-N preservation rule; a batch may cover all uncovered turns.
+   Pinned facts, player/scene-relevant character state, selected active knowledge records and prior valid memory remain in context. Gameplay history is the ordered, deduplicated union of older uncovered turns and the latest three completed player/GM pairs. Each entry has only `player` (the action) and `gm` (the final delivered, humanized narrative). IDs remain in the manifest rather than the text entries; dice, interpretations, tool exchanges and discarded responses are omitted from gameplay history. Compaction separately retains event IDs and dice/interpretations to preserve mechanical continuity. Older uncovered backlog remains raw until successfully summarized, so three pairs is a guaranteed recent window, not a destructive history cap. Existing manual/imported/legacy summaries may overlap those pairs; their summary text is preserved rather than attempting to subtract prose. Invalid memory contributes no coverage.
 5. **Reversibility**:
    If an undo rolls back past a compacted turn, the milestone is invalidated (`valid: false`) and prior milestones are restored as described above.
 

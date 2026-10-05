@@ -147,8 +147,8 @@ test('all illustrated payload selections and envelopes match the real context bu
           ];
           campaign.pinnedSourceIds = pinned ? [ids.source] : [];
           campaign.memory = { valid: true, text: expected.memory, coveredTurnIds: [] };
-          const turns = expected.history.map((h) => ({
-            id: h.id,
+          const turns = expected.history.map((h, index) => ({
+            id: `99999999-9999-4999-8999-${String(index + 1).padStart(12, '0')}`,
             action: h.player,
             narrative: h.gm,
             status: 'completed',

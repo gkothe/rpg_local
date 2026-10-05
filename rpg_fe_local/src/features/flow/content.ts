@@ -266,7 +266,7 @@ export const steps: FlowStep[] = [
     id: 'prepare',
     label: '4. Freeze context',
     node: 'context',
-    data: 'The app reads character sheets, history, and sources. It may summarize older turns while keeping their originals. It saves a fixed prompt and a complete copy of campaign knowledge for this attempt.',
+    data: 'The app reads character sheets, history, and sources. It always includes the latest three player/GM text pairs, plus any older turns not yet summarized. It summarizes only older turns while keeping their originals. It saves a fixed prompt and a complete copy of campaign knowledge for this attempt.',
   },
   {
     id: 'infer',

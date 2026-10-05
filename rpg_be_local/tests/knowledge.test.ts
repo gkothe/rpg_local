@@ -438,7 +438,20 @@ test('compaction carries only batch-linked knowledge with its original certainty
     completedAt: new Date().toISOString(),
   };
   const before = structuredClone(latest.knowledge);
-  const payload = JSON.parse(compactionBatch(latest, [turn], 100000).prompt);
+  const payload = JSON.parse(
+    compactionBatch(
+      latest,
+      [
+        turn,
+        ...Array.from({ length: 3 }, () => ({
+          ...turn,
+          id: randomUUID(),
+          narrative: 'Later event',
+        })),
+      ],
+      100000
+    ).prompt
+  );
   assert.equal(payload.knowledge.length, 1);
   assert.equal(payload.knowledge[0].title, 'New rumor');
   assert.equal(payload.knowledge[0].certainty, C.Rumor);

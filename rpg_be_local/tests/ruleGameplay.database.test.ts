@@ -43,14 +43,14 @@ test(
     const head = await rules.get();
     const campaign = newCampaign({ name: 'Original compaction race' });
     await store.insert(campaign);
-    for (let index = 0; index < 2; index++) {
+    for (let index = 0; index < 4; index++) {
       const prior: Turn = {
         id: randomUUID(),
         campaignId: campaign.id,
         requestId: randomUUID(),
         status: TurnStatus.Completed,
         action: 'Original previous event',
-        narrative: 'Original event. '.repeat(230),
+        narrative: 'Original event. '.repeat(450),
         changes: [],
         error: null,
         undone: false,

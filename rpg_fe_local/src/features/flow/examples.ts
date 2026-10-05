@@ -194,7 +194,6 @@ export function examplePayload(pinned: boolean, mentioned: boolean, book: boolea
     memory: 'Earlier turns: Mira arrived in the river town. This summary is lossy.',
     history: [
       {
-        id: '99999999-9999-4999-8999-999999999999',
         player: 'Inspect the bridge.',
         gm: 'The rail is broken.',
       },
