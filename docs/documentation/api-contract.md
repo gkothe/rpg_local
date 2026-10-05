@@ -259,6 +259,13 @@ it does not undo a committed turn or trigger another roll.
 Antigravity `native_completion` records completion status, reported turn count, response
 presence/length and pending dispatch count before validation. Rejected completion messages
 identify the failing condition; diagnostics do not store the rejected response text.
+Antigravity `provider_stage_start`/`provider_stage_end` events separate `hooks`,
+`agent_setup`, `prompt_logging`, `generation_process` and `agent_cleanup`. End events
+record status, monotonic `durationMs`, elapsed time since adapter entry (`elapsedMs`)
+and a classified failure code when applicable, using the existing execution/turn/purpose
+correlation. `generation_process` includes subprocess startup and all CLI inference/tool
+work; it is not a measurement of model inference alone. Stage diagnostics contain no
+environment, credentials or raw subprocess output and impose no execution deadline.
 
 ### Rule-read accounting after migration 0011
 
