@@ -3,6 +3,13 @@ import { DICE_TOOL_NAME, diceInputSchema, type DiceResult } from '../domain/dice
 import { RULE_TOOLS, serializedBytes, type RuleTool } from '../domain/rules.js';
 import { ruleToolSchemas } from '../services/ruleLookup.js';
 import { Problem } from '../errors.js';
+import {
+  createNpcRecall,
+  npcSearchSchema,
+  npcGetSchema,
+  NPC_SEARCH_TOOL_NAME,
+  NPC_GET_TOOL_NAME,
+} from '../domain/npcRecall.js';
 import { findRules, RULE_FIND_TOOL_NAME } from './rulesFind.js';
 import {
   CAMPAIGN_SOURCE_GET_TOOL_NAME,
@@ -51,7 +58,7 @@ export type GameplayToolRegistration = {
   description: string;
   schema: z.ZodType;
   purpose: 'default' | 'book';
-  capability: 'dice' | 'rules' | 'knowledge' | 'sources';
+  capability: 'dice' | 'rules' | 'knowledge' | 'sources' | 'characters';
   handler: (input: unknown, requestId: string | number) => Promise<GameplayToolResult>;
   invalid?: (input: unknown, requestId: string | number) => Promise<GameplayToolResult>;
 };
@@ -73,7 +80,33 @@ function ownedRegistrations(
   assertActive: () => Promise<void> = async () => {}
 ): GameplayToolRegistration[] {
   const recall = knowledge ? createKnowledgeRecall(knowledge) : undefined;
+  const npcs =
+    knowledge?.npcCharacters !== undefined
+      ? createNpcRecall(knowledge.campaignId, knowledge.npcCharacters, knowledge.records)
+      : undefined;
   return [
+    ...(npcs
+      ? [
+          {
+            name: NPC_SEARCH_TOOL_NAME,
+            description:
+              'Find existing NPCs by saved name or description. Empty query lists the frozen roster; resolve ambiguous identities before creating duplicates.',
+            schema: npcSearchSchema,
+            purpose: 'default' as const,
+            capability: 'characters' as const,
+            handler: async (input: unknown) => npcs.search(input),
+          },
+          {
+            name: NPC_GET_TOOL_NAME,
+            description:
+              'Read one complete frozen saved NPC sheet and linked knowledge locators. Current attributes/inventory are canonical; knowledge claims retain certainty and visibility. Private notes are excluded.',
+            schema: npcGetSchema,
+            purpose: 'default' as const,
+            capability: 'characters' as const,
+            handler: async (input: unknown) => npcs.get(input),
+          },
+        ]
+      : []),
     {
       name: DICE_TOOL_NAME,
       description:

@@ -1,7 +1,11 @@
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { Problem } from '../errors.js';
-import { ResponseFieldProblem, type ResponsePath } from '../domain/responseFields.js';
+import {
+  ResponseFieldProblem,
+  ResponseFieldProblems,
+  type ResponsePath,
+} from '../domain/responseFields.js';
 import { RESPONSE_RETRY_COUNT, responseRetryFeedback } from '../domain/responseRetry.js';
 import type { Generator } from '../providers/service.js';
 import type { ProviderSettings } from '../domain/types.js';
@@ -17,11 +21,13 @@ const editableFields = new Set([
 const forbidden = new Set(['__proto__', 'prototype', 'constructor']);
 function repairPaths(error: unknown): ResponsePath[] {
   const paths =
-    error instanceof ResponseFieldProblem
-      ? [error.path]
-      : error instanceof z.ZodError
-        ? error.issues.map((issue) => issue.path as ResponsePath)
-        : [];
+    error instanceof ResponseFieldProblems
+      ? error.problems.map((problem) => problem.path)
+      : error instanceof ResponseFieldProblem
+        ? [error.path]
+        : error instanceof z.ZodError
+          ? error.issues.map((issue) => issue.path as ResponsePath)
+          : [];
   const safe = paths.filter(
     (path) =>
       editableFields.has(String(path[0])) &&

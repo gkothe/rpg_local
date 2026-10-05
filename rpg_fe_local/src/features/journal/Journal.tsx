@@ -139,11 +139,11 @@ export default function Journal({
               </label>
             ))}
           <small>
-            Only pin essential short sources. Pinned content must fit the mandatory context budget.
+            Pinned sources are included in full every turn, even above the context target.
           </small>
         </fieldset>
-        {(['gameplay', 'compaction', 'memory'] as const).map((key) => (
-          <Field label={`${key[0].toUpperCase() + key.slice(1)} tokens`} key={key}>
+        {(['compaction'] as const).map((key) => (
+          <Field label="Compaction batch target (UTF-8 bytes)" key={key}>
             <input
               type="number"
               min={256}

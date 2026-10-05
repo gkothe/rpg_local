@@ -1,6 +1,7 @@
 import type { FlowEdge, FlowItem, FlowStep, FlowTool } from './types';
 import {
   ids,
+  npc,
   knowledgeGetResult,
   knowledgeSearchResult,
   ruleResult,
@@ -67,7 +68,7 @@ export const nodes: FlowItem[] = [
     'The app reads PostgreSQL and copies campaign knowledge into memory for the turn. It leaves private notes out of the gameplay context it builds automatically.',
     '4.3',
     ['rpg_be_local/src/domain/context.ts', 'rpg_be_local/src/domain/knowledgeRecall.ts'],
-    'V5 includes a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene. It also selects relevant campaign knowledge and searches source text for matching words. Context budgets guide these selections. Summaries can lose detail, so the app keeps the original turns.'
+    'V5 includes a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene. It also selects relevant campaign knowledge and searches source text for matching words. Gameplay has no token target: relevant retrieved sections and matching campaign facts are included without size-based omission. History is summarized in consecutive batches independently of gameplay prompt size. Summaries can lose detail, so the app keeps the original turns.'
   ),
   item(
     'model',
@@ -299,6 +300,42 @@ export const steps: FlowStep[] = [
   },
 ];
 export const tools: FlowTool[] = [
+  {
+    ...item(
+      'campaign_npcs_search',
+      'campaign_npcs_search',
+      'Find an existing NPC even when their sheet is absent from the initial prompt.',
+      'Before using an older NPC or creating a potentially duplicate character.',
+      'Saved name or description terms; an empty query lists the roster. An optional cursor retrieves the next page.',
+      'Up to 20 matching IDs and names. Duplicate names remain separate choices.',
+      'Uses this turn’s frozen NPC roster in memory, without another database query. Search results are navigation; get retrieves the saved sheet.',
+      '4.7',
+      ['rpg_be_local/src/domain/npcRecall.ts']
+    ),
+    bookOnly: false,
+    args: { query: 'ferryman' },
+    result: {
+      campaignId: ids.campaign,
+      npcs: [{ id: ids.npc, name: 'Ivo', revision: 0, matchedFields: ['description'] }],
+      nextCursor: null,
+    },
+  },
+  {
+    ...item(
+      'campaign_npcs_get',
+      'campaign_npcs_get',
+      'Read an existing NPC’s complete saved sheet.',
+      'After choosing an NPC ID, before relying on stats absent from the prompt.',
+      'The NPC’s unique ID.',
+      'Saved attributes, inventory, description and revision, plus links to knowledge records. Private notes are excluded.',
+      'Reads the frozen roster. Current saved sheet values remain distinct from historical events, rumors and GM-only knowledge.',
+      '4.7',
+      ['rpg_be_local/src/domain/npcRecall.ts']
+    ),
+    bookOnly: false,
+    args: { id: ids.npc },
+    result: { campaignId: ids.campaign, npc: { ...npc, revision: 0 }, knowledgeLinks: [] },
+  },
   {
     ...item(
       'campaign_sources_search',

@@ -108,23 +108,17 @@ export const campaignPatchSchema = z
       .optional(),
     budgets: z
       .object({
-        gameplay: z
-          .number()
-          .int()
-          .min(CONTEXT_BUDGET_LIMITS.gameplay.min)
-          .max(CONTEXT_BUDGET_LIMITS.gameplay.max),
+        gameplay: z.number().optional(),
         compaction: z
           .number()
           .int()
           .min(CONTEXT_BUDGET_LIMITS.compaction.min)
           .max(CONTEXT_BUDGET_LIMITS.compaction.max),
-        memory: z
-          .number()
-          .int()
-          .min(CONTEXT_BUDGET_LIMITS.memory.min)
-          .max(CONTEXT_BUDGET_LIMITS.memory.max),
+        // Accept the retired field from old clients/archives, then discard it.
+        memory: z.number().optional(),
       })
       .strict()
+      .transform(({ compaction }) => ({ compaction }))
       .optional(),
     state: object.optional(),
   })

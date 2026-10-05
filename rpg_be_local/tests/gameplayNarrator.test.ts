@@ -5,6 +5,17 @@ import {
   gameplayInstructionEnvelope,
 } from '../src/domain/gameplayNarrator.js';
 
+test('NPC guidance is explicitly enabled while legacy envelopes stay identical', () => {
+  const legacy = gameplayInstructionEnvelope('System', 'Campaign', false, 5);
+  assert.equal(gameplayInstructionEnvelope('System', 'Campaign', false, 5, false), legacy);
+  assert.doesNotMatch(legacy, /campaign_npcs_get/);
+  assert.match(
+    gameplayInstructionEnvelope('System', 'Campaign', false, 5, true),
+    /campaign_npcs_get/
+  );
+  assert.match(gameplayInstructionEnvelope('System', 'Campaign', true, 5, true), /before creating/);
+});
+
 test('instruction envelope preserves complete selected and campaign columns once', () => {
   const selected = '  SYSTEM_CANARY\n\n\t' + 'unchanged selected text '.repeat(10000);
   const campaign = '\n CAMPAIGN_CANARY\t\n';

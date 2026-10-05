@@ -83,8 +83,8 @@ export default function TurnWalkthrough({
         </div>
         <p>
           {book
-            ? 'Book mode has seven tools: dice, two campaign knowledge tools, and four rulebook tools.'
-            : 'Default mode has three tools: dice and two campaign knowledge tools.'}
+            ? 'Book mode adds rulebook tools to dice and campaign NPC, knowledge and source lookup.'
+            : 'Default mode includes dice and campaign NPC, knowledge and source lookup.'}
         </p>
         <p>
           {provider === 'codex'

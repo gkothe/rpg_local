@@ -7,6 +7,63 @@ import { GameplayTools } from '../src/providers/gameplayTools.js';
 import { startGameplayMcp } from '../src/providers/gameplayMcp.js';
 import { nativeGameplaySchema } from '../src/providers/gameplayContract.js';
 import { gameplayResponseJsonSchema } from '../src/domain/gameplayResponse.js';
+import { newCampaign } from '../src/domain/campaign.js';
+import { freezeKnowledge } from '../src/domain/knowledgeRecall.js';
+import { CharacterType } from '../src/domain/options.js';
+import { randomUUID } from 'node:crypto';
+
+test('NPC search and get traverse the private MCP transport with frozen sheets', async () => {
+  const c = newCampaign({ name: 'MCP NPC' });
+  c.characters.push({
+    id: randomUUID(),
+    name: 'Marcus',
+    type: CharacterType.Npc,
+    attributes: { strength: 3 },
+    inventory: {},
+    description: { role: 'merchant' },
+    notes: 'PRIVATE',
+    revision: 1,
+  });
+  const registry = new GameplayTools({
+    book: false,
+    knowledge: freezeKnowledge(c, 5, true),
+    assertActive: async () => {},
+    roll: async () => {
+      throw Error('Unexpected dice');
+    },
+  });
+  const endpoint = await startGameplayMcp(registry.definitions, registry.call);
+  const client = new Client({ name: 'npc-transport', version: '1' });
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(endpoint.url), {
+        requestInit: { headers: endpoint.headers },
+      })
+    );
+    assert.ok((await client.listTools()).tools.some((tool) => tool.name === 'campaign_npcs_get'));
+    const found = await client.callTool({
+      name: 'campaign_npcs_search',
+      arguments: { query: 'merchant' },
+    });
+    assert.equal(found.isError, undefined);
+    assert.match(JSON.stringify(found.content), /Marcus/);
+    const result = await client.callTool({
+      name: 'campaign_npcs_get',
+      arguments: { id: c.characters[0]!.id },
+    });
+    assert.equal(result.isError, undefined);
+    assert.match(JSON.stringify(result.content), /strength/);
+    assert.doesNotMatch(JSON.stringify(result.content), /PRIVATE|notes/);
+    assert.equal(
+      (await client.callTool({ name: 'campaign_npcs_get', arguments: { id: randomUUID() } }))
+        .isError,
+      true
+    );
+  } finally {
+    await client.close();
+    await endpoint.close();
+  }
+});
 
 test('explicit native schema selection is independent of book mode and fails closed', () => {
   const dispatch = async () => ({});

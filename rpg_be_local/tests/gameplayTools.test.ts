@@ -4,6 +4,78 @@ import { randomUUID } from 'node:crypto';
 import { GameplayTools } from '../src/providers/gameplayTools.js';
 import { freezeKnowledge } from '../src/domain/knowledgeRecall.js';
 import { newCampaign } from '../src/domain/campaign.js';
+import { CharacterType } from '../src/domain/options.js';
+
+test('owned NPC tools distinguish frozen capability absence from an empty roster and enforce replay/ownership', async () => {
+  const c = newCampaign({ name: 'NPC tools' });
+  c.characters.push({
+    id: randomUUID(),
+    name: 'Marcus',
+    type: CharacterType.Npc,
+    attributes: { strength: 3 },
+    inventory: {},
+    description: { role: 'merchant' },
+    notes: 'SECRET',
+    revision: 1,
+  });
+  for (const book of [false, true]) {
+    let active = true;
+    const options = {
+      book,
+      roll: async () => ({ rollId: randomUUID(), slot: 0, groups: [], reused: false }),
+      read: async () => ({}),
+      assertActive: async () => {
+        if (!active) throw new Error('Lost ownership');
+      },
+    };
+    const legacy = new GameplayTools({ ...options, knowledge: freezeKnowledge(c, 5) });
+    assert.ok(!legacy.definitions.some((d) => d.name.startsWith('campaign_npcs_')));
+    const registry = new GameplayTools({ ...options, knowledge: freezeKnowledge(c, 5, true) });
+    assert.equal(registry.definitions.filter((d) => d.name.startsWith('campaign_npcs_')).length, 2);
+    const found = await registry.call('campaign_npcs_search', { query: 'merchant' }, 'search');
+    assert.deepEqual(
+      await registry.call('campaign_npcs_search', { query: 'merchant' }, 'search'),
+      found
+    );
+    await assert.rejects(
+      registry.call('campaign_npcs_search', { query: 'guard' }, 'search'),
+      /changed tool arguments/
+    );
+    const sheet = await registry.call('campaign_npcs_get', { id: c.characters[0]!.id }, 'get');
+    assert.doesNotMatch(JSON.stringify(sheet), /SECRET|notes/);
+    await assert.rejects(
+      registry.call('campaign_npcs_get', { id: randomUUID() }, 'missing'),
+      /NPC is not/
+    );
+    await assert.rejects(
+      registry.call('campaign_npcs_get', { id: c.characters[0]!.id, campaignId: c.id }, 'invalid'),
+      /registered schema/
+    );
+    active = false;
+    await assert.rejects(
+      registry.call('campaign_npcs_search', { query: '' }, 'search'),
+      /Lost ownership/
+    );
+    c.characters = [];
+    active = true;
+    const empty = new GameplayTools({ ...options, knowledge: freezeKnowledge(c, 5, true) });
+    assert.deepEqual(
+      ((await empty.call('campaign_npcs_search', { query: '' }, 'empty')) as { npcs: unknown[] })
+        .npcs,
+      []
+    );
+    c.characters.push({
+      id: randomUUID(),
+      name: 'Marcus',
+      type: CharacterType.Npc,
+      attributes: {},
+      inventory: {},
+      description: {},
+      notes: '',
+      revision: 1,
+    });
+  }
+});
 
 test('combined originals identify supplied receipts and exact continuation arguments without blocking rereads', async () => {
   const reads: unknown[] = [];

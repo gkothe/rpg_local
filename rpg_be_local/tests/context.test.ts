@@ -7,6 +7,34 @@ import { TurnStatus } from '../src/domain/options.js';
 import { RuleSystemKind } from '../src/domain/rules.js';
 import { randomUUID } from 'node:crypto';
 
+test('NPC-enabled v5 context freezes off-prompt sheets without adding them to prompt or changing legacy contexts', () => {
+  const c = newCampaign({ name: 'NPC snapshot' });
+  c.characters.push({
+    id: randomUUID(),
+    name: 'Marcus',
+    type: 'npc',
+    attributes: { strength: 3 },
+    inventory: {},
+    description: {},
+    notes: 'NPC_PRIVATE',
+    revision: 2,
+  });
+  const legacy = buildContext(c, [], 'Travel', [], 16000, true, undefined, 5);
+  assert.equal(legacy.frozenKnowledge, undefined);
+  assert.doesNotMatch(legacy.systemPrompt!, /campaign_npcs_get/);
+  const context = buildContext(c, [], 'Travel', [], 16000, true, undefined, 5, true);
+  assert.equal(context.frozenKnowledge!.npcCharacters![0]!.attributes.strength, 3);
+  assert.deepEqual(JSON.parse(context.prompt).mandatory.characters, []);
+  assert.doesNotMatch(JSON.stringify(context), /NPC_PRIVATE/);
+  assert.match(context.systemPrompt!, /campaign_npcs_search/);
+  c.characters[0]!.attributes.strength = 9;
+  assert.equal(context.frozenKnowledge!.npcCharacters![0]!.attributes.strength, 3);
+  assert.equal(
+    buildContext(c, [], 'Travel', [], 16000, true, undefined, 4, true).frozenKnowledge,
+    undefined
+  );
+});
+
 test('v4 evidence spans identify only supplied source text with absolute Unicode offsets', () => {
   const c = newCampaign({ name: 'Evidence spans' });
   const id = randomUUID();
@@ -88,7 +116,6 @@ test('v4 context separates exact instructions from reference data and selects ex
 
 test('book context fits ordinary instructions and a character without the old byte cap', () => {
   const c = newCampaign({ name: 'Book context' });
-  c.budgets.gameplay = 16000;
   c.characters = [
     {
       id: 'player',
@@ -193,4 +220,27 @@ test('memory coverage and undone events are excluded and compaction stays bounde
   assert.ok(largeBatch.prompt.includes('x'.repeat(40000)));
   c.memory.valid = false;
   assert.deepEqual(buildContext(c, h, 'go', [], 16000).historyIds, ['1', '2']);
+});
+
+test('retrieved relevant sections are included even when the old capacity estimate is tiny', () => {
+  const campaign = newCampaign({ name: 'No gameplay ceiling' });
+  const sections = [
+    { id: randomUUID(), version: 1, text: 'Relevant rule. '.repeat(3000) },
+    { id: randomUUID(), version: 1, text: 'Other relevant rule. '.repeat(3000) },
+  ];
+  const prompt = JSON.parse(buildContext(campaign, [], 'act', sections, 1).prompt);
+  assert.deepEqual(prompt.rules, sections);
+});
+
+test('default compaction packs a 32-KiB consecutive batch without splitting turns', () => {
+  const c = newCampaign({ name: '32 KiB compaction' });
+  assert.equal(c.budgets.compaction, 32768);
+  const history = Array.from({ length: 6 }, (_, i) => turn(String(i), 'x'.repeat(6000)));
+  const batch = compactionBatch(c, history);
+  assert.equal(batch.turns.length, 5);
+  assert.ok(Buffer.byteLength(batch.prompt, 'utf8') <= 32768);
+  assert.deepEqual(
+    batch.turns.map((t) => t.id),
+    ['0', '1', '2', '3', '4']
+  );
 });

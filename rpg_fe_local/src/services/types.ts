@@ -229,7 +229,7 @@ export interface Campaign {
   pinnedFacts: string[];
   pinnedSourceIds: string[];
   pinnedSourceSections?: { sourceId: string; version: number; index: number }[];
-  budgets: { gameplay: number; compaction: number; memory: number };
+  budgets: { compaction: number };
   state: Record<string, unknown>;
   memory: {
     id: string;
@@ -295,7 +295,7 @@ export interface Settings {
     characterType: string;
     ocrLanguage: string;
     transcriptionLanguage: string;
-    budgets: { gameplay: number; compaction: number; memory: number };
+    budgets: { compaction: number };
   };
   audio: { available: boolean; reason: string | null; maxSeconds: number };
   lan: { enabled: boolean };

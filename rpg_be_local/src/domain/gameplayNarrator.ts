@@ -24,7 +24,8 @@ export function gameplayInstructionEnvelope(
   systemInstructions: string,
   campaignInstructions: string,
   book: boolean,
-  version = KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+  version = KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+  npcLookup = false
 ): string {
   const technical =
     'Application integration contract: Return only JSON matching the supplied response schema. ' +
@@ -46,5 +47,8 @@ export function gameplayInstructionEnvelope(
     version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
       ? '\nFor every campaign-source or book evidence item, provide the exact quote and source identity. Choose a quote that occurs only once in the supplied text. The application calculates absolute UTF-16 start/end and book pages; do not calculate them yourself.'
       : '';
-  return `${technical}${audited}${citationInstructions}\n\n${GAMEPLAY_WRITING_GUIDANCE}\n\nSelected system instructions:\n${systemInstructions}\n\nCampaign instructions:\n${campaignInstructions}\n\n`;
+  const npcInstructions = npcLookup
+    ? '\nNPC retrieval: Search existing NPCs with campaign_npcs_search before creating a potentially duplicate character. Empty query lists the frozen roster. Resolve ambiguous matches with the player when needed. Read absent NPC stats with campaign_npcs_get; its saved attributes and inventory are canonical for this turn. Use its knowledge links with campaign_knowledge_get for past events and relationships; preserve certainty, historical status and GM-only visibility. Private notes are unavailable. Never infer saved NPC stats from memory alone.'
+    : '';
+  return `${technical}${audited}${citationInstructions}${npcInstructions}\n\n${GAMEPLAY_WRITING_GUIDANCE}\n\nSelected system instructions:\n${systemInstructions}\n\nCampaign instructions:\n${campaignInstructions}\n\n`;
 }

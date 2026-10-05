@@ -40,7 +40,8 @@ export default function PayloadExplorer() {
         <p>
           <strong>{mentioned ? 'Ivo included' : 'Ivo omitted'}</strong>. Mentioning Ivo selects his
           NPC sheet in this example. In a real turn, the app also checks the saved state, pinned
-          facts, and the last three completed turns that have not been undone.
+          facts, and the last three completed turns that have not been undone. If Ivo is absent, the
+          GM can still search the frozen NPC roster and retrieve his saved sheet with the NPC tools.
         </p>
         <p>
           <strong>{pinned ? 'Pinned excerpt included' : 'Pinned excerpt omitted'}</strong>. A pinned
@@ -48,7 +49,7 @@ export default function PayloadExplorer() {
         </p>
         <p>
           <strong>{book ? 'Book overview included' : 'Default system context'}</strong>. Book mode
-          adds a rulebook overview and makes the four book tools available.
+          adds a rulebook overview and makes rulebook tools available.
         </p>
       </div>
       <details>

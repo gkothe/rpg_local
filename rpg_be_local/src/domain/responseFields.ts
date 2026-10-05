@@ -9,6 +9,15 @@ export class ResponseFieldProblem extends Problem {
     super(cause.status, cause.code, cause.message);
   }
 }
+/** Independent invalid fields can be corrected together without widening their paths. */
+export class ResponseFieldProblems extends ResponseFieldProblem {
+  constructor(public problems: readonly ResponseFieldProblem[]) {
+    super(problems[0]!.path, problems[0]!.cause);
+    this.message = problems
+      .map((problem) => `${problem.path.join('.')}: ${problem.message}`)
+      .join('; ');
+  }
+}
 export function atResponseField<T>(path: ResponsePath, work: () => T): T {
   try {
     return work();

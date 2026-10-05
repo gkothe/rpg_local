@@ -150,7 +150,7 @@ test(
     );
     const library = new LibraryService(store);
     const archive = await library.export(c.id);
-    assert.equal(archive.version, 5);
+    assert.equal(archive.version, 6);
     const imported = await library.import(archive);
     assert.equal(imported.knowledge?.[0]?.certainty, C.Rumor);
     assert.notEqual(imported.knowledge?.[0]?.id, (await store.campaign(c.id)).knowledge![0]!.id);
@@ -325,6 +325,17 @@ test(
       name: 'Long knowledge DB',
       instructions: 'Exact campaign instructions:\n' + 'Keep this whitespace.  \n'.repeat(900),
     });
+    // A mandatory sheet keeps this test's oversized-prompt assertion independent of compaction.
+    c.characters.push({
+      id: randomUUID(),
+      name: 'Traveler',
+      type: 'player',
+      attributes: {},
+      inventory: {},
+      description: { dossier: 'x'.repeat(18000) },
+      notes: '',
+      revision: 1,
+    });
     await store.insert(c);
     let compactions = 0;
     let count = 0;
@@ -424,6 +435,223 @@ test(
 import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { ProviderService } from '../src/providers/service.js';
+import { CharacterType } from '../src/domain/options.js';
+import { freezeKnowledge, type FrozenKnowledge } from '../src/domain/knowledgeRecall.js';
+import { gameplayInstructionEnvelope } from '../src/domain/gameplayNarrator.js';
+import { GameplayTools } from '../src/providers/gameplayTools.js';
+import { buildContext } from '../src/domain/context.js';
+import { gameplayDigest } from '../src/domain/diceContext.js';
+
+test(
+  'NPC-enabled gameplay retrieves off-prompt sheets, targets dice, retries frozen tools and round-trips persisted archives',
+  { skip: !enabled },
+  async () => {
+    const c = newCampaign({ name: 'NPC retrieval integration' });
+    const npcId = randomUUID();
+    c.characters.push({
+      id: npcId,
+      name: 'Marcus',
+      type: CharacterType.Npc,
+      attributes: { strength: 3 },
+      inventory: { coins: 7 },
+      description: { role: 'merchant' },
+      notes: 'PRIVATE_NPC',
+      revision: 1,
+    });
+    await store.insert(c);
+    let calls = 0;
+    const generator: Generator = {
+      ...base,
+      generate: async () => ({ narrative: 'A familiar merchant greets you.' }),
+      generateOwnedGameplay: async (_settings, prompt, _schema, system, tools) => {
+        calls++;
+        assert.match(system, /campaign_npcs_get/);
+        assert.deepEqual(JSON.parse(prompt.split('\nReplay')[0]!).mandatory.characters, []);
+        const found = await tools('campaign_npcs_search', { query: 'merchant' }, 'find');
+        assert.equal((found as { npcs: { id: string }[] }).npcs[0]!.id, npcId);
+        const sheet = await tools('campaign_npcs_get', { id: npcId }, 'sheet');
+        assert.equal(
+          (sheet as { npc: { attributes: { strength: number } } }).npc.attributes.strength,
+          3
+        );
+        assert.doesNotMatch(JSON.stringify(sheet), /PRIVATE_NPC|notes/);
+        await assert.rejects(
+          tools('campaign_npcs_get', { id: randomUUID() }, 'missing'),
+          /NPC is not/
+        );
+        await assert.rejects(
+          tools(
+            'roll_dice',
+            {
+              slot: 0,
+              groups: [{ label: 'Check', count: 1, sides: 6 }],
+              reason: 'Check merchant',
+              declaration: 'No modifiers',
+              actorId: randomUUID(),
+            },
+            'invalid-actor'
+          ),
+          /frozen context/
+        );
+        const roll = await tools(
+          'roll_dice',
+          {
+            slot: 0,
+            groups: [{ label: 'Check', count: 1, sides: 6 }],
+            reason: 'Check merchant',
+            declaration: 'No modifiers',
+            actorId: npcId,
+          },
+          'roll'
+        );
+        if (calls === 1)
+          throw new Problem(503, 'local_service', 'Synthetic interruption after NPC dice');
+        return {
+          version: 5,
+          narrative: 'A familiar merchant greets you.',
+          operations: [],
+          rollInterpretations: [
+            {
+              rollId: (roll as { rollId: string }).rollId,
+              explanation: 'The merchant greets you.',
+            },
+          ],
+          ruleCitations: [],
+          knowledgeChanges: [],
+          operationExplanations: [],
+        };
+      },
+    };
+    const service = new TurnService(store, generator, 5);
+    const first = await service.submit(c.id, {
+      revision: 0,
+      requestId: randomUUID(),
+      action: 'Return to town',
+    });
+    const failed = await finish(c.id, first.id);
+    assert.equal(failed.status, 'failed', failed.error ?? '');
+    const retried = await service.retry(c.id, first.id, {
+      revision: 0,
+      requestId: randomUUID(),
+      settings: { provider: 'switched', model: 'fixture', effort: null },
+    });
+    const completed = await finish(c.id, retried.id);
+    assert.equal(completed.status, 'completed', completed.error ?? '');
+    assert.equal(calls, 2);
+    const library = new LibraryService(store);
+    const exported = await library.export(c.id);
+    assert.equal(exported.version, 6);
+    const original: FrozenKnowledge = exported.diceSessions![0]!.frozenKnowledge!;
+    assert.equal(original.npcCharacters![0]!.id, npcId);
+    assert.ok(
+      exported.diceSessions![0]!.toolDefinitions!.some((tool) => tool.name === 'campaign_npcs_get')
+    );
+    const imported = await library.import(exported);
+    const reexported = await library.export(imported.id);
+    const restored: FrozenKnowledge = reexported.diceSessions![0]!.frozenKnowledge!;
+    assert.equal(restored.npcCharacters![0]!.id, imported.characters[0]!.id);
+    assert.equal(restored.npcCharacters![0]!.inventory.coins, 7);
+    assert.doesNotMatch(JSON.stringify(restored), /PRIVATE_NPC|notes/);
+    await library.import(reexported);
+  }
+);
+
+test(
+  'pre-NPC v5 retries retain exact frozen definitions and do not backfill the new roster',
+  { skip: !enabled },
+  async () => {
+    const c = newCampaign({ name: 'Legacy v5 NPC retry' });
+    await store.insert(c);
+    let calls = 0;
+    const generator: Generator = {
+      ...base,
+      generate: async () => ({ narrative: 'You continue.' }),
+      generateOwnedGameplay: async (_s, _p, _schema, system, tools) => {
+        calls++;
+        assert.doesNotMatch(system, /campaign_npcs_get/);
+        assert.ok(
+          !tools.definitions!.some((definition) => definition.name.startsWith('campaign_npcs_'))
+        );
+        const roll = await tools(
+          'roll_dice',
+          {
+            slot: 0,
+            groups: [{ label: 'Check', count: 1, sides: 6 }],
+            reason: 'Check',
+            declaration: 'No modifiers',
+          },
+          'roll'
+        );
+        return {
+          version: 5,
+          narrative: 'You continue.',
+          operations: [],
+          rollInterpretations: [
+            { rollId: (roll as { rollId: string }).rollId, explanation: 'Continue.' },
+          ],
+          ruleCitations: [],
+          knowledgeChanges: [],
+          operationExplanations: [],
+        };
+      },
+    };
+    const service = new TurnService(store, generator, 5);
+    const context = buildContext(c, [], 'Continue', [], 16000, true, undefined, 5);
+    const knowledge = freezeKnowledge(c, 5);
+    const definitions = new GameplayTools({
+      book: false,
+      knowledge,
+      readCampaignSource: async () => ({}),
+      assertActive: async () => {},
+      roll: async () => {
+        throw Error('Fixture only');
+      },
+    }).definitions;
+    const sessionId = randomUUID();
+    const first: Turn = {
+      id: randomUUID(),
+      campaignId: c.id,
+      requestId: randomUUID(),
+      status: 'failed',
+      action: 'Continue',
+      narrative: null,
+      changes: [],
+      error: 'Historical interruption',
+      undone: false,
+      settings: c.settings,
+      context,
+      createdAt: c.createdAt,
+      completedAt: c.createdAt,
+      diceSessionId: sessionId,
+    };
+    await store.pool.query(
+      'INSERT INTO turns(id,campaign_id,request_id,payload_hash,status,document) VALUES($1,$2,$3,$4,$5,$6)',
+      [first.id, c.id, first.requestId, 'fixture', first.status, first]
+    );
+    await store.pool.query(
+      'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,prompt_contract_version,digest_version,system_prompt,frozen_knowledge,tool_definitions,frozen_sources) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
+      [
+        sessionId,
+        c.id,
+        first.id,
+        gameplayDigest(c, [], undefined, 3),
+        context.prompt,
+        0,
+        '[]',
+        5,
+        3,
+        gameplayInstructionEnvelope('', '', false, 5),
+        knowledge,
+        JSON.stringify(definitions),
+        context.frozenSources,
+      ]
+    );
+    const retry = await service.retry(c.id, first.id, { revision: 0, requestId: randomUUID() });
+    const completed = await finish(c.id, retry.id);
+    assert.equal(completed.status, 'completed', completed.error ?? '');
+    assert.equal(calls, 1);
+  }
+);
 test(
   'on-demand context inspection hydrates exact root inputs without duplicating persisted registry and enforces campaign ownership',
   { skip: !enabled },

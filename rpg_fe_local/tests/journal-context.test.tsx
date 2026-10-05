@@ -64,3 +64,10 @@ it('does not replace a newer inspected turn with an older delayed response', asy
   await waitFor(() => expect(screen.queryByText(/Outdated instructions/)).not.toBeInTheDocument());
   expect(screen.getByText(/New saved instructions/)).toBeInTheDocument();
 });
+
+it('shows active context targets without the retired memory setting', () => {
+  render(<Journal campaign={fixtureCampaign()} options={options} onSaved={async () => {}} />);
+  expect(screen.queryByLabelText('Gameplay tokens')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Compaction batch target (UTF-8 bytes)')).toBeInTheDocument();
+  expect(screen.queryByLabelText('Memory tokens')).not.toBeInTheDocument();
+});

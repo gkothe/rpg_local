@@ -36,6 +36,7 @@ import {
   RULE_ARCHIVE_FORMAT_VERSION,
   KNOWLEDGE_ARCHIVE_FORMAT_VERSION,
   AUDITED_ARCHIVE_FORMAT_VERSION,
+  NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION,
 } from '../domain/versions.js';
 import {
   ruleContextSchema,
@@ -147,23 +148,17 @@ const campaign = z
       .optional(),
     budgets: z
       .object({
-        gameplay: z
-          .number()
-          .int()
-          .min(CONTEXT_BUDGET_LIMITS.gameplay.min)
-          .max(CONTEXT_BUDGET_LIMITS.gameplay.max),
+        gameplay: z.number().optional(),
         compaction: z
           .number()
           .int()
           .min(CONTEXT_BUDGET_LIMITS.compaction.min)
           .max(CONTEXT_BUDGET_LIMITS.compaction.max),
-        memory: z
-          .number()
-          .int()
-          .min(CONTEXT_BUDGET_LIMITS.memory.min)
-          .max(CONTEXT_BUDGET_LIMITS.memory.max),
+        // Accept the retired field from old clients/archives, then discard it.
+        memory: z.number().optional(),
       })
-      .strict(),
+      .strict()
+      .transform(({ compaction }) => ({ compaction })),
     state: object,
     memory: memory.nullable(),
     createdAt: z.iso.datetime(),
@@ -310,7 +305,10 @@ const auditedContext = knowledgeContext
   .strict();
 const auditedArchiveSchema = knowledgeArchiveSchema
   .extend({
-    version: z.literal(AUDITED_ARCHIVE_FORMAT_VERSION),
+    version: z.union([
+      z.literal(AUDITED_ARCHIVE_FORMAT_VERSION),
+      z.literal(NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION),
+    ]),
     campaign: campaign
       .extend({
         knowledge: z.array(campaignKnowledgeSchema),
@@ -346,12 +344,17 @@ const auditedArchiveSchema = knowledgeArchiveSchema
     ),
   })
   .strict();
+export function assertNpcArchiveFormat(version: number, captured?: FrozenKnowledge | null) {
+  if (version < NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION && captured?.npcCharacters !== undefined)
+    throw new Problem(422, 'archive_invalid', 'Frozen NPC sheets require archive version 6');
+}
 export function remapArchive(raw: unknown): Archive {
   const isAudited =
     typeof raw === 'object' &&
     raw !== null &&
     'version' in raw &&
-    raw.version === AUDITED_ARCHIVE_FORMAT_VERSION;
+    (raw.version === AUDITED_ARCHIVE_FORMAT_VERSION ||
+      raw.version === NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION);
   const isKnowledge =
     isAudited ||
     (typeof raw === 'object' &&
@@ -439,9 +442,10 @@ export function remapArchive(raw: unknown): Archive {
     throw new Problem(422, 'archive_invalid', 'Legacy archives cannot contain dice sessions');
   const archive: Archive = {
     ...parsed,
-    version: (isAudited
-      ? AUDITED_ARCHIVE_FORMAT_VERSION
-      : ARCHIVE_FORMAT_VERSION) as Archive['version'],
+    version:
+      parsed.version === NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION
+        ? NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION
+        : ARCHIVE_FORMAT_VERSION,
     diceSessions: parsed.diceSessions ?? [],
     diceRecords: parsed.diceRecords ?? [],
   };
@@ -527,7 +531,7 @@ export function remapArchive(raw: unknown): Archive {
     if (!ids.has(id)) ids.set(id, randomUUID());
     historicalCharacters.add(id);
   };
-  const frozen = [
+  const frozen: FrozenKnowledge[] = [
     ...archive.diceSessions!.flatMap((session) =>
       session.frozenKnowledge ? [session.frozenKnowledge] : []
     ),
@@ -535,7 +539,15 @@ export function remapArchive(raw: unknown): Archive {
       turn.context?.frozenKnowledge ? [turn.context.frozenKnowledge] : []
     ),
   ];
+  for (const turn of archive.turns) {
+    if (
+      turn.context?.frozenKnowledge?.npcCharacters !== undefined &&
+      turn.context.promptContractVersion !== 5
+    )
+      throw new Problem(422, 'archive_invalid', 'Frozen NPC sheets require version 5 gameplay');
+  }
   for (const captured of frozen) {
+    assertNpcArchiveFormat(parsed.version, captured);
     if (
       captured.campaignId !== old.id ||
       new Set(captured.characters.map((char) => char.id)).size !== captured.characters.length ||
@@ -543,6 +555,19 @@ export function remapArchive(raw: unknown): Archive {
     )
       throw new Problem(422, 'archive_invalid', 'Invalid frozen knowledge campaign or identities');
     captured.characters.forEach((char) => characterLink(char.id));
+    if (captured.npcCharacters) {
+      if (
+        new Set(captured.npcCharacters.map((npc) => npc.id)).size !==
+          captured.npcCharacters.length ||
+        old.characters.some(
+          (character) =>
+            character.type === CharacterType.Player &&
+            captured.npcCharacters!.some((npc) => npc.id === character.id)
+        )
+      )
+        throw new Problem(422, 'archive_invalid', 'Invalid frozen NPC identities');
+      captured.npcCharacters.forEach((npc) => characterLink(npc.id));
+    }
     captured.sourceIds.forEach(sourceLink);
     if (captured.sourceVersions) {
       if (
@@ -987,6 +1012,9 @@ export function remapArchive(raw: unknown): Archive {
     captured.characters.forEach((character) => {
       character.id = mapped(character.id);
     });
+    captured.npcCharacters?.forEach((npc) => {
+      npc.id = mapped(npc.id);
+    });
     captured.sourceIds = captured.sourceIds.map(mapped);
     for (const source of captured.sourceVersions ?? []) source.id = mapped(source.id);
   };
@@ -1215,6 +1243,10 @@ export class LibraryService {
         'SELECT * FROM dice_records WHERE campaign_id=$1 ORDER BY session_id,slot',
         [id]
       );
+      for (const turn of turns)
+        assertNpcArchiveFormat(ARCHIVE_FORMAT_VERSION, turn.context?.frozenKnowledge);
+      for (const row of sessions.rows)
+        assertNpcArchiveFormat(ARCHIVE_FORMAT_VERSION, row.frozen_knowledge);
       return {
         format: ARCHIVE_FORMAT_ID,
         version: ARCHIVE_FORMAT_VERSION,

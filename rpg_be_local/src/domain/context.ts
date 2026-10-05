@@ -4,7 +4,7 @@ import { responseJsonSchema, memoryJsonSchema } from './schemas.js';
 import { CharacterType, SourceStatus, TurnStatus } from './options.js';
 import { DICE_NARRATOR } from './dice.js';
 import { BOOK_GAMEPLAY_NARRATOR, gameplayInstructionEnvelope } from './gameplayNarrator.js';
-import { selectRelevantKnowledge } from './knowledgeRecall.js';
+import { selectRelevantKnowledge, freezeKnowledge } from './knowledgeRecall.js';
 import {
   KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
   AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
@@ -65,10 +65,11 @@ export function buildContext(
     end?: number;
     name?: string;
   }[],
-  capacity: number,
+  _capacity: number,
   trustedDice = false,
   rulePrompt?: RulePrompt,
-  responseVersion?: number
+  responseVersion?: number,
+  npcLookup = false
 ): ContextManifest {
   const sourceContext = responseVersion === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
   const envelope = responseVersion === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION || sourceContext;
@@ -90,10 +91,10 @@ export function buildContext(
         rulePrompt?.instructions ?? '',
         c.instructions,
         rulePrompt?.context.kind === RuleSystemKind.Library,
-        responseVersion
+        responseVersion,
+        sourceContext && npcLookup
       )
     : undefined;
-  let ceiling = Math.min(c.budgets.gameplay, capacity);
   const book = rulePrompt?.context.kind === RuleSystemKind.Library;
   const estimate = book ? estimateBookTokens : estimateTokens;
   const history = uncovered(c, turns);
@@ -194,29 +195,14 @@ export function buildContext(
     history: format(history),
     rules: [],
   };
-  // Budgets guide retrieval and compaction, never rejection or data loss.
-  ceiling = Math.max(ceiling, estimate(JSON.stringify(payload)));
+  // Retrieval already ranks relevant sections. Do not reject them by prompt size.
   for (const rule of rules) {
     if (
       c.pinnedSourceIds.includes(rule.id) ||
       pinned.some((s) => s.id === rule.id && s.text === rule.text)
     )
       continue;
-    const candidate = { ...payload, rules: [...payload.rules, rule] };
-    if (estimate(JSON.stringify(candidate)) <= ceiling) payload.rules.push(rule);
-    else if (sourceContext) {
-      sourceSelection.omitted.push({
-        id: rule.id,
-        version: rule.version,
-        sectionIndex: c.sources.find((s) => s.id === rule.id && s.version === rule.version)
-          ? (sourceSections(
-              c.sources.find((s) => s.id === rule.id && s.version === rule.version)!
-            ).find((s) => s.start === rule.start)?.index ?? 0)
-          : 0,
-      });
-      if (!sourceSelection.reasons.includes('target_omission'))
-        sourceSelection.reasons.push('target_omission');
-    }
+    payload.rules.push(rule);
   }
   const prompt = JSON.stringify(payload);
   const sourceSpans = envelope
@@ -243,6 +229,7 @@ export function buildContext(
     ...(sourceContext
       ? {
           frozenSources,
+          ...(npcLookup ? { frozenKnowledge: freezeKnowledge(c, responseVersion, true) } : {}),
           sourceSelection: {
             ...sourceSelection,
             included: (sourceSpans ?? []).map((span) => ({

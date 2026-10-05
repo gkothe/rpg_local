@@ -11,6 +11,7 @@ import {
   type CampaignKnowledge,
 } from './knowledge.js';
 import type { Campaign } from './types.js';
+import { npcSnapshotSchema, freezeNpcCharacters } from './npcRecall.js';
 export const KNOWLEDGE_SEARCH_TOOL_NAME = 'campaign_knowledge_search';
 export const KNOWLEDGE_GET_TOOL_NAME = 'campaign_knowledge_get';
 export const knowledgeSearchSchema = z
@@ -34,13 +35,17 @@ export const frozenKnowledgeSchema = z
   })
   .strict();
 export const frozenKnowledgeV5Schema = frozenKnowledgeSchema
-  .extend({ records: z.array(campaignKnowledgeSchema) })
+  .extend({
+    records: z.array(campaignKnowledgeSchema),
+    npcCharacters: z.array(npcSnapshotSchema).optional(),
+  })
   .strict();
 export type FrozenKnowledge = z.infer<typeof frozenKnowledgeV5Schema>;
-export function freezeKnowledge(c: Campaign, version = 4): FrozenKnowledge {
+export function freezeKnowledge(c: Campaign, version = 4, includeNpcs = false): FrozenKnowledge {
   return structuredClone({
     campaignId: c.id,
     records: version === 5 ? (c.knowledge ?? []) : legacyKnowledge(c.knowledge ?? []),
+    ...(version === 5 && includeNpcs ? { npcCharacters: freezeNpcCharacters(c) } : {}),
     characters: c.characters.map(({ id, name }) => ({ id, name })),
     sourceIds: c.sources.map((s) => s.id),
     sourceVersions: c.sources.map(({ id, version }) => ({ id, version })),
@@ -103,16 +108,7 @@ export function selectRelevantKnowledge(
         b.updatedAt.localeCompare(a.updatedAt) ||
         a.id.localeCompare(b.id)
     );
-  const selected = [...mandatory];
-  let size = JSON.stringify(selected).length;
-  for (const r of optional) {
-    const cost = JSON.stringify(r).length;
-    if (size + cost <= c.budgets.gameplay) {
-      selected.push(r);
-      size += cost;
-    }
-  }
-  return selected;
+  return [...mandatory, ...optional];
 }
 export function createKnowledgeRecall(raw: FrozenKnowledge) {
   const frozen = structuredClone(frozenKnowledgeV5Schema.parse(raw));

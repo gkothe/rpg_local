@@ -307,7 +307,7 @@ sequenceDiagram
 
 Implementation evidence: [gameplayTools.ts](../../rpg_be_local/src/providers/gameplayTools.ts), [claudeDice.ts](../../rpg_be_local/src/providers/claudeDice.ts), [codexDice.ts](../../rpg_be_local/src/providers/codexDice.ts), [antigravityMcpBook.ts](../../rpg_be_local/src/providers/antigravityMcpBook.ts), [discovery.ts](../../rpg_be_local/src/providers/discovery.ts).
 
-During a game turn, the model has access to application-owned tools exposed through authenticated private loopback HTTP MCP (Claude/Antigravity) or stdio JSON-RPC dynamic tools (Codex). Current v5 gameplay exposes dice, knowledge recall and campaign source lookup; book mode adds rule lookup tools. Historical v4 sessions retain their original dice/knowledge registry:
+During a game turn, the model has access to application-owned tools exposed through authenticated private loopback HTTP MCP (Claude/Antigravity) or stdio JSON-RPC dynamic tools (Codex). New v5 gameplay exposes dice, NPC retrieval, knowledge recall and campaign source lookup; book mode adds rule lookup tools. Historical sessions retain their exact original registry:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -398,7 +398,7 @@ Validation runs in application code, without a tool call or an AI call. Current 
 4. If a readable response fails in a repairable field, send its candidate, allowed field paths, failure reason and captured evidence to the same selected CLI/model/effort, without gameplay tools. The CLI returns only path/value corrections. The application rejects any path outside its allowlist and revalidates the corrected response. Valid fields, the narrative and saved dice cannot be replaced through this correction contract. Paths may identify an invalid item or metadata collection when the error involves that complete item/collection.
 5. A validated candidate proceeds to mandatory narrative-only editing, then atomic commit. No state mutation is committed during field repair, and no database transaction spans the correction CLI call.
 
-Field validation permits up to two correction calls. If restricted repair fails, the turn fails with saved dice available; it does not automatically generate another scenario. Account quota, authentication, cancellation, isolation and ownership/revision failures stop immediately. Failed candidates remain in private diagnostic logs; only fully validated candidates receive an editing-resume record.
+Citation binding gathers all independently invalid citation paths before requesting correction, so multiple malformed quotes can be repaired together without authorizing edits to valid citations or unrelated fields. Field validation permits up to two correction calls. If restricted repair fails, the turn fails with saved dice available; it does not automatically generate another scenario. Account quota, authentication, cancellation, isolation and ownership/revision failures stop immediately. Failed candidates remain in private diagnostic logs; only fully validated candidates receive an editing-resume record.
 
 Unreadable JSON or failures occurring before a final response exists still use the legacy generation-retry loop, with up to two additional attempts and enforced replay of saved dice. Historical version 1–4 retries retain their original complete-response contract. Neither receipt checks nor narrative anchor checks prove semantic fidelity or correct rule interpretation.
 
@@ -850,11 +850,11 @@ Implementation evidence: [context.ts](../../rpg_be_local/src/domain/context.ts),
 
 `buildContext()` returns a **ContextManifest** containing serialized JSON `prompt`, revision, estimates, source/history IDs and optional system prompt/frozen metadata. The manifest itself is not the user payload sent to inference.
 
-Because different models have different context window tolerances, the application enforces **soft token budgets**:
+The application leaves gameplay prompt capacity to the CLI and retains only a soft summarization-batch target:
 
-- `gameplay`: default 16,000 estimated tokens (optional retrieval target, not a history ceiling).
-- `compaction`: default 8,000 tokens.
-- `memory`: default 2,000 tokens.
+- Gameplay has no configurable prompt-size ceiling. Ranked retrieved sections and matching optional campaign facts are included without a size gate. Legacy `budgets.gameplay` values are ignored and discarded from edits/imports.
+- `compaction`: default 32,768 UTF-8 bytes (32 KiB) per summarization batch under the current conservative estimator, not 8,000 tokenizer-measured tokens.
+  The retired `memory` budget has no runtime purpose and is no longer configurable. Older archive/client fields are accepted and discarded; this does not remove campaign memories or summarization.
 
 These targets never reject a successful CLI result. Ordinary generation, field repair and narrative editing do not require token-usage telemetry or impose a post-response input-token ceiling. Completion, isolation and structured-response validation still apply; reported usage remains available in local diagnostics. Native adapters treat absent, partial or malformed usage telemetry as unavailable diagnostics rather than failing otherwise valid responses. Foreign thread identities still fail isolation checks. Explicit model catalogs accept any positive input-token target without a fixed upper ceiling.
 
@@ -1301,7 +1301,7 @@ Implementation evidence: [context.ts](../../rpg_be_local/src/domain/context.ts),
 
 Compaction is lossy model-authored summarization. Original turns remain in PostgreSQL, but covered turn text is replaced by memory in subsequent gameplay prompts. Schema validation establishes a non-empty text field, not completeness or factual fidelity.
 
-For new actions, compaction is considered when uncovered completed history exceeds 6,000 estimated tokens, the prompt is missing, or its estimate exceeds 80% of the soft selected capacity. It runs only with more than one uncovered turn and is skipped on manual retry:
+For new actions, compaction is considered when uncovered completed history exceeds 6,000 estimated tokens, or the prompt is missing. Gameplay prompt size no longer triggers summarization. It runs only with more than one uncovered turn and is skipped on manual retry:
 
 1. **Consecutive Prefix Batching (`context.ts: compactionBatch`)**:
    Selects a consecutive prefix of uncovered completed turns. Its soft ceiling is enlarged to accommodate each individual turn, so the batch can exceed `c.budgets.compaction`. It includes prior valid memory for incremental summarization rather than resending the complete covered transcript.
@@ -1311,7 +1311,7 @@ For new actions, compaction is considered when uncovered completed history excee
    Preserve origins and certainty: allegations, rumors and beliefs must remain attributed and uncertain; memory never replaces canonical registry records.
    ```
 3. **Memory Record Insertion**:
-   The model returns `{ text }`; the backend constructs the Memory ID, timestamp, valid flag and cumulative `coveredTurnIds` (prior valid coverage plus this batch). Each milestone is committed separately before gameplay generation and can survive later turn failure. Generated text is not checked against `c.budgets.memory`; manual reviewed memory is.
+   The model returns `{ text }`; the backend constructs the Memory ID, timestamp, valid flag and cumulative `coveredTurnIds` (prior valid coverage plus this batch). Each milestone is committed separately before gameplay generation and can survive later turn failure. Generated and manually saved memory have no memory-budget gate.
 4. **Active State Continuity**:
    Pinned facts, player/scene-relevant character state, selected active knowledge records, prior valid memory and all uncovered turns remain in context. There is no fixed last-N preservation rule; a batch may cover all uncovered turns.
 5. **Reversibility**:
@@ -1330,8 +1330,8 @@ English journal interface teaches this architecture through four views:
   provider/mode differences and failure/repair/retry branches.
 - **Payload**: synthetic pin/NPC/book toggles, complete system/user prompt examples with the
   v5 response schema, a final proposal with indexed mechanical explanations and an expected-value acceptance/rejection comparison.
-- **Tools**: all seven named owned tools, example arguments/results and selectable request,
-  validation, service, return and final-proposal stages. It distinguishes frozen knowledge recall
+- **Tools**: named owned tools, example arguments/results and selectable request,
+  validation, service, return and final-proposal stages. It distinguishes frozen NPC sheets and knowledge recall
   from PostgreSQL rule lookup and persisted dice.
 - **Storage**: producing/consuming services, retained audit, success/failure/cancellation/undo
   outcomes, touched-field conflicts and source/audio/archive/template/logging branches.
@@ -1385,7 +1385,7 @@ Implementation: [turns.ts](../../rpg_be_local/src/services/turns.ts), [narrative
 | `turns.document.operationExplanations` | Indexed reasons and supporting evidence for mechanical changes.                                                                                                           |
 | ignored root `log/`                    | Exact prompt JSON and readable Markdown, plus ordered correlated JSONL events for requests, owned tool results, provider finals, repairs, narrative selection and commit. |
 
-Migrations [0009](../../rpg_be_local/migrationssql/0009_turn_reference_audit.sql) and [0010](../../rpg_be_local/migrationssql/0010_narrative_edits.sql) add these records without rewriting historical migrations. Candidate contents and completed edits are immutable; owner/status changes support recovery. New exports use archive 5 and preserve frozen source snapshots and read provenance while imported sessions remain non-executable. Pending editor candidates are not transported as resumable campaign saves. Templates start a fresh timeline and clear played knowledge.
+Migrations [0009](../../rpg_be_local/migrationssql/0009_turn_reference_audit.sql) and [0010](../../rpg_be_local/migrationssql/0010_narrative_edits.sql) add these records without rewriting historical migrations. Candidate contents and completed edits are immutable; owner/status changes support recovery. New exports use archive 6 and preserve frozen NPC and source snapshots and read provenance while imported sessions remain non-executable. Pending editor candidates are not transported as resumable campaign saves. Templates start a fresh timeline and clear played knowledge.
 
 Logs retain the `YYYYMMdd__HHmmss__{action}` prefix, with collision-safe suffixes. Run, turn, execution and correction metadata distinguish one logical action from individual provider calls. Authentication/environment/native stderr data is excluded from trace payloads. Prompts and full local audit can still contain private campaign information. A mandatory pre-execution logging failure stops the call. Logging failure after a saved draw or commit marks the audit incomplete instead of repeating gameplay or pretending a rollback occurred.
 
@@ -1402,6 +1402,30 @@ GM-only knowledge stores unrevealed plans and secrets separately from visible NP
 Full exports, ignored local logs and deliberately opened Advanced context diagnostics can reveal spoilers. This is a player presentation boundary, not access control against the owner of the local database. Prompts instruct the model to avoid putting secrets into narration, public state or visible change reasons; the app cannot establish that prose is free of every semantic spoiler.
 
 Implementation: [context.ts](../../rpg_be_local/src/domain/context.ts), [campaignSourceRecall.ts](../../rpg_be_local/src/domain/campaignSourceRecall.ts), [playerProjection.ts](../../rpg_be_local/src/domain/playerProjection.ts), [operationExplanations.ts](../../rpg_be_local/src/domain/operationExplanations.ts).
+
+### 4.7 Frozen NPC retrieval
+
+Player sheets remain in every gameplay prompt; scene-relevant NPC sheets are selected automatically.
+For an older NPC absent from that prompt, `campaign_npcs_search` searches saved names and nested
+description text in the turn's frozen roster. All query tokens must match; duplicate names retain
+separate IDs. An empty query lists the roster, with up to 20 results per page.
+`campaign_npcs_get` returns one full saved sheet (attributes, inventory, description and revision)
+and linked knowledge locators. Private notes are excluded. Knowledge remains separate from canonical
+stats and retains certainty, lifecycle and GM-only visibility.
+
+New version-5 contexts capture this roster alongside `frozenKnowledge.npcCharacters`, persisted in
+the root dice session's existing JSONB metadata. Lookups use memory, not fresh database reads, and
+retries reconstruct the exact original registry. Old snapshots lacking the field expose no NPC tools;
+an explicitly empty roster still enables search/get. Frozen NPC IDs are valid dice actor/target IDs
+even when their sheets were absent from the initial prompt. Reads grant no mutation privileges.
+Codex can correct `npc_not_found` or `npc_cursor` failures with a fresh call ID; ownership,
+cancellation and operational failures remain fatal.
+
+Exports now use archive format 6; imports retain versions 1–5. Snapshot IDs and defined knowledge
+links are remapped, including historical NPCs, while arbitrary sheet values and UUID-looking prose
+remain unchanged. NPC snapshots cannot be labeled as version-5 archive data. Gameplay response
+version 5 and digest version 3 remain unchanged. The Flow Tools and Payload views illustrate
+off-prompt NPC retrieval without calling a provider or reading a live campaign.
 
 ### Combined book lookup
 

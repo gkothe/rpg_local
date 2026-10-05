@@ -40,6 +40,20 @@ import {
 import { existsSync, readFileSync } from 'node:fs';
 import { createCampaignSourceRecall } from '../../rpg_be_local/src/domain/campaignSourceRecall.ts';
 import { findRules } from '../../rpg_be_local/src/providers/rulesFind.ts';
+import { createNpcRecall } from '../../rpg_be_local/src/domain/npcRecall.ts';
+
+test('illustrated NPC lookup retrieves an off-prompt saved sheet without private notes', () => {
+  const lookup = createNpcRecall(ids.campaign, [{ ...npc, revision: 0 }], []);
+  for (const [name, method] of [
+    ['campaign_npcs_search', 'search'],
+    ['campaign_npcs_get', 'get'],
+  ]) {
+    const example = tools.find((tool) => tool.id === name);
+    assert.ok(example, `Missing ${name} example`);
+    assert.deepEqual(lookup[method](example.args), example.result);
+    assert.doesNotMatch(JSON.stringify(example.result), /notes/);
+  }
+});
 
 test('illustrated campaign source navigation matches real search and get payloads', () => {
   const lookup = createCampaignSourceRecall({
@@ -154,7 +168,8 @@ test('all illustrated payload selections and envelopes match the real context bu
                 : 'Use model knowledge and label provisional adjudications.',
               overview: expected.mandatory.rulesOverview ?? '',
             },
-            version
+            version,
+            version === 5
           );
           assert.deepEqual(JSON.parse(manifest.prompt), expected);
           assert.equal(

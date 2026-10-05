@@ -259,6 +259,8 @@ export async function runCodexDicePhases(
                   'gameplay_arguments_invalid',
                   'knowledge_not_found',
                   'knowledge_cursor',
+                  'npc_not_found',
+                  'npc_cursor',
                 ].includes(error.code)
               )
                 throw error;

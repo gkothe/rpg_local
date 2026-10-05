@@ -67,4 +67,7 @@ test('recall is frozen across compaction/provider switches; relevance includes u
   assert.equal(recall.search({ query: '', status: S.Retracted }).records.length, 1);
   assert.equal(recall.get({ id: frozen.records[44]!.id }).status, S.Retracted);
   assert.equal(selectRelevantKnowledge(r.campaign, 'Wait')[0]!.kind, K.Debt);
+  for (const record of r.campaign.knowledge!) record.text += 'x'.repeat(1000);
+  assert.equal(selectRelevantKnowledge(r.campaign, 'Inn').length, 44);
+  assert.equal(selectRelevantKnowledge(r.campaign, 'Unrelated').length, 1);
 });

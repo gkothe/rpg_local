@@ -1,5 +1,24 @@
 import { test, expect } from '@playwright/test';
 
+test('Flow explains off-prompt NPC retrieval using synthetic data only', async ({ page }) => {
+  const calls: string[] = [];
+  await page.route('**/api/**', (route) => {
+    calls.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ json: { data: { enabled: false, desktop: true, paired: true } } });
+  });
+  await page.goto('/flow?view=tools');
+  await page.getByRole('button', { name: /^campaign_npcs_get/ }).click();
+  await expect(page.getByRole('heading', { name: 'How NPC lookup works' })).toBeVisible();
+  await expect(
+    page.getByText('The roster stays fixed for this turn and its retries.', { exact: false })
+  ).toBeVisible();
+  await page.getByText('Example arguments and result sent to the model', { exact: true }).click();
+  await expect(page.locator('.flow-card pre').filter({ hasText: 'knowledgeLinks' })).toContainText(
+    'Ivo'
+  );
+  expect(calls.every((path) => path === '/api/lan/status')).toBe(true);
+});
+
 test('explores the complete guide without campaign or provider requests', async ({
   page,
 }, testInfo) => {

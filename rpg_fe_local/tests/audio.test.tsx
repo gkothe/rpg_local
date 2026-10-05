@@ -60,7 +60,7 @@ describe('audio boundaries', () => {
       </>
     );
     expect(screen.queryByText('Read aloud')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Read', exact: true })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Read' })).toHaveLength(2);
     expect(screen.queryByText('Online voice (en-US)')).not.toBeInTheDocument();
     const rows = screen
       .getAllByRole('group', { name: 'Read aloud controls' })

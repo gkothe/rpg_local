@@ -4,13 +4,93 @@ import { sourceSections } from '../src/domain/sourceSections.js';
 import { textSource } from '../src/services/sources.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import { buildContext } from '../src/domain/context.js';
-import { LibraryService, remapArchive } from '../src/services/library.js';
+import { LibraryService, remapArchive, assertNpcArchiveFormat } from '../src/services/library.js';
 import type { Store } from '../src/store.js';
 import { RuleSystemKind } from '../src/domain/rules.js';
-import { createKnowledgeRecall } from '../src/domain/knowledgeRecall.js';
+import { createKnowledgeRecall, type FrozenKnowledge } from '../src/domain/knowledgeRecall.js';
 import { privateIpv4 } from '../src/security.js';
 import { randomUUID } from 'node:crypto';
 import { KNOWLEDGE_ARCHIVE_FORMAT_VERSION } from '../src/domain/versions.js';
+import { CharacterType } from '../src/domain/options.js';
+
+function npcArchive() {
+  const input = knowledgeArchive();
+  const npcId = input.campaign.knowledge![0]!.characterIds[0]!;
+  return {
+    ...input,
+    version: 6,
+    diceSessions: input.diceSessions.map((session) => ({
+      ...session,
+      promptContractVersion: 5,
+      digestVersion: 3,
+      frozenSources: { campaignId: input.campaign.id, sources: [] },
+      frozenKnowledge: {
+        ...session.frozenKnowledge,
+        npcCharacters: [
+          {
+            id: npcId,
+            name: 'Deleted guard',
+            type: CharacterType.Npc,
+            revision: 2,
+            attributes: { literal: npcId },
+            inventory: { coins: 7 },
+            description: { role: 'guard' },
+          },
+        ],
+      },
+    })),
+  };
+}
+
+test('NPC archive snapshots remap historical identities but preserve incidental sheet strings', () => {
+  const input = npcArchive();
+  const out = remapArchive(input);
+  assert.equal(out.version, 6);
+  const captured: FrozenKnowledge = out.diceSessions![0]!.frozenKnowledge!;
+  const npc = captured.npcCharacters![0]!;
+  assert.notEqual(npc.id, input.diceSessions[0]!.frozenKnowledge.npcCharacters[0]!.id);
+  assert.equal(npc.id, out.campaign.knowledge![0]!.characterIds[0]);
+  assert.equal(npc.id, out.diceSessions![0]!.characterIds[0]);
+  assert.equal(npc.attributes.literal, input.diceSessions[0]!.frozenKnowledge.npcCharacters[0]!.id);
+  assert.equal(npc.inventory.coins, 7);
+  assert.equal(npc.revision, 2);
+  assert.throws(() => assertNpcArchiveFormat(5, captured), /version 6/);
+  assert.doesNotThrow(() => assertNpcArchiveFormat(6, captured));
+  assert.doesNotThrow(() => assertNpcArchiveFormat(5, { ...captured, npcCharacters: undefined }));
+  assert.throws(() => remapArchive({ ...input, version: 5 }), /version 6/);
+  const reimported = remapArchive(out);
+  const restored: FrozenKnowledge = reimported.diceSessions![0]!.frozenKnowledge!;
+  assert.equal(restored.npcCharacters![0]!.inventory.coins, 7);
+});
+
+test('NPC archives reject duplicate, private, player and foreign snapshot identities', () => {
+  for (const corrupt of [
+    (input: ReturnType<typeof npcArchive>) =>
+      input.diceSessions[0]!.frozenKnowledge.npcCharacters.push(
+        structuredClone(input.diceSessions[0]!.frozenKnowledge.npcCharacters[0]!)
+      ),
+    (input: ReturnType<typeof npcArchive>) =>
+      Object.assign(input.diceSessions[0]!.frozenKnowledge.npcCharacters[0]!, { notes: 'private' }),
+    (input: ReturnType<typeof npcArchive>) =>
+      Object.assign(input.diceSessions[0]!.frozenKnowledge.npcCharacters[0]!, { type: 'player' }),
+    (input: ReturnType<typeof npcArchive>) => {
+      input.diceSessions[0]!.frozenKnowledge.campaignId = randomUUID();
+    },
+  ]) {
+    const input = npcArchive();
+    corrupt(input);
+    assert.throws(() => remapArchive(input));
+  }
+});
+
+test('NPC snapshots cannot be attached to a historical v4 turn context', () => {
+  const input = npcArchive();
+  const context = buildContext(input.campaign, [], 'Continue', [], 16000, true, undefined, 4);
+  Object.assign(input.turns[0]!, {
+    context: { ...context, frozenKnowledge: input.diceSessions[0]!.frozenKnowledge },
+  });
+  assert.throws(() => remapArchive(input), /NPC sheets require version 5 gameplay/);
+});
 import {
   KnowledgeKind,
   KnowledgeOrigin,
@@ -442,4 +522,13 @@ test('archives preserve memory above the soft campaign target', () => {
   const imported = remapArchive(withMemory);
   assert.equal(imported.campaign.memory?.text, memory.text);
   assert.equal(imported.memories[0]?.text, memory.text);
+});
+
+test('legacy archive memory budget is discarded while campaign memory is retained', () => {
+  const archive = knowledgeArchive();
+  const imported = remapArchive({
+    ...archive,
+    campaign: { ...archive.campaign, budgets: { ...archive.campaign.budgets, memory: 2000 } },
+  });
+  assert.deepEqual(Object.keys(imported.campaign.budgets), ['compaction']);
 });

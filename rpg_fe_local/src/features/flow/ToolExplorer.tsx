@@ -20,6 +20,7 @@ export default function ToolExplorer({
   const tool = tools.find((t) => t.id === selected) ?? tools[0];
   const bookEnabled = book || tool.bookOnly;
   const knowledge = tool.id.startsWith('campaign_knowledge');
+  const npcs = tool.id.startsWith('campaign_npcs');
   return (
     <section className="flow-card" aria-label="Tool explorer">
       <h2>How the model uses tools</h2>
@@ -40,7 +41,8 @@ export default function ToolExplorer({
         Enable book tools
       </label>
       <p>
-        {bookEnabled ? '7 available tools' : '3 available tools. The other four require book mode.'}
+        {tools.filter((candidate) => bookEnabled || !candidate.bookOnly).length} available tools.
+        {!bookEnabled && ' Rulebook tools require book mode.'}
       </p>
       <div className="flow-tool-list">
         {tools.map((t) => (
@@ -59,11 +61,13 @@ export default function ToolExplorer({
         ))}
       </div>
       <h3 style={{ marginTop: '1.5rem' }}>
-        {knowledge
-          ? 'How knowledge lookup works'
-          : tool.id === 'roll_dice'
-            ? 'How a dice roll is recorded'
-            : 'How the model reads a rulebook'}
+        {npcs
+          ? 'How NPC lookup works'
+          : knowledge
+            ? 'How knowledge lookup works'
+            : tool.id === 'roll_dice'
+              ? 'How a dice roll is recorded'
+              : 'How the model reads a rulebook'}
       </h3>
       <div className="flow-edges" aria-label="Tool trace stages">
         {[
@@ -80,7 +84,26 @@ export default function ToolExplorer({
       </div>
       <p role="status">{traceDetails[trace]}</p>
       <ol className="flow-trace">
-        {knowledge ? (
+        {npcs ? (
+          <>
+            <li>
+              Player sheets are always supplied. NPCs mentioned in the scene can also be included
+              automatically.
+            </li>
+            <li>
+              For an older NPC absent from the prompt, search the frozen roster by name or
+              description. An empty query lists it; duplicate names have separate IDs.
+            </li>
+            <li>
+              Get returns the chosen NPC’s complete saved sheet without private notes. Knowledge
+              links lead to events and relationships through the knowledge tools.
+            </li>
+            <li>
+              The roster stays fixed for this turn and its retries. Lookup reads data; changes still
+              require validated operations in the final proposal.
+            </li>
+          </>
+        ) : knowledge ? (
           <>
             <li>
               Before calling the model, the app reads campaign knowledge from PostgreSQL and copies
@@ -160,9 +183,9 @@ export default function ToolExplorer({
         <summary>How a model corrects a tool request</summary>
         <p>
           Codex can receive an unsuccessful tool result for an invalid dice request, invalid
-          argument format, missing knowledge record, or invalid search cursor. The model can correct
-          the request within the same conversation using a new call ID. This does not erase saved
-          dice or restart the outer response-repair counter.
+          argument format, missing NPC or knowledge record, or invalid search cursor. The model can
+          correct the request within the same conversation using a new call ID. This does not erase
+          saved dice or restart the outer response-repair counter.
         </p>
         <p>
           Antigravity must call the native call_mcp_tool gateway with ServerName:local_rpg, a

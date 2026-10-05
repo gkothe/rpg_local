@@ -1,3 +1,5 @@
+import { CONTEXT_DEFAULTS } from '../src/domain/options.js';
+import { campaignPatchSchema } from '../src/domain/schemas.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -40,4 +42,13 @@ test('manual memory preserves text above the soft target and still checks covera
     /consecutive prefix/
   );
   assert.equal(saved.length, 1);
+});
+
+test('retired memory budget is absent from defaults and discarded from legacy edits', () => {
+  assert.deepEqual(Object.keys(CONTEXT_DEFAULTS), ['compaction']);
+  const parsed = campaignPatchSchema.parse({
+    revision: 0,
+    budgets: { gameplay: 16000, compaction: 8000, memory: 2000 },
+  });
+  assert.deepEqual(parsed.budgets, { compaction: 8000 });
 });

@@ -6,6 +6,7 @@ Read this file and the target app's `CLAUDE.md` before changing its code. Read b
 
 - Use the coding skill and relevant specialists when available. Skills are shared across harnesses; never install, edit or delete them without the user's explicit confirmation. A public checkout must work without machine-specific skill paths.
 - Keep common rules here, app gotchas in each app's `CLAUDE.md`, and topic details in `docs/`. Record non-obvious verified findings concisely; correct stale entries. Keep temporary plans, investigation journals and review reports outside the repository. Update maintained documentation with verified behavior rather than retaining implementation history.
+- When a change affects the behavior explained by the Flow view, update that view and its maintained documentation. Add only relevant changes; do not add unrelated detail or noise.
 - Never copy credentials, `.env`, private data, logs, dumps or unrelated Git histories into this repository. Use placeholders in committed examples. Never use a production database for development or tests.
 - Keep scratch files, temporary scripts and diff dumps outside the repository. Permanent tests and maintained tooling belong in the repository.
 - Root npm workspaces own installation and `package-lock.json`. Coordinate installs between agents. Use normal `npm install`; do not inherit another project's dependency workarounds.

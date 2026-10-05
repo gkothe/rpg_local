@@ -52,14 +52,10 @@ export const CHARACTER_MUTABLE_FIELDS = [
 export const OCR_LANGUAGE_CODES = ['eng', 'por', 'eng+por'] as const;
 export const TRANSCRIPTION_LANGUAGE_CODES = ['auto', 'en', 'pt'] as const;
 export const CONTEXT_BUDGET_LIMITS = {
-  gameplay: { min: 2000, max: 16000, default: 16000 },
-  compaction: { min: 2000, max: 8000, default: 8000 },
-  memory: { min: 200, max: 2000, default: 2000 },
+  compaction: { min: 2000, max: 32 * 1024, default: 32 * 1024 },
 } as const;
 export const CONTEXT_DEFAULTS = {
-  gameplay: CONTEXT_BUDGET_LIMITS.gameplay.default,
   compaction: CONTEXT_BUDGET_LIMITS.compaction.default,
-  memory: CONTEXT_BUDGET_LIMITS.memory.default,
 } as const;
 export const TURN_STATUS_OPTIONS = [
   { id: TurnStatus.Pending, label: 'Preparing', active: true, terminal: false, completed: false },

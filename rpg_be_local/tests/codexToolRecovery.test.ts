@@ -5,6 +5,79 @@ import os from 'node:os';
 import path from 'node:path';
 import { runCodexDicePhases } from '../src/providers/codexDice.js';
 import { Problem } from '../src/errors.js';
+import { randomUUID } from 'node:crypto';
+import { GameplayTools } from '../src/providers/gameplayTools.js';
+import { newCampaign } from '../src/domain/campaign.js';
+import { freezeKnowledge } from '../src/domain/knowledgeRecall.js';
+import { CharacterType } from '../src/domain/options.js';
+import { gameplayResponseJsonSchema } from '../src/domain/gameplayResponse.js';
+
+for (const code of ['npc_not_found', 'npc_cursor']) {
+  test(`Codex corrects ${code} with a fresh call ID and receives actual frozen NPC results`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-codex-npc-'));
+    try {
+      const c = newCampaign({ name: 'Native NPC' });
+      const id = randomUUID();
+      c.characters.push({
+        id,
+        name: 'Marcus',
+        type: CharacterType.Npc,
+        attributes: { strength: 3 },
+        inventory: {},
+        description: {},
+        notes: 'PRIVATE',
+        revision: 1,
+      });
+      const registry = new GameplayTools({
+        book: false,
+        knowledge: freezeKnowledge(c, 5, true),
+        assertActive: async () => {},
+        roll: async () => {
+          throw Error('Unexpected roll');
+        },
+      });
+      const tool = code === 'npc_not_found' ? 'campaign_npcs_get' : 'campaign_npcs_search';
+      const badArgs =
+        code === 'npc_not_found' ? { id: randomUUID() } : { query: '', cursor: 'bad' };
+      const goodArgs = code === 'npc_not_found' ? { id } : { query: 'Marcus' };
+      const file = path.join(root, 'cli.mjs');
+      await writeFile(
+        file,
+        `import readline from 'node:readline';
+const send=o=>console.log(JSON.stringify(o));
+readline.createInterface({input:process.stdin}).on('line',raw=>{
+ const m=JSON.parse(raw);
+ if(m.id===1)send({id:1,result:{}});
+ else if(m.id===2){if(!m.params.dynamicTools.some(t=>t.name==='${tool}'))throw Error('Missing NPC tool');send({id:2,result:{thread:{id:'t'}}});}
+ else if(m.id===3){send({id:3,result:{turn:{id:'u'}}});send({id:9,method:'item/tool/call',params:{tool:'${tool}',arguments:${JSON.stringify(badArgs)},callId:'bad',threadId:'t',turnId:'u'}});}
+ else if(m.id===9){if(m.result.success!==false)throw Error('Expected recoverable failure');send({id:10,method:'item/tool/call',params:{tool:'${tool}',arguments:${JSON.stringify(goodArgs)},callId:'corrected',threadId:'t',turnId:'u'}});}
+ else if(m.id===10){if(!m.result.success||!JSON.stringify(m.result).includes('Marcus')||JSON.stringify(m.result).includes('PRIVATE'))throw Error('Expected private-safe NPC result');send({method:'turn/completed',params:{threadId:'t',turn:{id:'u',status:'completed',items:[{type:'agentMessage',text:JSON.stringify({payload_json:JSON.stringify({version:4,narrative:'NPC recalled',operations:[],rollInterpretations:[],ruleCitations:[],knowledgeChanges:[]})})}]}}});}
+});`
+      );
+      const result = await runCodexDicePhases(
+        { binary: process.execPath, prefix: [file] },
+        { provider: 'codex', model: 'fixture', effort: null },
+        'Synthetic NPC action',
+        root,
+        process.env,
+        {},
+        async () => {
+          throw Error('Unexpected roll');
+        },
+        undefined,
+        {
+          dispatch: registry.call,
+          definitions: registry.definitions,
+          schema: gameplayResponseJsonSchema,
+          systemPrompt: '',
+        }
+      );
+      assert.equal((result as { narrative: string }).narrative, 'NPC recalled');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
 
 const fixture = `import readline from 'node:readline';
 const send=o=>console.log(JSON.stringify(o));

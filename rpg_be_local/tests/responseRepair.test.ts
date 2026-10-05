@@ -14,7 +14,7 @@ import {
 } from '../src/domain/knowledge.js';
 import { ruleCitationSchema, RuleSystemKind, type RuleRead } from '../src/domain/rules.js';
 import { validateRuleCitations } from '../src/domain/ruleCitationValidation.js';
-import { ResponseFieldProblem } from '../src/domain/responseFields.js';
+import { ResponseFieldProblem, ResponseFieldProblems } from '../src/domain/responseFields.js';
 import { Problem } from '../src/errors.js';
 import {
   validateWithFieldRepair,
@@ -290,6 +290,71 @@ test('field repair corrects one citation and preserves narrative, hidden facts a
     quote: 'Invented quotation',
   });
 });
+test('repairs all invalid citations together before the retry budget, preserving valid content and dice', async () => {
+  const campaign = newCampaign({ name: 'Citation repair' });
+  campaign.id = campaignId;
+  const rollId = randomUUID();
+  const valid = response(sourceEvidence()).knowledgeChanges[0]!;
+  const original = {
+    ...response(sourceEvidence()),
+    knowledgeChanges: [
+      { ...valid, evidence: [{ ...sourceEvidence(), quote: 'Incorrect first quotation' }] },
+      valid,
+      { ...valid, evidence: [{ ...sourceEvidence(), quote: 'Incorrect second quotation' }] },
+    ],
+    operations: [{ op: 'state', expected: campaign.state, value: { gate: 'closed' } }],
+    operationExplanations: [
+      {
+        operationIndex: 0,
+        reason: 'The keeper owns the key and closes the gate.',
+        basis: 'source',
+        rollIds: [],
+        evidence: [{ ...sourceEvidence(), quote: 'Incorrect third quotation' }],
+        visibility: 'player',
+      },
+    ],
+    rollInterpretations: [{ rollId, explanation: 'The saved roll remains authoritative.' }],
+  };
+  const paths = [
+    ['knowledgeChanges', 0, 'evidence', 0],
+    ['knowledgeChanges', 2, 'evidence', 0],
+    ['operationExplanations', 0, 'evidence', 0],
+  ];
+  const snapshot = structuredClone(original);
+  assert.throws(
+    () => bindResponseCitations(gameplayResponseV5InputSchema.parse(original), context),
+    (error: unknown) =>
+      error instanceof ResponseFieldProblems &&
+      JSON.stringify(error.problems.map((problem) => problem.path)) === JSON.stringify(paths)
+  );
+  let calls = 0;
+  const generator: Generator = {
+    capacity: async () => 10000,
+    generate: async (_settings, prompt) => {
+      calls++;
+      assert.deepEqual(JSON.parse(prompt).allowedPaths, paths);
+      return { corrections: paths.map((path) => ({ path, value: sourceEvidence() })) };
+    },
+  };
+  const result = await validateWithFieldRepair(
+    original,
+    async (candidate) => {
+      const bound = bindResponseCitations(gameplayResponseV5InputSchema.parse(candidate), context);
+      applyResponse(campaign, bound, turnId, context);
+    },
+    generator,
+    settings
+  );
+  assert.equal(calls, 1);
+  assert.deepEqual(original, snapshot);
+  assert.equal(result.narrative, original.narrative);
+  assert.deepEqual(result.operations, original.operations);
+  assert.deepEqual(result.knowledgeChanges[1], valid);
+  assert.deepEqual(result.rollInterpretations, original.rollInterpretations);
+  assert.equal(result.operationExplanations[0]!.reason, original.operationExplanations[0]!.reason);
+  assert.equal(result.knowledgeChanges[0]!.visibility, 'gm_only');
+  assert.deepEqual(campaign.state, original.operations[0]!.expected);
+});
 test('repair rejects narrative edits, unsafe paths and malformed correction output', async () => {
   const original = response(sourceEvidence());
   for (const raw of [
@@ -327,6 +392,38 @@ test('repair rejects narrative edits, unsafe paths and malformed correction outp
     (error: unknown) => error instanceof Problem && error.code === 'response_repair_failed'
   );
   assert.equal(calls, 1);
+});
+test('batched citation repair retains the two-call limit when corrections remain invalid', async () => {
+  const original = response({ ...sourceEvidence(), quote: 'Invalid quote' });
+  original.knowledgeChanges.push(structuredClone(original.knowledgeChanges[0]!));
+  let calls = 0;
+  const generator: Generator = {
+    capacity: async () => 10000,
+    generate: async (_settings, prompt) => {
+      calls++;
+      const { allowedPaths } = JSON.parse(prompt);
+      assert.equal(allowedPaths.length, 2);
+      return {
+        corrections: allowedPaths.map((path: (string | number)[]) => ({
+          path,
+          value: { ...sourceEvidence(), quote: 'Still invalid' },
+        })),
+      };
+    },
+  };
+  await assert.rejects(
+    () =>
+      validateWithFieldRepair(
+        original,
+        async (candidate) => {
+          bindResponseCitations(gameplayResponseV5InputSchema.parse(candidate), context);
+        },
+        generator,
+        settings
+      ),
+    (error: unknown) => error instanceof Problem && error.code === 'response_repair_failed'
+  );
+  assert.equal(calls, 2);
 });
 test('quota, cancellation and ownership failures stop repair; no generated scene is requested', async () => {
   const original = response(sourceEvidence());

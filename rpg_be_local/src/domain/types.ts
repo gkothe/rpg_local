@@ -18,6 +18,8 @@ import type {
 import type {
   ARCHIVE_FORMAT_ID,
   ARCHIVE_FORMAT_VERSION,
+  AUDITED_ARCHIVE_FORMAT_VERSION,
+  NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION,
   GM_RESPONSE_SCHEMA_VERSION,
 } from './versions.js';
 import type { DiceRecord, DiceSession } from './dice.js';
@@ -79,7 +81,7 @@ export type Campaign = {
   pinnedFacts: string[];
   pinnedSourceIds: string[];
   pinnedSourceSections?: { sourceId: string; version: number; index: number }[];
-  budgets: { gameplay: number; compaction: number; memory: number };
+  budgets: { compaction: number };
   state: JsonObject;
   memory: Memory | null;
   createdAt: string;
@@ -173,7 +175,10 @@ export type Archive = {
   diceSessions?: DiceSession[];
   diceRecords?: DiceRecord[];
   format: typeof ARCHIVE_FORMAT_ID;
-  version: typeof ARCHIVE_FORMAT_VERSION;
+  version:
+    | typeof ARCHIVE_FORMAT_VERSION
+    | typeof AUDITED_ARCHIVE_FORMAT_VERSION
+    | typeof NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION;
   campaign: Campaign;
   turns: Turn[];
   snapshots: Snapshot[];

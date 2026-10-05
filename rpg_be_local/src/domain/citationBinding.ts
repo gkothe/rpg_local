@@ -1,6 +1,10 @@
 import { Problem } from '../errors.js';
 import { mapResponseCitations } from './citationInput.js';
-import { ResponseFieldProblem } from './responseFields.js';
+import {
+  ResponseFieldProblem,
+  ResponseFieldProblems,
+  type ResponsePath,
+} from './responseFields.js';
 import { citationPages } from './ruleCitationValidation.js';
 import type { KnowledgeValidation } from './knowledge.js';
 import type { GameplayResponseV5 } from './gameplayResponse.js';
@@ -17,7 +21,8 @@ export function bindResponseCitations(
   response: GameplayResponseV5,
   context: KnowledgeValidation
 ): GameplayResponseV5 {
-  return mapResponseCitations(response, (citation, book, path) => {
+  const problems: ResponseFieldProblem[] = [];
+  const bind = (citation: Record<string, unknown>, book: boolean, path: ResponsePath) => {
     const invalid = (message: string): never => {
       throw new ResponseFieldProblem(path, new Problem(502, 'citation_binding', message));
     };
@@ -72,5 +77,16 @@ export function bindResponseCitations(
       citation.start = starts[0]!;
       citation.end = starts[0]! + quote.length;
     }
+  };
+  const bound = mapResponseCitations(response, (citation, book, path) => {
+    try {
+      bind(citation, book, path);
+    } catch (error) {
+      if (!(error instanceof ResponseFieldProblem)) throw error;
+      problems.push(error);
+    }
   }) as GameplayResponseV5;
+  if (problems.length === 1) throw problems[0];
+  if (problems.length > 1) throw new ResponseFieldProblems(problems);
+  return bound;
 }

@@ -76,7 +76,6 @@ import {
 const TURN_LEASE_SECONDS = 45;
 const TURN_HEARTBEAT_INTERVAL_MS = 10_000;
 const AUTO_COMPACTION_HISTORY_THRESHOLD_TOKENS = 6_000;
-const CONTEXT_REBUILD_THRESHOLD = 0.8;
 export class TurnService {
   private aborts = new Map<string, AbortController>();
   constructor(
@@ -132,7 +131,7 @@ export class TurnService {
     const capacity = await this.selectedCapacity(
       initialCampaign,
       input.settings ?? initialCampaign.settings,
-      initialCampaign.budgets.gameplay
+      Infinity
     );
     let launch = false;
     const turn = await this.store.transaction(async (client) => {
@@ -189,7 +188,9 @@ export class TurnService {
             !!this.generator.generateGameplay ||
             system.kind === RuleSystemKind.Library,
           this.rulePrompt(system),
-          this.generator.generateOwnedGameplay ? this.responseVersion : undefined
+          this.generator.generateOwnedGameplay ? this.responseVersion : undefined,
+          !!this.generator.generateOwnedGameplay &&
+            this.responseVersion === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
         );
       } catch (e) {
         if (!(e instanceof Problem && e.code === 'context_overflow')) throw e;
@@ -256,11 +257,7 @@ export class TurnService {
       return this.store.turn(campaignId, prior.rows[0].document.id);
     }
     const initial = await this.store.campaign(campaignId);
-    await this.selectedCapacity(
-      initial,
-      input.settings ?? initial.settings,
-      initial.budgets.gameplay
-    );
+    await this.selectedCapacity(initial, input.settings ?? initial.settings, Infinity);
     let launch = false;
     const next = await this.store.transaction(async (client) => {
       const campaign = await this.store.campaign(campaignId, client, true);
@@ -480,11 +477,10 @@ export class TurnService {
       });
       let c = await this.store.campaign(t.campaignId);
       let history = await this.store.activeTurns(c.id);
-      const capacity = await this.selectedCapacity(c, t.settings, c.budgets.gameplay);
+      const capacity = await this.selectedCapacity(c, t.settings, Infinity);
       let needs =
         uncoveredHistoryTokens(c, history) > AUTO_COMPACTION_HISTORY_THRESHOLD_TOKENS ||
-        !t.context?.prompt ||
-        t.context.estimatedTokens > capacity * CONTEXT_REBUILD_THRESHOLD;
+        !t.context?.prompt;
       // Each bounded batch covers a consecutive prefix; never recursively summarizes the full transcript.
       while (!t.retryOfTurnId && needs && uncovered(c, history).length > 1) {
         const compactionCapacity = await this.generator.capacity(t.settings, c.budgets.compaction);
@@ -544,7 +540,9 @@ export class TurnService {
             t.ruleContext
               ? this.rulePrompt(await new RuleStore(this.store).guard(t.ruleContext, client))
               : undefined,
-            this.generator.generateOwnedGameplay ? this.responseVersion : undefined
+            this.generator.generateOwnedGameplay ? this.responseVersion : undefined,
+            !!this.generator.generateOwnedGameplay &&
+              this.responseVersion === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
           );
           t.context = turn.context;
           await this.store.saveTurn(turn, client);
@@ -658,7 +656,12 @@ export class TurnService {
                       ? KNOWLEDGE_GAMEPLAY_DIGEST_VERSION
                       : LEGACY_GAMEPLAY_DIGEST_VERSION
                 ),
-                characters.map((character) => character.id),
+                [
+                  ...new Set([
+                    ...characters.map((character) => character.id),
+                    ...(t.context!.frozenKnowledge?.npcCharacters ?? []).map((npc) => npc.id),
+                  ]),
+                ],
                 v4
                   ? {
                       promptContractVersion: t.context!.promptContractVersion,

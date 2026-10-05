@@ -14,7 +14,7 @@ Campaigns also include `pinnedSourceSections: {sourceId:string,version:number,in
 
 `Memory = {id,text,coveredTurnIds:string[],valid:boolean,createdAt:string}`
 
-`Campaign = {id,name,description,instructions,revision:number,notes:string,notesRevision:number,characters:Character[],sources:Source[],settings:ProviderSettings,pinnedFacts:string[],pinnedSourceIds:string[],budgets:{gameplay:number,compaction:number,memory:number},state:object,memory:Memory|null,createdAt:string,updatedAt:string}`
+`Campaign = {id,name,description,instructions,revision:number,notes:string,notesRevision:number,characters:Character[],sources:Source[],settings:ProviderSettings,pinnedFacts:string[],pinnedSourceIds:string[],budgets:{compaction:number},state:object,memory:Memory|null,createdAt:string,updatedAt:string}`
 
 `Turn = {id,campaignId,requestId,status:'pending'|'running'|'completed'|'failed'|'cancelled'|'interrupted',action,narrative:string|null,changes:string[],error:string|null,undone:boolean,settings:ProviderSettings,context:object|null,createdAt,completedAt:string|null}`
 
@@ -49,13 +49,29 @@ Campaigns also include `pinnedSourceSections: {sourceId:string,version:number,in
 - POST `/campaigns/:id/memory` `{revision,text,coveredTurnIds:string[],confirm:true}` => Campaign. Coverage must be an exact consecutive prefix of active completed turns; bounded text, explicitly reviewed checkpoint.
 - GET/POST `/templates`; POST `{name,campaignId,revision}` => Template `{id,name,setup:object,createdAt}`. DELETE `/templates/:id` `{}` => `{deleted:true}`. POST `/templates/:id/campaigns` `{name?}` => Campaign.
 - GET/POST `/character-templates`; POST `{name,campaignId,characterId,revision}` => `{id,name,character:Character,createdAt}`. Private character notes are removed. DELETE `/character-templates/:id` `{}` => `{deleted:true}`. POST `/campaigns/:id/characters/from-template` `{templateId,revision}` => Campaign with a fresh character ID and empty private notes.
-- GET `/campaigns/:id/export` => Archive `{format:'local-rpg',version:2,campaign:Campaign,turns:Turn[],snapshots:object[],memories:Memory[],diceSessions:object[],diceRecords:object[]}`. Idle campaign only; no paths/credentials/audio/raw files.
+- GET `/campaigns/:id/export` => Archive `{format:'local-rpg',version:6,campaign:Campaign,turns:Turn[],snapshots:object[],memories:Memory[],diceSessions:object[],diceRecords:object[]}`. Idle campaign only; no paths/credentials/audio/raw files. Imports accept versions 1–6; older app versions cannot import the new format.
 - POST `/campaigns/import` `{archive:Archive}` => CampaignDetail with new UUIDs.
 - POST `/audio/transcriptions` multipart `file`, `language` ('en'/'pt'/'auto') => `{text:string}`. Local FasterWhisper only; no campaign context; diagnostics under settings. No hidden cloud fallback.
 - POST `/lan/code` `{}` => `{code,expiresAt}`; desktop loopback only. POST `/lan/pair` `{code}` => `{paired:true}` and HttpOnly device cookie; opt-in LAN only, single use. POST `/lan/revoke` `{}` => `{revoked:true}`; desktop only. Sessions clear on restart. Unpaired LAN campaign reads and writes return `pairing_required`.
 - GET `/lan/status` => `{enabled,desktop,paired,expiresAt:string|null,connectUrls:string[],microphoneRequiresHttps:true}`. HTTPS pairing sets a Secure cookie. Device approval expires after twelve hours; code expires after two minutes. Status is available before pairing.
 
 ## Frontend behavior
+
+### Owned NPC lookup tools
+
+New version-5 gameplay sessions expose `campaign_npcs_search({query:string,cursor?:string})`
+and `campaign_npcs_get({id:uuid})` through the existing private owned tool transport, not HTTP
+campaign routes. Search is case-insensitive across saved names and nested description strings,
+AND-matches query tokens, and returns `{campaignId,npcs:[{id,name,revision,matchedFields}],nextCursor}`.
+Empty query lists the roster. Query length is at most 256 characters, cursor at most 2048, and
+page size is 20. Cursors are bound to the frozen campaign snapshot and normalized query.
+
+Get returns `{campaignId,npc:{id,name,type:'npc',attributes,inventory,description,revision},knowledgeLinks}`.
+Links contain `{id,title,kind,origin,certainty,status,visibility?}`; use `campaign_knowledge_get`
+for the full record. Private notes are excluded. Missing or player IDs produce `npc_not_found`404;
+invalid/mismatched cursors produce `npc_cursor`422; invalid arguments use `gameplay_arguments_invalid`422.
+The optional `frozenKnowledge.npcCharacters` metadata is stored only for NPC-enabled sessions;
+absence preserves the old tool registry on retries. Archive format 6 preserves/remaps this data.
 
 Always send current `revision` on campaign mutations; refetch after turn completes/cancels/undo. Toolbar changes use PATCH campaign/settings; turn captures settings. Don't lose local unsaved character/composer text while refetching. Read-aloud is frontend local SpeechSynthesis only. LAN opt-in configuration stays a desktop setup feature; unpaired LAN protected reads and writes require pairing cookie.
 
@@ -129,9 +145,9 @@ Character parsing accepts imported UTF-8 text in any extension (including JSON/M
 
 ### CLI capacity and automatic response repair
 
-Campaign budgets are soft retrieval/compaction targets, not AI admission limits. Mandatory context is preserved even above a target. Native CLI context/output/compaction and inference limits apply; the app adds no AI attempt deadline. Ordinary generation, field repair and narrative editing also accept successful CLI responses above soft capacity, or without token-usage telemetry; usage is diagnostic rather than an admission gate, including partial or malformed usage metadata. Memory checkpoints are accepted above their soft target for manual saves and archive imports. Explicit model catalogs accept any positive input-token target. Successful isolated completion and valid response JSON remain required. Active turn Cancel remains available. Version warnings remain informational, and installed model-supported efforts plus Default are accepted.
+Gameplay has no configurable size ceiling: relevant retrieved passages and matching campaign facts are included without a token gate. Compaction retains a consecutive-prefix batch target (default 32,768 UTF-8 bytes, measured by the conservative estimator). Legacy gameplay/memory budget fields are accepted and discarded from edits/imports. Mandatory context is preserved even above a target. Native CLI context/output/compaction and inference limits apply; the app adds no AI attempt deadline. Ordinary generation, field repair and narrative editing also accept successful CLI responses above soft capacity, or without token-usage telemetry; usage is diagnostic rather than an admission gate, including partial or malformed usage metadata. Memory checkpoints are accepted above their soft target for manual saves and archive imports. Explicit model catalogs accept any positive input-token target. Successful isolated completion and valid response JSON remain required. Active turn Cancel remains available. Version warnings remain informational, and installed model-supported efforts plus Default are accepted.
 
-Current v5 readable responses use field-only repair: application validation identifies allowed paths; a tools-free call to the same CLI/model/effort returns path/value corrections, which are checked and fully revalidated. Narrative and other valid fields stay unchanged. Citation offsets/pages are computed in code from exact, uniquely identifiable supplied quotes; computed fields are optional only on the CLI wire contract and remain required in storage/archives. Invalid or ambiguous quotes still require correction. Restricted repair failure stops without automatic scene regeneration. Unreadable JSON and pre-final generation failures retain up to two generation retries with saved-dice replay; historical versions retain their complete-response retry behavior. Both correction loops stop on quota, cancellation, changed ownership/rules/campaign context or forbidden capabilities. Diagnostic prompts and responses remain local Git-ignored logs. The UI keeps an animated busy indicator and an editable next-action draft.
+Current v5 readable responses use field-only repair: application validation identifies allowed paths; a tools-free call to the same CLI/model/effort returns path/value corrections, which are checked and fully revalidated. Narrative and other valid fields stay unchanged. Citation offsets/pages are computed in code from exact, uniquely identifiable supplied quotes; computed fields are optional only on the CLI wire contract and remain required in storage/archives. Invalid or ambiguous quotes still require correction. Citation binding gathers every independently invalid citation path in one correction request, within the existing two-call repair limit; valid citations and unrelated fields remain protected. Restricted repair failure stops without automatic scene regeneration. Unreadable JSON and pre-final generation failures retain up to two generation retries with saved-dice replay; historical versions retain their complete-response retry behavior. Both correction loops stop on quota, cancellation, changed ownership/rules/campaign context or forbidden capabilities. Diagnostic prompts and responses remain local Git-ignored logs. The UI keeps an animated busy indicator and an editable next-action draft.
 
 Invalid Antigravity `call_mcp_tool` gateway server/tool envelopes use recoverable `gameplay_tool_unavailable`: dispatch is denied, the provider attempt closes, and correction feedback identifies the owned registry. Saved dice/context remain unchanged. Actual native capability violations retain non-retryable isolation errors. Argument-free DONE metadata is accepted only for an already validated/dispatched owned tool step.
 
