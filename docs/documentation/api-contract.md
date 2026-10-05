@@ -306,6 +306,15 @@ during Settings refresh. CLI discovery failures retain their diagnostic reason.
 
 ### Rule-read accounting after migration 0011
 
+For current v5 tool registries, `rules_search` entries may include `alreadySupplied`,
+`originalComplete` and `suppliedOriginals` receipt locators for original text delivered
+in that execution at the same rule revision/hash/path. `rules_find` returns those
+locators and skips automatic rereads of complete originals. Partial or explicit
+`rules_get` reads remain available; metadata alone cannot support a ruling.
+Restricted response corrections select evidence through invalid-field references,
+with full-context fallback for unresolved references or collection errors. This does
+not change response schemas, allowed correction paths or provider effort.
+
 Rule lookups have no accumulated request-count or transcript-byte ceiling. The database
 keeps nonnegative audit counters and immutable receipts. Responses remain paginated;
 a cursor requests the next page. Archive v5 preserves receipt totals above the former

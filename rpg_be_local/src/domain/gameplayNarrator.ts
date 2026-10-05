@@ -20,6 +20,9 @@ export const GAMEPLAY_WRITING_GUIDANCE =
   'Return the game response only, without editorial drafts, writing audits or explanations of these guidelines.';
 
 // Legacy prompts above remain available only for frozen pre-envelope retries.
+export const KNOWLEDGE_PROVENANCE_GUIDANCE =
+  'Use origin source only for claims directly supported by the cited original document or book, with exact evidence. Use origin gm for events or details created during play, with evidence []. Keep documented facts and emergent developments in separate records when their origins differ; a background citation does not establish newly invented details. Player claims retain their attribution and certainty. Never change origin merely to make evidence pass validation.';
+
 export function gameplayInstructionEnvelope(
   systemInstructions: string,
   campaignInstructions: string,
@@ -50,5 +53,9 @@ export function gameplayInstructionEnvelope(
   const npcInstructions = npcLookup
     ? '\nNPC retrieval: Search existing NPCs with campaign_npcs_search before creating a potentially duplicate character. Empty query lists the frozen roster. Resolve ambiguous matches with the player when needed. Read absent NPC stats with campaign_npcs_get; its saved attributes and inventory are canonical for this turn. Use its knowledge links with campaign_knowledge_get for past events and relationships; preserve certainty, historical status and GM-only visibility. Private notes are unavailable. Never infer saved NPC stats from memory alone.'
     : '';
-  return `${technical}${audited}${citationInstructions}${npcInstructions}\n\n${GAMEPLAY_WRITING_GUIDANCE}\n\nSelected system instructions:\n${systemInstructions}\n\nCampaign instructions:\n${campaignInstructions}\n\n`;
+  const provenanceInstructions =
+    version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+      ? `\nKnowledge provenance: ${KNOWLEDGE_PROVENANCE_GUIDANCE}`
+      : '';
+  return `${technical}${audited}${citationInstructions}${provenanceInstructions}${npcInstructions}\n\n${GAMEPLAY_WRITING_GUIDANCE}\n\nSelected system instructions:\n${systemInstructions}\n\nCampaign instructions:\n${campaignInstructions}\n\n`;
 }

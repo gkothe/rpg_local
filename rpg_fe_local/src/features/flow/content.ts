@@ -109,7 +109,7 @@ export const nodes: FlowItem[] = [
     'After the model responds and before the app saves the gameplay result.',
     'The v5 response: story text, proposed changes, explanations of dice rolls, rule citations, and campaign knowledge changes.',
     'Validated changes, their explanations and a prose-only edited narrative. An editing failure preserves the private candidate for editing-only resume.',
-    'A rejected proposal leaves the saved gameplay state unchanged. For some errors, the app can ask the model to fix its response up to twice.',
+    'A rejected proposal leaves the saved gameplay state unchanged. The app can request up to two corrections, sending evidence linked to the invalid fields. Unresolved references or collection errors retain the complete evidence bundle.',
     '5.1',
     [
       'rpg_be_local/src/domain/gameplayResponse.ts',

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { withSuppliedRuleReads } from './ruleReadReuse.js';
 import { DICE_TOOL_NAME, diceInputSchema, type DiceResult } from '../domain/dice.js';
 import { RULE_TOOLS, serializedBytes, type RuleTool } from '../domain/rules.js';
 import { ruleToolSchemas } from '../services/ruleLookup.js';
@@ -79,6 +80,7 @@ function ownedRegistrations(
   ruleFind = false,
   assertActive: () => Promise<void> = async () => {}
 ): GameplayToolRegistration[] {
+  const ruleRead = read && ruleFind ? withSuppliedRuleReads(read) : read;
   const recall = knowledge ? createKnowledgeRecall(knowledge) : undefined;
   const npcs =
     knowledge?.npcCharacters !== undefined
@@ -144,14 +146,17 @@ function ownedRegistrations(
     ...RULE_TOOLS.map((name): GameplayToolRegistration => ({
       name,
       description:
-        name === 'rules_get'
+        (name === 'rules_get'
           ? 'Read bounded direct original text or derived fields. Only direct text receipts support citations.'
-          : 'Discover current rule paths and derived navigation metadata. Results are not ruling authority.',
+          : 'Discover current rule paths and derived navigation metadata. Results are not ruling authority.') +
+        (ruleFind
+          ? ' Reuse suppliedOriginals receipt locators when alreadySupplied; originalComplete means the whole passage was delivered. Intentional rereads remain available.'
+          : ''),
       schema: ruleToolSchemas[name],
       purpose: 'book',
       capability: 'rules',
-      handler: (input, id) => read!(name, input, JSON.stringify(id)),
-      invalid: (input, id) => read!(name, input, JSON.stringify(id)),
+      handler: (input, id) => ruleRead!(name, input, JSON.stringify(id)),
+      invalid: (input, id) => ruleRead!(name, input, JSON.stringify(id)),
     })),
     ...(ruleFind
       ? [
@@ -163,7 +168,7 @@ function ownedRegistrations(
             purpose: 'book' as const,
             capability: 'rules' as const,
             handler: (input: unknown, id: string | number) =>
-              findRules(read!, input, id, assertActive),
+              findRules(ruleRead!, input, id, assertActive),
           },
         ]
       : []),

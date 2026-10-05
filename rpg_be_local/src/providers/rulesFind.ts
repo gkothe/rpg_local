@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { RuleTool } from '../domain/rules.js';
+import { originalReadLocator } from './ruleReadReuse.js';
 
 export const RULE_FIND_TOOL_NAME = 'rules_find';
 // A first page of originals, not a cap on further retrieval or native tool calls.
@@ -16,7 +17,14 @@ export async function findRules(
   const search = await read('rules_search', input, `find:${identity}:search`);
   const eligible = Array.isArray(search.entries)
     ? search.entries.filter(
-        (entry): entry is { path: string; readableOriginal: true } =>
+        (
+          entry
+        ): entry is {
+          path: string;
+          readableOriginal: true;
+          originalComplete?: boolean;
+          suppliedOriginals?: unknown[];
+        } =>
           !!entry &&
           typeof entry === 'object' &&
           entry.readableOriginal === true &&
@@ -24,7 +32,8 @@ export async function findRules(
       )
     : [];
   const reads: Record<string, unknown>[] = [];
-  for (const [index, hit] of eligible.slice(0, INITIAL_ORIGINAL_READS).entries()) {
+  const unread = eligible.filter((hit) => !hit.originalComplete);
+  for (const [index, hit] of unread.slice(0, INITIAL_ORIGINAL_READS).entries()) {
     await assertActive();
     reads.push(
       await read('rules_get', { path: hit.path, view: 'text' }, `find:${identity}:get:${index}`)
@@ -33,26 +42,21 @@ export async function findRules(
   return {
     search,
     reads,
-    suppliedOriginals: reads
-      .filter(
-        (read) =>
-          !read.error &&
-          read.view === 'text' &&
-          !read.structural &&
-          typeof read.text === 'string' &&
-          read.text.length > 0
-      )
-      .map((read) => ({
-        receiptId: read.receipt,
-        path: read.path,
-        start: read.start,
-        end: read.end,
-        complete: read.complete,
-        nextRead:
-          typeof read.cursor === 'string'
-            ? { path: read.path, view: 'text', cursor: read.cursor }
-            : null,
-      })),
-    unreadPaths: eligible.slice(INITIAL_ORIGINAL_READS).map((hit) => hit.path),
+    suppliedOriginals: [
+      ...eligible
+        .filter((hit) => hit.originalComplete)
+        .flatMap((hit) => hit.suppliedOriginals ?? []),
+      ...reads
+        .filter(
+          (read) =>
+            !read.error &&
+            read.view === 'text' &&
+            !read.structural &&
+            typeof read.text === 'string' &&
+            read.text.length > 0
+        )
+        .map(originalReadLocator),
+    ],
+    unreadPaths: unread.slice(INITIAL_ORIGINAL_READS).map((hit) => hit.path),
   };
 }

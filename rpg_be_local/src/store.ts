@@ -1,5 +1,6 @@
 import { KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from './domain/versions.js';
 import { sourceSections } from './domain/sourceSections.js';
+import { selectInitialSourceSections } from './domain/campaignSourceRecall.js';
 import pg, { type PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { databaseUrl } from './config.js';
@@ -285,7 +286,8 @@ export class Store {
   async retrieve(
     c: Campaign,
     action: string,
-    client?: PoolClient
+    client?: PoolClient,
+    scene?: string
   ): Promise<
     { id: string; version: number; text: string; name: string; start: number; end: number }[]
   > {
@@ -308,9 +310,12 @@ export class Store {
     ]);
     const words = [
       ...new Set(
-        (action.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(
-          (word) => word.length > 2 && !stop.has(word)
-        )
+        (
+          [action, scene ?? '']
+            .join(' ')
+            .toLowerCase()
+            .match(/[\p{L}\p{N}]+/gu) ?? []
+        ).filter((word) => word.length > 2 && !stop.has(word))
       ),
     ].slice(0, 32);
     if (!words.length) return [];
@@ -319,7 +324,7 @@ export class Store {
       "SELECT source_id,version,content,ordinal FROM source_chunks WHERE campaign_id=$1 AND search @@ to_tsquery('simple',$2) ORDER BY ts_rank(search,to_tsquery('simple',$2)) DESC,source_id,ordinal LIMIT 8",
       [c.id, terms]
     );
-    return r.rows
+    const originals = r.rows
       .filter((x) =>
         c.sources.some(
           (s) =>
@@ -340,6 +345,7 @@ export class Store {
           end: section.end,
         };
       });
+    return scene === undefined ? originals : selectInitialSourceSections(originals, action, scene);
   }
   async snapshot(id: string, client: PoolClient): Promise<Snapshot> {
     const r = await client.query('SELECT document FROM snapshots WHERE turn_id=$1', [id]);

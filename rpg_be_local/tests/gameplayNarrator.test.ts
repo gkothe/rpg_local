@@ -5,6 +5,21 @@ import {
   gameplayInstructionEnvelope,
 } from '../src/domain/gameplayNarrator.js';
 
+test('v5 distinguishes documented knowledge from emergent details without changing v4 guidance', () => {
+  const current = gameplayInstructionEnvelope('System', 'Campaign', true, 5);
+  assert.match(current, /Use origin source only for claims directly supported/);
+  assert.match(
+    current,
+    /Use origin gm for events or details created during play, with evidence \[\]/
+  );
+  assert.match(current, /separate records when their origins differ/);
+  assert.match(current, /Never change origin merely to make evidence pass validation/);
+  assert.doesNotMatch(
+    gameplayInstructionEnvelope('System', 'Campaign', true, 4),
+    /Knowledge provenance:/
+  );
+});
+
 test('NPC guidance is explicitly enabled while legacy envelopes stay identical', () => {
   const legacy = gameplayInstructionEnvelope('System', 'Campaign', false, 5);
   assert.equal(gameplayInstructionEnvelope('System', 'Campaign', false, 5, false), legacy);

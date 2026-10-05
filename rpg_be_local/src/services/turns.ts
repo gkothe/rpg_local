@@ -168,12 +168,13 @@ export class TurnService {
       const history = await this.store.activeTurns(c.id, client);
       const rules = await this.store.retrieve(
         c,
+        t.action,
+        client,
         this.responseVersion >= AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
-          ? [t.action, ...c.characters.map((x) => x.name), history.at(-1)?.narrative ?? ''].join(
-              ' '
-            )
-          : t.action,
-        client
+          ? typeof c.state.scene === 'string'
+            ? c.state.scene
+            : ''
+          : undefined
       );
       let context = null;
       try {
@@ -501,14 +502,13 @@ export class TurnService {
           const h = await this.store.activeTurns(campaign.id, client);
           const rules = await this.store.retrieve(
             campaign,
+            t.action,
+            client,
             this.responseVersion >= AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
-              ? [
-                  t.action,
-                  ...campaign.characters.map((x) => x.name),
-                  h.at(-1)?.narrative ?? '',
-                ].join(' ')
-              : t.action,
-            client
+              ? typeof campaign.state.scene === 'string'
+                ? campaign.state.scene
+                : ''
+              : undefined
           );
           turn.context = buildContext(
             campaign,

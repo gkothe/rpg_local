@@ -1,4 +1,37 @@
 import { test } from 'node:test';
+import { selectInitialSourceSections } from '../src/domain/campaignSourceRecall.js';
+
+test('initial source selection prioritizes the action, uses scene fallback and preserves whole originals', () => {
+  const irrelevant = { text: 'Sigurd explores political Rome.' };
+  const location = { text: 'The hypogeum has tunnels and corridors.' };
+  const relevant = {
+    text: 'Guard patrols protect the locked gate.\n\nComplete original paragraph.',
+  };
+  assert.deepEqual(
+    selectInitialSourceSections(
+      [irrelevant, location, relevant],
+      'inspect guard patrols',
+      'hypogeum'
+    ),
+    [relevant]
+  );
+  assert.deepEqual(
+    selectInitialSourceSections([irrelevant, location], 'listen quietly', 'hypogeum'),
+    [location]
+  );
+  assert.deepEqual(
+    selectInitialSourceSections([irrelevant], 'inspect guard patrols', 'hypogeum'),
+    []
+  );
+  assert.equal(
+    selectInitialSourceSections(
+      Array.from({ length: 8 }, () => relevant),
+      'guard',
+      ''
+    ).length,
+    4
+  );
+});
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { newCampaign } from '../src/domain/campaign.js';

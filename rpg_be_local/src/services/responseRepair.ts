@@ -10,6 +10,8 @@ import { RESPONSE_RETRY_COUNT, responseRetryFeedback } from '../domain/responseR
 import type { Generator } from '../providers/service.js';
 import type { ProviderSettings } from '../domain/types.js';
 import { traceEvent, type PromptTraceContext } from '../providers/promptLog.js';
+import { selectRepairEvidence } from './responseRepairContext.js';
+import { KNOWLEDGE_PROVENANCE_GUIDANCE } from '../domain/gameplayNarrator.js';
 
 const editableFields = new Set([
   'operations',
@@ -160,12 +162,23 @@ export async function validateWithFieldRepair<T>(
           },
         },
       };
+      const fullEvidence = await evidence?.();
+      const selection = selectRepairEvidence(candidate, paths, fullEvidence);
+      await traceEvent(child, 'field_repair_context', {
+        mode: selection.mode,
+        fallbackReasons: selection.fallbackReasons,
+        fullEvidenceBytes: Buffer.byteLength(JSON.stringify(fullEvidence) ?? '', 'utf8'),
+        selectedEvidenceBytes: Buffer.byteLength(JSON.stringify(selection.evidence) ?? '', 'utf8'),
+      });
       const prompt = JSON.stringify({
         task: 'Correct only the listed invalid fields of this saved GM response. Return corrections in exactly the allowed path order. Preserve the narrative, scenario, valid operations, facts and authoritative dice. No tools, new events, invented receipts or rerolls. Use exact quotes from the supplied evidence; the app calculates citation offsets and pages. Do not remove valid material to evade validation.',
         invalid: error instanceof Error ? error.message : 'Invalid response',
         allowedPaths: paths,
+        ...(paths.some((path) => path[0] === 'knowledgeChanges' || path[0] === 'operations')
+          ? { knowledgeProvenance: KNOWLEDGE_PROVENANCE_GUIDANCE }
+          : {}),
         response: candidate,
-        evidence: await evidence?.(),
+        evidence: selection.evidence,
       });
       try {
         const raw = await generator.generate(settings, prompt, schema, signal, child);

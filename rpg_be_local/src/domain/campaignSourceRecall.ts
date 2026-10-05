@@ -11,6 +11,7 @@ export const CAMPAIGN_SOURCE_GET_TOOL_NAME = 'campaign_sources_get';
 export type CampaignSourceTool =
   typeof CAMPAIGN_SOURCE_SEARCH_TOOL_NAME | typeof CAMPAIGN_SOURCE_GET_TOOL_NAME;
 export const CAMPAIGN_SOURCE_SELECTION = {
+  initialSections: 4,
   bootstrapChars: 12000,
   searchPageSections: 8,
   excerptChars: 240,
@@ -68,6 +69,25 @@ function searchMatch(text: string, query: string) {
     rank: coverage + (coverage && phrase >= 0 ? words.size + 1 : 0),
     match: phrase >= 0 ? original[phrase]!.index : best,
   };
+}
+/** Whole originals remain available through source lookup; this ranks only initial context. */
+export function selectInitialSourceSections<T extends { text: string }>(
+  candidates: readonly T[],
+  action: string,
+  scene: string
+): T[] {
+  const ranked = candidates.map((item, index) => ({
+    item,
+    index,
+    actionRank: searchMatch(item.text, action).rank,
+    sceneRank: searchMatch(item.text, scene).rank,
+  }));
+  const hasActionMatch = ranked.some((entry) => entry.actionRank > 0);
+  return ranked
+    .filter((entry) => (hasActionMatch ? entry.actionRank > 0 : entry.sceneRank > 0))
+    .sort((a, b) => b.actionRank - a.actionRank || b.sceneRank - a.sceneRank || a.index - b.index)
+    .slice(0, CAMPAIGN_SOURCE_SELECTION.initialSections)
+    .map((entry) => entry.item);
 }
 export const campaignSourceSearchSchema = z
   .object({
