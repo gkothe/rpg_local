@@ -92,7 +92,6 @@ export const campaignPatchSchema = z
     description: z.string().max(MAX_LONG_TEXT_CHARS).optional(),
     instructions: z.string().max(MAX_LONG_TEXT_CHARS).optional(),
     settings: settingsSchema.optional(),
-    pinnedFacts: z.array(z.string().max(4000)).max(100).optional(),
     pinnedSourceIds: z.array(idSchema).max(100).optional(),
     pinnedSourceSections: z
       .array(

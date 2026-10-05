@@ -192,7 +192,7 @@ it('switches providers in an existing game without losing its draft or history',
   expect(action).toHaveValue('Speak to Marta');
   expect(screen.getByText(fixtureTurn().narrative!)).toBeInTheDocument();
   expect(campaign.characters[0].attributes.health).toBe(12);
-  expect(campaign.pinnedFacts).toEqual(['The northern bridge was destroyed.']);
+  expect(campaign.description).toBe(fixtureCampaign().description);
   expect(campaign.settings).toEqual(next);
   fireEvent.submit(action.closest('form')!);
   await waitFor(() => {

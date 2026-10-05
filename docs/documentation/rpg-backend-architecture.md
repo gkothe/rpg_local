@@ -884,7 +884,6 @@ To avoid flooding the model context, dynamic filtering occurs before prompt comp
    The engine computes a lowercased search corpus containing:
    - The current player `action`.
    - The campaign `state` object.
-   - All `pinnedFacts`.
    - Formatted transcript of the **last 3 completed turns** (`turns.slice(-3)`).
 2. **Relevant Character Filtering**:
    - All player characters (`type === 'player'`) are **always included**.
@@ -927,11 +926,6 @@ In Schema Versions 4 and 5 (the example below illustrates the legacy v4 shape), 
       "kind": "model_knowledge",
       "contentHash": "49c2dff7..."
     },
-    "description": "A dark fantasy campaign set in the Grim Hollow valleys.",
-    "pinnedFacts": [
-      "The sun has not risen for three hundred years.",
-      "Silver weapons bypass werewolf damage immunity."
-    ],
     "pinnedRules": [
       {
         "id": "source-uuid-1",
@@ -1050,7 +1044,7 @@ Campaign instructions:
 
 Implementation evidence: [context.ts](../../rpg_be_local/src/domain/context.ts), [knowledgeRecall.ts](../../rpg_be_local/src/domain/knowledgeRecall.ts), [service.ts](../../rpg_be_local/src/providers/service.ts), [codex.ts](../../rpg_be_local/src/providers/codex.ts), [claudeDice.ts](../../rpg_be_local/src/providers/claudeDice.ts), [antigravityDice.ts](../../rpg_be_local/src/providers/antigravityDice.ts), [promptLog.ts](../../rpg_be_local/src/providers/promptLog.ts), [library.ts](../../rpg_be_local/src/services/library.ts).
 
-`buildContext` omits campaign and character `notes`, non-completed/undone turns, and unconfirmed source text. It includes all player characters and only name/ID-matched NPC sheets. These are field-selection guarantees: notes pasted into an action, source, description or instruction field are still ordinary model input.
+`buildContext` omits the player-facing campaign `description`, campaign and character `notes`, non-completed/undone turns, and unconfirmed source text. Memory summarization also omits the campaign description. It includes all player characters and only name/ID-matched NPC sheets. These are field-selection guarantees: notes pasted into an action, source, character description or instruction field are still ordinary model input.
 
 The boundary has distinct scopes:
 

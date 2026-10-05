@@ -14,7 +14,7 @@ Campaigns also include `pinnedSourceSections: {sourceId:string,version:number,in
 
 `Memory = {id,text,coveredTurnIds:string[],valid:boolean,createdAt:string}`
 
-`Campaign = {id,name,description,instructions,revision:number,notes:string,notesRevision:number,characters:Character[],sources:Source[],settings:ProviderSettings,pinnedFacts:string[],pinnedSourceIds:string[],budgets:{compaction:number},state:object,memory:Memory|null,createdAt:string,updatedAt:string}`
+`Campaign = {id,name,description,instructions,revision:number,notes:string,notesRevision:number,characters:Character[],sources:Source[],settings:ProviderSettings,pinnedSourceIds:string[],budgets:{compaction:number},state:object,memory:Memory|null,createdAt:string,updatedAt:string}`
 
 `Turn = {id,campaignId,requestId,status:'pending'|'running'|'completed'|'failed'|'cancelled'|'interrupted',action,narrative:string|null,changes:string[],error:string|null,undone:boolean,settings:ProviderSettings,context:object|null,createdAt,completedAt:string|null}`
 
@@ -28,7 +28,7 @@ Campaigns also include `pinnedSourceSections: {sourceId:string,version:number,in
 - GET `/providers`: `Provider[]` where `{id,name,available:boolean,supported:boolean,reason:string|null,version:string|null,models:{id,label,efforts:string[],inputTokens:number}[],catalogProvenance:string}`. Installed but unsupported isolation is disabled, not a working adapter. Models are administrator configured/verified options, never guessed dynamic subscription availability.
 - GET/POST `/campaigns`; POST `{name,description?,instructions?,settings?}` => Campaign. GET rows are Campaign summaries (same shape; FE can use name/updatedAt).
 - GET `/campaigns/:id` => CampaignDetail.
-- PATCH `/campaigns/:id` `{revision,name?,description?,instructions?,settings?,pinnedFacts?,pinnedSourceIds?,budgets?,state?}` => Campaign. Revision is informational; older values are accepted.
+- PATCH `/campaigns/:id` `{revision,name?,description?,instructions?,settings?,pinnedSourceIds?,budgets?,state?}` => Campaign. Revision is informational; older values are accepted.
 - DELETE `/campaigns/:id` `{revision}` => `{deleted:true}`; active turn409.
 - PATCH `/campaigns/:id/notes` `{notes,notesRevision}` => Campaign (private notes don't enter prompt).
 - POST `/campaigns/:id/characters` `{revision,name,type?,attributes?,inventory?,description?,notes?}` => Campaign.
@@ -56,6 +56,39 @@ Campaigns also include `pinnedSourceSections: {sourceId:string,version:number,in
 - GET `/lan/status` => `{enabled,desktop,paired,expiresAt:string|null,connectUrls:string[],microphoneRequiresHttps:true}`. HTTPS pairing sets a Secure cookie. Device approval expires after twelve hours; code expires after two minutes. Status is available before pairing.
 
 ## Frontend behavior
+
+Campaign settings live in Game master: campaign name, Description,
+GM instructions, pinned sources and compaction settings. `description` is a player-maintained
+summary shown in the campaign library and header. It is excluded from gameplay prompts,
+scene selection and memory summarization. Imported sources supply campaign background;
+GM instructions control how the game runs. `pinnedFacts`
+is retired from campaign DTOs and PATCH requests; migration 0013 removes it without merging its
+text. Older archives/templates accept and discard it; frozen historical prompts remain unchanged.
+The GM does not update Description automatically.
+GM auxiliary state and its JSON editor/save action also live in Game master. The Journal
+retains campaign memory and private notes; manual memory replacement and saved context inspection
+are currently hidden.
+Automatic memory summaries request bullet points in the existing `text` field, with
+one `- ` item per line. Journal renders bullet-only summaries as lists and retains paragraph
+display for older summaries. The format instruction preserves the same information and detail
+as a paragraph summary. No database conversion is required.
+
+The Play view places “Load full saved transcript” inside the conversation panel, before any
+messages, so it is available at the top when scrolling older messages. The right panel is empty
+and reserved for future content. Characters, campaign memory and sources remain available in
+their respective campaign sections.
+When Play first opens, the conversation scrolls to the latest message after campaign settings
+have loaded. Scrolling up to read older messages disables following new messages until the
+player returns near the bottom.
+The turn-audit and debug checkboxes sit outside and directly below the action composer panel.
+The Utility tab contains Download campaign backup, Save campaign template, reusable character templates and Add a character
+(including drafting from a confirmed source). Character creation drafts persist across tab changes. Individual
+characters retain their Save character as template action in Characters and NPCs.
+Character cards show editable Name and Character notes above their sheet sections, without an
+Edit character accordion. Save character as template and NPC Delete character sit at the bottom,
+with Save character aligned to the right. Player character cards have no Delete character button.
+Name and notes stay as local drafts during automatic campaign refreshes and save only through
+Save character. A full page reload discards unsaved drafts and opens the saved campaign data.
 
 ### Owned NPC lookup tools
 

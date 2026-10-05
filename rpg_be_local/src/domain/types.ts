@@ -78,7 +78,6 @@ export type Campaign = {
   characters: Character[];
   sources: Source[];
   settings: ProviderSettings;
-  pinnedFacts: string[];
   pinnedSourceIds: string[];
   pinnedSourceSections?: { sourceId: string; version: number; index: number }[];
   budgets: { compaction: number };

@@ -214,12 +214,15 @@ export default function Setup() {
               placeholder="Name your campaign"
             />
           </Field>
-          <Field label="Description">
+          <Field
+            label="Description"
+            tooltip="A short summary shown in the campaign library and header. It is not sent to the GM."
+          >
             <textarea
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Setting, premise, or a short description"
+              placeholder="A short summary for your campaign library"
             />
           </Field>
           <Field

@@ -61,14 +61,14 @@ export const nodes: FlowItem[] = [
   item(
     'context',
     'Context builder',
-    'The context builder prepares the information the model will receive: saved character sheets, scene facts, earlier turns, and reference text.',
+    'The context builder prepares the information the model will receive: GM instructions, saved character sheets, scene facts, earlier turns, and reference text. Campaign context settings live in the Game master tab. Description is a player summary shown in the library and header; it is not sent to the GM.',
     'Before the model responds. The app may first summarize older turns to shorten the context.',
     'The saved campaign, completed turns that have not been undone, confirmed source excerpts, and the selected rule system.',
     'Separate system instructions and a JSON user prompt. The app also keeps a ContextManifest that records what it selected, and saves a fixed copy for this attempt.',
     'The app reads PostgreSQL and copies campaign knowledge into memory for the turn. It leaves private notes out of the gameplay context it builds automatically.',
     '4.3',
     ['rpg_be_local/src/domain/context.ts', 'rpg_be_local/src/domain/knowledgeRecall.ts'],
-    'V5 includes a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene. It also selects relevant campaign knowledge and searches source text for matching words. Gameplay has no token target: relevant retrieved sections and matching campaign facts are included without size-based omission. History is summarized in consecutive batches independently of gameplay prompt size. Summaries can lose detail, so the app keeps the original turns.'
+    'V5 includes a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene. It also selects relevant campaign knowledge and searches source text for matching words. Gameplay has no token target: relevant retrieved sections and matching campaign facts are included without size-based omission. History is summarized in consecutive batches independently of gameplay prompt size. Memory summaries request bullet points while preserving the same information as paragraph summaries. Summaries can lose detail, so the app keeps the original turns.'
   ),
   item(
     'model',

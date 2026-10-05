@@ -17,7 +17,7 @@ test(
   async (testContext) => {
     const store = new Store();
     const c = newCampaign({ name: 'Isolated 1000-turn service regression' });
-    c.pinnedFacts = ['Marta owes you a favor.'];
+    c.description = 'Marta owes you a favor.';
     c.state = { step: 0 };
     const requests: {
       kind: 'gameplay' | 'memory';

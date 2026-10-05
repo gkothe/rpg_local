@@ -401,7 +401,7 @@ test(
   async () => {
     const campaign = await create();
     await store.edit(campaign.id, 0, (c) => {
-      c.pinnedFacts = ['Marta owes a favor.'];
+      c.description = 'Marta owes a favor.';
     });
     const prompts: { provider: string; prompt: string; memory: boolean }[] = [];
     const generator: Generator = {

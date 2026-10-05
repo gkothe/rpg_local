@@ -33,7 +33,6 @@ export function publicCampaign(campaign: Campaign): Campaign {
     characters: structuredClone(campaign.characters),
     sources: structuredClone(campaign.sources),
     settings: structuredClone(campaign.settings),
-    pinnedFacts: [...campaign.pinnedFacts],
     pinnedSourceIds: [...campaign.pinnedSourceIds],
     pinnedSourceSections: structuredClone(campaign.pinnedSourceSections),
     budgets: { ...campaign.budgets },

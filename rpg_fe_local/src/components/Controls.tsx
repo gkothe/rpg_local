@@ -3,14 +3,18 @@ export function Field({
   label,
   children,
   hint,
+  tooltip,
 }: {
   label: string;
   children: ReactNode;
   hint?: string;
+  tooltip?: string;
 }) {
   return (
     <label className="field">
-      <span>{label}</span>
+      <span title={tooltip} tabIndex={tooltip ? 0 : undefined}>
+        {label}
+      </span>
       {children}
       {hint && <small>{hint}</small>}
     </label>

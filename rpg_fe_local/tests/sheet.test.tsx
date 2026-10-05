@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, within, fireEvent, waitFor } from '@testing-library/react';
 import CharacterSheet from '../src/features/characters/CharacterSheet';
+import CharacterCreator from '../src/features/characters/CharacterCreator';
 import { fixtureCampaign, options } from './fixtures';
 afterEach(() => vi.unstubAllGlobals());
 describe('draft protection', () => {
@@ -11,7 +12,7 @@ describe('draft protection', () => {
     );
     vi.stubGlobal('fetch', fetcher);
     const campaign = fixtureCampaign();
-    render(<CharacterSheet campaign={campaign} options={options} onSaved={vi.fn()} />);
+    render(<CharacterCreator campaign={campaign} options={options} onSaved={vi.fn()} />);
     fireEvent.click(screen.getByText('Add a character'));
     const creator = within(screen.getByText('Add a character').closest('details')!);
     fireEvent.change(creator.getByLabelText('Name'), { target: { value: 'My ranger' } });
@@ -67,7 +68,9 @@ describe('draft protection', () => {
     });
     vi.stubGlobal('fetch', fetcher);
     const onSaved = vi.fn();
-    const view = render(<CharacterSheet campaign={campaign} options={options} onSaved={onSaved} />);
+    const view = render(
+      <CharacterCreator campaign={campaign} options={options} onSaved={onSaved} />
+    );
     fireEvent.click(screen.getByText('Add a character'));
     fireEvent.change(screen.getByLabelText('Parse a confirmed source'), {
       target: { value: 'sheet' },
@@ -75,7 +78,11 @@ describe('draft protection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generate editable character draft' }));
     await waitFor(() => expect(screen.getByDisplayValue('Arin')).toBeInTheDocument());
     view.rerender(
-      <CharacterSheet campaign={{ ...campaign, revision: 2 }} options={options} onSaved={onSaved} />
+      <CharacterCreator
+        campaign={{ ...campaign, revision: 2 }}
+        options={options}
+        onSaved={onSaved}
+      />
     );
     fireEvent.click(screen.getByRole('button', { name: /^Add character$/ }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Campaign changed'));
@@ -93,10 +100,9 @@ describe('draft protection', () => {
   it('keeps local character edits and the original revision when fresh turn state arrives', async () => {
     const fetcher = vi.fn(async (_url: string, init?: RequestInit) =>
       init?.method === 'PATCH'
-        ? new Response(
-            JSON.stringify({ detail: 'Reload current character to resolve this conflict.' }),
-            { status: 409 }
-          )
+        ? new Response(JSON.stringify({ detail: 'Character save temporarily unavailable.' }), {
+            status: 503,
+          })
         : new Response(JSON.stringify({ data: [] }))
     );
     vi.stubGlobal('fetch', fetcher);
@@ -108,8 +114,13 @@ describe('draft protection', () => {
     );
     fireEvent.click(screen.getByText('Marta', { selector: 'summary' }));
     const editor = within(screen.getByRole('heading', { name: 'Marta npc' }).closest('article')!);
-    fireEvent.click(editor.getByText('Edit character'));
+    expect(editor.queryByText('Edit character')).not.toBeInTheDocument();
+    expect(editor.getByLabelText('Name')).toBeVisible();
+    expect(editor.getByLabelText('Character notes')).toBeVisible();
     fireEvent.change(editor.getByLabelText('Name'), { target: { value: 'My unsaved name' } });
+    fireEvent.change(editor.getByLabelText('Character notes'), {
+      target: { value: 'My unsaved notes' },
+    });
     view.rerender(
       <CharacterSheet
         campaign={{
@@ -123,6 +134,7 @@ describe('draft protection', () => {
       />
     );
     expect(editor.getByLabelText('Name')).toHaveValue('My unsaved name');
+    expect(editor.getByLabelText('Character notes')).toHaveValue('My unsaved notes');
     fireEvent.click(editor.getByRole('button', { name: 'Save character' }));
     await waitFor(() =>
       expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1)
@@ -134,10 +146,12 @@ describe('draft protection', () => {
     });
     expect(JSON.parse(mutation![1]!.body as string)).not.toHaveProperty('attributes');
     await waitFor(() =>
-      expect(editor.getByRole('alert')).toHaveTextContent('Reload current character')
+      expect(editor.getByRole('alert')).toHaveTextContent('Character save temporarily unavailable.')
     );
     expect(onSaved).not.toHaveBeenCalled();
-    fireEvent.click(editor.getByRole('button', { name: 'Reload current character' }));
-    expect(editor.getByLabelText('Name')).toHaveValue('Marta');
+    expect(editor.getByLabelText('Name')).toHaveValue('My unsaved name');
+    expect(
+      editor.queryByRole('button', { name: 'Reload current character' })
+    ).not.toBeInTheDocument();
   });
 });

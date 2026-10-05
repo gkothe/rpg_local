@@ -13,19 +13,23 @@ test('real isolated PostgreSQL manual campaign, source, notes and archive round 
   await page.getByRole('button', { name: 'Create campaign' }).click();
   await expect(page.getByRole('heading', { name })).toBeVisible();
   const originalUrl = page.url();
-  await page.getByRole('button', { name: 'Characters', exact: true }).click();
+  await page.getByRole('button', { name: 'Utility', exact: true }).click();
   await page.getByText('Add a character', { exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Smoke character');
   await page.getByRole('button', { name: 'Add character', exact: true }).click();
+  await page.getByRole('button', { name: 'Characters', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Smoke character player' })).toBeVisible();
   page.once('dialog', (dialog) => dialog.accept(`${name} character`));
   await page.getByRole('button', { name: 'Save character as template' }).click();
+  await page.getByRole('button', { name: 'Utility', exact: true }).click();
   await page.getByText('Reusable character templates', { exact: true }).click();
   await page
     .getByRole('combobox', { name: 'Character template', exact: true })
     .selectOption({ label: `${name} character` });
   await page.getByRole('button', { name: 'Add character from template' }).click();
+  await page.getByRole('button', { name: 'Characters', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Smoke character player' })).toHaveCount(2);
+  await page.getByRole('button', { name: 'Utility', exact: true }).click();
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: `Delete character template ${name} character` }).click();
   await expect(
@@ -52,9 +56,10 @@ test('real isolated PostgreSQL manual campaign, source, notes and archive round 
   await page.getByRole('button', { name: 'Journal', exact: true }).click();
   await expect(page.getByLabel('Personal notes')).toHaveValue('Private smoke note');
   page.once('dialog', (dialog) => dialog.accept(`${name} template`));
-  await page.getByRole('button', { name: 'Save template' }).click();
+  await page.getByRole('button', { name: 'Utility', exact: true }).click();
+  await page.getByRole('button', { name: 'Save campaign template' }).click();
   const downloadPromise = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByRole('button', { name: 'Download campaign backup', exact: true }).click();
   const download = await downloadPromise;
   const path = await download.path();
   expect(path).toBeTruthy();

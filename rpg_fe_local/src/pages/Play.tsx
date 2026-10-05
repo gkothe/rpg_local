@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { Send, Undo2, Download, BookmarkPlus, LoaderCircle } from 'lucide-react';
+import { ArrowLeft, Send, Undo2, Download, BookmarkPlus, LoaderCircle } from 'lucide-react';
 import { useResource } from '../hooks/useResource';
 import type {
   CampaignDetail,
@@ -12,10 +12,14 @@ import type {
 import { request, requestCollection, json, errorMessage } from '../services/client';
 import { ErrorNotice, Empty } from '../components/Controls';
 import ProviderPicker from '../features/providers/ProviderPicker';
-import { providerValid as validProvider, isCompleted, isConfirmed } from '../services/options';
+import { providerValid as validProvider, isCompleted } from '../services/options';
 import CharacterSheet from '../features/characters/CharacterSheet';
+import CharacterTemplates from '../features/characters/CharacterTemplates';
+import CharacterCreator from '../features/characters/CharacterCreator';
 import SourceManager from '../features/sources/SourceManager';
 import Journal from '../features/journal/Journal';
+import GmState from '../features/journal/GmState';
+import CampaignContextSettings from '../features/journal/CampaignContextSettings';
 import { useTurn } from '../features/play/useTurn';
 import { Dictation } from '../features/audio/Dictation';
 import { TurnNarrative } from '../features/play/TurnNarrative';
@@ -41,11 +45,18 @@ export default function PlayPage() {
     campaign = resource.data;
   const transcript = useRef<HTMLElement | null>(null);
   const followChat = useRef(true);
+  const openedChat = useRef<string | null>(null);
+  const campaignId = campaign?.id;
+  const latestTurnId = campaign?.turns.at(-1)?.id;
   const latestMessage = campaign?.turns.at(-1)?.narrative;
-  useEffect(() => {
-    if (tab === 'play' && transcript.current && followChat.current)
-      transcript.current.scrollTop = transcript.current.scrollHeight;
-  }, [latestMessage, tab]);
+  useLayoutEffect(() => {
+    if (tab !== 'play' || !campaignId || !settings.data || !transcript.current) return;
+    if (openedChat.current !== campaignId) {
+      openedChat.current = campaignId;
+      followChat.current = true;
+    }
+    if (followChat.current) transcript.current.scrollTop = transcript.current.scrollHeight;
+  }, [campaignId, latestTurnId, latestMessage, settings.data, tab]);
   if (!campaign)
     return (
       <div className="page">
@@ -92,50 +103,18 @@ export default function PlayPage() {
   return (
     <div className="page play-page">
       <div className="page-heading">
+        <Link className="campaign-back" to="/" aria-label="Back to library" title="Back to library">
+          <ArrowLeft size={22} aria-hidden="true" />
+        </Link>
         <div>
-          <Link className="back" to="/">
-            Back to library
-          </Link>
           <h1>{campaign.name}</h1>
-          <p className="muted">{campaign.description}</p>
-        </div>
-        <div className="row wrap">
-          <button disabled={game.busy || saving} onClick={() => void exportCampaign()}>
-            <Download size={16} />
-            Export
-          </button>
-          <button
-            disabled={game.busy || saving}
-            onClick={async () => {
-              if (savingGuard.current) return;
-              const name = prompt('Template name', campaign.name);
-              if (!name) return;
-              savingGuard.current = true;
-              setSaving(true);
-              try {
-                await request(
-                  '/templates',
-                  json('POST', { name, campaignId: id, revision: campaign.revision })
-                );
-                setError('');
-                setFeedback('Campaign template saved.');
-              } catch (e) {
-                setError(errorMessage(e));
-              } finally {
-                savingGuard.current = false;
-                setSaving(false);
-              }
-            }}
-          >
-            <BookmarkPlus size={16} />
-            Save template
-          </button>
+          {campaign.description && <p className="muted">{campaign.description}</p>}
         </div>
       </div>
       <ErrorNotice message={error || resource.error || providers.error} />
       {feedback && <p role="status">{feedback}</p>}
       <nav className="tabs" aria-label="Campaign sections">
-        {['play', 'characters', 'npcs', 'journal', 'sources', 'game master'].map((t) => (
+        {['play', 'characters', 'npcs', 'journal', 'sources', 'game master', 'utility'].map((t) => (
           <button
             aria-current={tab === t ? 'page' : undefined}
             className={tab === t ? 'selected' : ''}
@@ -146,112 +125,133 @@ export default function PlayPage() {
           </button>
         ))}
       </nav>
-      <div className="panel provider-panel" hidden={tab !== 'game master'}>
-        <RuleSystemPicker
-          campaignId={campaign.id}
-          value={campaign.ruleSystemId ?? null}
-          unresolved={campaign.ruleResolution?.reference}
-          disabled={game.busy || saving}
-          onChange={async (systemId) => {
-            if (savingGuard.current) return;
-            savingGuard.current = true;
-            setSaving(true);
-            try {
-              await request(
-                `/campaigns/${id}/rule-system${campaign.ruleResolution ? '/resolution' : ''}`,
-                json(campaign.ruleResolution ? 'POST' : 'PATCH', {
-                  revision: campaign.revision,
-                  systemId,
-                  requestId: crypto.randomUUID(),
-                })
-              );
-              await resource.reload();
-              await ruleSystem.reload();
-              setError('');
-              setFeedback(
-                'Rule selection saved. The next new action uses the latest published rules.'
-              );
-            } catch (error) {
-              setError(errorMessage(error));
-            } finally {
-              savingGuard.current = false;
-              setSaving(false);
-            }
-          }}
+      <section className="stack utility-page" hidden={tab !== 'utility'}>
+        <h2>Utility</h2>
+        <div className="utility-campaign-tools">
+          <section className="panel stack utility-tool">
+            <h3>Campaign backup</h3>
+            <p className="muted">
+              Download this campaign and its saved history. Restore it through Import campaign in
+              the library.
+            </p>
+            <button
+              title="Download a JSON archive with saved campaign data, turns and game records. Original uploaded files are excluded."
+              disabled={game.busy || saving}
+              onClick={() => void exportCampaign()}
+            >
+              <Download size={16} />
+              Download campaign backup
+            </button>
+          </section>
+          <section className="panel stack utility-tool">
+            <h3>Campaign template</h3>
+            <p className="muted">Reuse this campaign's setup to start another campaign.</p>
+            <button
+              title="Save the campaign setup, characters and source text for a new campaign. The new campaign starts with a fresh timeline."
+              disabled={game.busy || saving}
+              onClick={async () => {
+                if (savingGuard.current) return;
+                const name = prompt('Template name', campaign.name);
+                if (!name) return;
+                savingGuard.current = true;
+                setSaving(true);
+                try {
+                  await request(
+                    '/templates',
+                    json('POST', { name, campaignId: id, revision: campaign.revision })
+                  );
+                  setError('');
+                  setFeedback('Campaign template saved.');
+                } catch (e) {
+                  setError(errorMessage(e));
+                } finally {
+                  savingGuard.current = false;
+                  setSaving(false);
+                }
+              }}
+            >
+              <BookmarkPlus size={16} />
+              Save campaign template
+            </button>
+          </section>
+        </div>
+        {tab === 'utility' && <CharacterTemplates campaign={campaign} onSaved={resource.reload} />}
+        <CharacterCreator campaign={campaign} options={settings.data} onSaved={resource.reload} />
+      </section>
+      <div className="stack" hidden={tab !== 'game master'}>
+        <div className="panel provider-panel">
+          <RuleSystemPicker
+            campaignId={campaign.id}
+            value={campaign.ruleSystemId ?? null}
+            unresolved={campaign.ruleResolution?.reference}
+            disabled={game.busy || saving}
+            onChange={async (systemId) => {
+              if (savingGuard.current) return;
+              savingGuard.current = true;
+              setSaving(true);
+              try {
+                await request(
+                  `/campaigns/${id}/rule-system${campaign.ruleResolution ? '/resolution' : ''}`,
+                  json(campaign.ruleResolution ? 'POST' : 'PATCH', {
+                    revision: campaign.revision,
+                    systemId,
+                    requestId: crypto.randomUUID(),
+                  })
+                );
+                await resource.reload();
+                await ruleSystem.reload();
+                setError('');
+                setFeedback(
+                  'Rule selection saved. The next new action uses the latest published rules.'
+                );
+              } catch (error) {
+                setError(errorMessage(error));
+              } finally {
+                savingGuard.current = false;
+                setSaving(false);
+              }
+            }}
+          />
+          <h2>Game master</h2>
+          <p className="muted">
+            Change CLI, model or effort between turns. Your campaign, characters and saved context
+            stay with the game; the next turn uses your new selection.
+          </p>
+          <ProviderPicker
+            providers={providers.data || []}
+            value={campaign.settings}
+            disabled={game.busy || saving}
+            onRefresh={() => providers.reload('/providers?refresh=true')}
+            onChange={async (value) => {
+              if (savingGuard.current) return;
+              savingGuard.current = true;
+              setSaving(true);
+              setFeedback('');
+              try {
+                await request(
+                  `/campaigns/${id}`,
+                  json('PATCH', { revision: campaign.revision, settings: value })
+                );
+                await resource.reload();
+                setError('');
+                setFeedback('Game master settings saved.');
+              } catch (e) {
+                setError(errorMessage(e));
+              } finally {
+                savingGuard.current = false;
+                setSaving(false);
+              }
+            }}
+          />
+        </div>
+        <CampaignContextSettings
+          campaign={campaign}
+          options={settings.data}
+          onSaved={resource.reload}
         />
-        <h2>Game master</h2>
-        <p className="muted">
-          Change CLI, model or effort between turns. Your campaign, characters and saved context
-          stay with the game; the next turn uses your new selection.
-        </p>
-        <ProviderPicker
-          providers={providers.data || []}
-          value={campaign.settings}
-          disabled={game.busy || saving}
-          onRefresh={() => providers.reload('/providers?refresh=true')}
-          onChange={async (value) => {
-            if (savingGuard.current) return;
-            savingGuard.current = true;
-            setSaving(true);
-            setFeedback('');
-            try {
-              await request(
-                `/campaigns/${id}`,
-                json('PATCH', { revision: campaign.revision, settings: value })
-              );
-              await resource.reload();
-              setError('');
-              setFeedback('Game master settings saved.');
-            } catch (e) {
-              setError(errorMessage(e));
-            } finally {
-              savingGuard.current = false;
-              setSaving(false);
-            }
-          }}
-        />
+        <GmState key={campaign.id} campaign={campaign} onSaved={resource.reload} />
       </div>
       <div hidden={tab !== 'play'}>
-        <div className="transcript-options">
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={showAudit}
-              onChange={(e) => setShowAudit(e.target.checked)}
-            />
-            Show turn audit (including undone and failed attempts)
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={showDebug}
-              onChange={(e) => setShowDebug(e.target.checked)}
-            />
-            Show debug info
-          </label>
-        </div>
-        <button
-          disabled={saving}
-          onClick={async () => {
-            if (savingGuard.current) return;
-            savingGuard.current = true;
-            setSaving(true);
-            try {
-              const turns = await requestCollection<Turn>(`/campaigns/${id}/turns`);
-              resource.setData((current) =>
-                current && current.id === id ? { ...current, turns } : current
-              );
-              setError('');
-            } catch (e) {
-              setError(errorMessage(e));
-            } finally {
-              savingGuard.current = false;
-              setSaving(false);
-            }
-          }}
-        >
-          Load full saved transcript
-        </button>
         <div className="play-layout">
           <section
             className="transcript"
@@ -264,6 +264,28 @@ export default function PlayPage() {
                 CHAT_BOTTOM_THRESHOLD_PX;
             }}
           >
+            <button
+              disabled={saving}
+              onClick={async () => {
+                if (savingGuard.current) return;
+                savingGuard.current = true;
+                setSaving(true);
+                try {
+                  const turns = await requestCollection<Turn>(`/campaigns/${id}/turns`);
+                  resource.setData((current) =>
+                    current && current.id === id ? { ...current, turns } : current
+                  );
+                  setError('');
+                } catch (e) {
+                  setError(errorMessage(e));
+                } finally {
+                  savingGuard.current = false;
+                  setSaving(false);
+                }
+              }}
+            >
+              Load full saved transcript
+            </button>
             {campaign.turns.filter((t) => isCompleted(t, settings.data) && !t.undone).length ===
               0 && (
               <Empty title="Begin the first scene">
@@ -422,45 +444,7 @@ export default function PlayPage() {
                 </article>
               ))}
           </section>
-          <aside className="campaign-aside panel">
-            <h2>At a glance</h2>
-            <h3>Characters</h3>
-            {campaign.characters.length ? (
-              campaign.characters.map((c) => (
-                <button
-                  key={c.id}
-                  className="character-link"
-                  onClick={() =>
-                    setTab(
-                      settings.data?.characterTypeOptions.find((role) => role.id === c.type)
-                        ?.default === false
-                        ? 'npcs'
-                        : 'characters'
-                    )
-                  }
-                >
-                  <strong>{c.name}</strong>
-                  <small>{c.type}</small>
-                </button>
-              ))
-            ) : (
-              <p className="muted">No characters yet.</p>
-            )}
-            <h3>Campaign memory</h3>
-            <p>
-              {campaign.memory?.valid
-                ? campaign.memory.text
-                : 'Memory will build as the campaign grows.'}
-            </p>
-            <button className="quiet" onClick={() => setTab('journal')}>
-              Inspect context
-            </button>
-            <h3>Rules</h3>
-            <p>
-              {campaign.sources.filter((s) => isConfirmed(s, settings.data)).length} confirmed
-              source(s)
-            </p>
-          </aside>
+          <aside className="campaign-aside panel" />
         </div>
         <section className="composer panel">
           <ErrorNotice message={game.error} />
@@ -592,6 +576,24 @@ export default function PlayPage() {
             )}
           </form>
         </section>
+        <div className="transcript-options">
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={showAudit}
+              onChange={(e) => setShowAudit(e.target.checked)}
+            />
+            Show turn audit (including undone and failed attempts)
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={showDebug}
+              onChange={(e) => setShowDebug(e.target.checked)}
+            />
+            Show debug info
+          </label>
+        </div>
       </div>
       <div hidden={tab !== 'characters' && tab !== 'npcs'}>
         <CharacterSheet

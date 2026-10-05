@@ -126,7 +126,7 @@ test('all illustrated payload selections and envelopes match the real context bu
               : examplePayload(pinned, mentioned, book);
           const campaign = newCampaign({
             name: 'Teaching example',
-            description: expected.mandatory.description,
+            description: 'A river town after the flood.',
             instructions: 'Tell the story in English with a hopeful tone.',
           });
           campaign.characters = [player, npc].map((character) => ({
@@ -135,7 +135,6 @@ test('all illustrated payload selections and envelopes match the real context bu
             revision: 0,
           }));
           campaign.state = expected.mandatory.state;
-          campaign.pinnedFacts = expected.mandatory.pinnedFacts;
           campaign.sources = [
             {
               id: ids.source,

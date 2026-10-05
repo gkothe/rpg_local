@@ -12,6 +12,45 @@ import type { Turn } from '../src/domain/types.js';
 import { TurnStatus } from '../src/domain/options.js';
 import { RuleSystemKind } from '../src/domain/rules.js';
 import { randomUUID } from 'node:crypto';
+import { campaignPatchSchema } from '../src/domain/schemas.js';
+
+test('campaign description stays out of gameplay, NPC selection and memory summarization', () => {
+  const campaign = newCampaign({
+    name: 'Shared background',
+    description: 'Marta has a silver key.',
+  });
+  campaign.characters = [
+    {
+      id: randomUUID(),
+      name: 'Marta',
+      type: 'npc',
+      attributes: {},
+      inventory: {},
+      description: {},
+      notes: '',
+      revision: 0,
+    },
+  ];
+  const prompt = JSON.parse(buildContext(campaign, [], 'Wait', [], 16000).prompt);
+  assert.equal(Object.hasOwn(prompt.mandatory, 'description'), false);
+  assert.deepEqual(prompt.mandatory.characters, []);
+  assert.doesNotMatch(JSON.stringify(prompt), /silver key/);
+  const scene = JSON.parse(buildContext(campaign, [], 'Talk to Marta', [], 16000).prompt);
+  assert.equal(scene.mandatory.characters[0].name, 'Marta');
+  assert.equal(Object.hasOwn(prompt.mandatory, 'pinnedFacts'), false);
+  assert.equal(Object.hasOwn(campaign, 'pinnedFacts'), false);
+  assert.equal(
+    campaignPatchSchema.safeParse({ revision: 0, pinnedFacts: ['Retired'] }).success,
+    false
+  );
+  const history = Array.from({ length: 15 }, (_, i) => turn(String(i), 'Wait'));
+  const summary = JSON.parse(compactionBatch(campaign, history).prompt);
+  assert.match(summary.instruction, /one item per line starting with "- "/);
+  assert.equal(Object.hasOwn(summary, 'description'), false);
+  assert.doesNotMatch(JSON.stringify(summary), /silver key/);
+  assert.equal(campaign.description, 'Marta has a silver key.');
+  assert.equal(Object.hasOwn(summary, 'pinnedFacts'), false);
+});
 
 test('NPC-enabled v5 context freezes off-prompt sheets without adding them to prompt or changing legacy contexts', () => {
   const c = newCampaign({ name: 'NPC snapshot' });
@@ -192,9 +231,9 @@ test('gameplay history contains only delivered text and excludes failed and undo
   assert.ok(context.estimatedTokens <= 16000);
   assert.doesNotMatch(compactionBatch(c, [completed], 16000).prompt, /roll_dice/);
 });
-test('preserves uncovered turns and pinned facts even above the optional retrieval target', () => {
+test('preserves uncovered turns and campaign state even above the optional retrieval target', () => {
   const c = newCampaign({ name: 'A' });
-  c.pinnedFacts = ['Marta has a silver key'];
+  c.state = { establishedFact: 'Marta has a silver key' };
   const history = [turn('1', 'Door open')];
   const context = buildContext(c, history, 'walk', [], 16000);
   assert.ok(context.prompt.includes('silver key'));

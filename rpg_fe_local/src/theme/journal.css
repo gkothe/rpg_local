@@ -205,6 +205,41 @@ small {
   gap: 2rem;
   margin-bottom: 2rem;
 }
+.play-page {
+  padding-top: 1rem;
+}
+.play-page > .page-heading {
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.25rem;
+}
+.play-page > .page-heading > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.campaign-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: inherit;
+}
+.campaign-back:hover {
+  background: var(--raised);
+}
+.play-page > .page-heading h1 {
+  font-size: clamp(1.35rem, 2vw, 1.75rem);
+  margin-bottom: 0;
+}
+.play-page > .page-heading p {
+  margin: 0.35rem 0 0;
+}
 .panel {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -396,6 +431,37 @@ small {
   text-align: left;
   margin: 0.5rem 0;
 }
+.character-save {
+  margin-left: auto;
+}
+.utility-page > h2,
+.utility-tool h3,
+.utility-tool p {
+  margin: 0;
+}
+.utility-campaign-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.utility-tool > button {
+  align-self: flex-start;
+  margin-top: auto;
+}
+.field > span[title] {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 4px;
+}
+.field > span[title]:focus-visible {
+  outline: 3px solid var(--sage);
+  outline-offset: 4px;
+}
+@media (max-width: 600px) {
+  .utility-campaign-tools {
+    grid-template-columns: 1fr;
+  }
+}
 .transcript {
   min-width: 0;
 }
@@ -555,6 +621,7 @@ details > .stack {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem 1.5rem;
+  margin-top: 1rem;
   margin-bottom: 0.5rem;
 }
 .check input {

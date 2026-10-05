@@ -36,6 +36,7 @@ export function gameplayDigest(
           },
         }
       : {}),
+    // Historical retry digests retain this metadata; it is not included in GM prompts.
     description: campaign.description,
     instructions: campaign.instructions,
     characters: campaign.characters.map(
@@ -53,7 +54,8 @@ export function gameplayDigest(
           : {}),
       };
     }),
-    pinnedFacts: campaign.pinnedFacts,
+    // Keep the retired empty slot in the immutable digest contract for saved-dice retries.
+    pinnedFacts: [],
     pinnedSourceIds: campaign.pinnedSourceIds,
     pinnedSourceSections: campaign.pinnedSourceSections ?? [],
     budgets: campaign.budgets,

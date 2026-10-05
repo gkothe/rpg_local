@@ -23,7 +23,6 @@ export function newCampaign(input: {
     knowledge: [],
     sources: [],
     settings: input.settings ?? { ...emptySettings },
-    pinnedFacts: [],
     pinnedSourceIds: [],
     pinnedSourceSections: [],
     budgets: { ...CONTEXT_DEFAULTS },

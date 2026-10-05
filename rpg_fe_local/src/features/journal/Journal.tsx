@@ -1,8 +1,7 @@
-import { isCompleted, isConfirmed } from '../../services/options';
+import { isCompleted } from '../../services/options';
 import { useRef, useState } from 'react';
 import type { CampaignDetail, Settings } from '../../services/types';
-import { Field, ErrorNotice, JsonEditor } from '../../components/Controls';
-import { parseObject } from '../../services/validation';
+import { Field, ErrorNotice } from '../../components/Controls';
 import { request, json, errorMessage } from '../../services/client';
 import { useResource } from '../../hooks/useResource';
 export default function Journal({
@@ -23,13 +22,6 @@ export default function Journal({
     .reverse()
     .find((turn) => turn.diceSessionId || turn.narrative || turn.context);
   const [notes, setNotes] = useState(campaign.notes),
-    [campaignName, setCampaignName] = useState(campaign.name),
-    [description, setDescription] = useState(campaign.description),
-    [stateJson, setStateJson] = useState(JSON.stringify(campaign.state, null, 2)),
-    [pins, setPins] = useState(campaign.pinnedFacts.join('\n')),
-    [pinnedSources, setPinnedSources] = useState(campaign.pinnedSourceIds),
-    [instructions, setInstructions] = useState(campaign.instructions),
-    [budgets, setBudgets] = useState(campaign.budgets),
     [memory, setMemory] = useState(''),
     [coverage, setCoverage] = useState<string[]>([]),
     [error, setError] = useState('');
@@ -59,13 +51,6 @@ export default function Journal({
           setNotes(campaign.notes);
           setMemory('');
           setCoverage([]);
-          setCampaignName(campaign.name);
-          setDescription(campaign.description);
-          setStateJson(JSON.stringify(campaign.state, null, 2));
-          setPins(campaign.pinnedFacts.join('\n'));
-          setPinnedSources(campaign.pinnedSourceIds);
-          setInstructions(campaign.instructions);
-          setBudgets(campaign.budgets);
           baseRevision.current = campaign.revision;
           baseNotesRevision.current = campaign.notesRevision;
           setError('');
@@ -76,9 +61,11 @@ export default function Journal({
       </button>
       <div className="panel stack">
         <h3>Campaign memory</h3>
-        <p className="prose">
-          {campaign.memory?.valid ? campaign.memory.text : 'No campaign memory checkpoint yet.'}
-        </p>
+        <MemoryText
+          text={
+            campaign.memory?.valid ? campaign.memory.text : 'No campaign memory checkpoint yet.'
+          }
+        />
         <small className="muted">
           Memory is a compact record; character state is saved separately. Full turns remain in your
           transcript.
@@ -99,80 +86,8 @@ export default function Journal({
           Save notes
         </button>
       </div>
-      <div className="panel stack">
-        <Field label="Campaign name">
-          <input value={campaignName} onChange={(e) => setCampaignName(e.target.value)} />
-        </Field>
-        <Field label="Description">
-          <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
-        </Field>
-        <Field
-          label="Pinned campaign facts"
-          hint="One per line. These facts are included in every game turn."
-        >
-          <textarea rows={5} value={pins} onChange={(e) => setPins(e.target.value)} />
-        </Field>
-        <Field label="GM instructions">
-          <textarea
-            rows={4}
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-          />
-        </Field>
-        <h3>Context budgets</h3>
-        <fieldset>
-          <legend>Pinned source material</legend>
-          {campaign.sources
-            .filter((s) => isConfirmed(s, options))
-            .map((s) => (
-              <label className="check" key={s.id}>
-                <input
-                  type="checkbox"
-                  checked={pinnedSources.includes(s.id)}
-                  onChange={(e) =>
-                    setPinnedSources((current) =>
-                      e.target.checked ? [...current, s.id] : current.filter((id) => id !== s.id)
-                    )
-                  }
-                />
-                {s.name}
-              </label>
-            ))}
-          <small>
-            Pinned sources are included in full every turn, even above the context target.
-          </small>
-        </fieldset>
-        {(['compaction'] as const).map((key) => (
-          <Field label="Compaction batch target (UTF-8 bytes)" key={key}>
-            <input
-              type="number"
-              min={256}
-              max={options?.defaults.budgets[key]}
-              value={budgets[key]}
-              onChange={(e) => setBudgets({ ...budgets, [key]: Number(e.target.value) })}
-            />
-          </Field>
-        ))}
-        <button
-          onClick={() =>
-            void save(`/campaigns/${campaign.id}`, {
-              revision: baseRevision.current,
-              name: campaignName,
-              description,
-              pinnedFacts: pins
-                .split('\n')
-                .map((p) => p.trim())
-                .filter(Boolean),
-              instructions,
-              pinnedSourceIds: pinnedSources,
-              budgets,
-            })
-          }
-        >
-          Save context settings
-        </button>
-      </div>
-      <details className="panel">
+
+      <details className="panel" hidden>
         <summary>Advanced: replace campaign memory</summary>
         <div className="stack">
           <p>
@@ -233,7 +148,11 @@ export default function Journal({
           </button>
         </div>
       </details>
-      <details className="panel" onToggle={(event) => setInspectOpen(event.currentTarget.open)}>
+      <details
+        className="panel"
+        hidden
+        onToggle={(event) => setInspectOpen(event.currentTarget.open)}
+      >
         <summary>Advanced: inspect last turn context (may reveal GM secrets)</summary>
         <p className="muted">
           Full saved prompts and source receipts may contain unrevealed GM information. Campaign
@@ -249,38 +168,24 @@ export default function Journal({
           <pre className="code">{'{}'}</pre>
         ) : null}
       </details>
-      <section className="panel stack">
-        <h3>GM auxiliary state</h3>
-        <dl className="sheet-values">
-          {Object.entries(campaign.state).map(([key, value]) => (
-            <div key={key}>
-              <dt>{key}</dt>
-              <dd>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</dd>
-            </div>
-          ))}
-        </dl>
-        <JsonEditor
-          value={stateJson}
-          onChange={setStateJson}
-          label="Advanced: edit GM state JSON"
-        />
-        <button
-          onClick={() => {
-            try {
-              void save(`/campaigns/${campaign.id}`, {
-                revision: baseRevision.current,
-                state: parseObject(stateJson),
-              });
-            } catch (e) {
-              setError(errorMessage(e));
-            }
-          }}
-        >
-          Save GM state
-        </button>
-      </section>
     </section>
   );
+}
+
+function MemoryText({ text }: { text: string }) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length && lines.every((line) => /^[-*•]\s+\S/.test(line)))
+    return (
+      <ul className="prose">
+        {lines.map((line, index) => (
+          <li key={index}>{line.replace(/^[-*•]\s+/, '')}</li>
+        ))}
+      </ul>
+    );
+  return <p className="prose">{text}</p>;
 }
 
 function TurnContext({ campaignId, turnId }: { campaignId: string; turnId: string }) {

@@ -63,7 +63,6 @@ export function fixtureCampaign(): CampaignDetail {
     ],
     sources: [],
     settings: { provider: 'claude', model: 'fixture-model', effort: 'low' },
-    pinnedFacts: ['The northern bridge was destroyed.'],
     pinnedSourceIds: [],
     budgets: { compaction: 32768 },
     state: {},

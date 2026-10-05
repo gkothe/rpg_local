@@ -171,8 +171,6 @@ export function examplePayload(pinned: boolean, mentioned: boolean, book: boolea
       ...(book
         ? { rulesOverview: 'Bridge checks: consult the selected book before resolving.' }
         : {}),
-      description: 'A river town after the flood.',
-      pinnedFacts: ['The north bridge is damaged.'],
       pinnedRules: pinned
         ? [
             {

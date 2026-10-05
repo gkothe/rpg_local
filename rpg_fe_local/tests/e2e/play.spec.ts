@@ -1,6 +1,55 @@
 import { test, expect } from '@playwright/test';
 import { fixtureCampaign, fixtureTurn, options, providers } from '../fixtures';
 
+test('Play opens at the latest message after settings load and preserves reading older messages', async ({
+  page,
+}) => {
+  const campaign = fixtureCampaign();
+  campaign.turns = Array.from({ length: 12 }, (_, index) => ({
+    ...fixtureTurn(),
+    id: `saved-turn-${index}`,
+    narrative: `Scene ${index}. ${'The courtyard is quiet. '.repeat(30)}`,
+  }));
+  let releaseSettings!: () => void;
+  const settingsReady = new Promise<void>((resolve) => {
+    releaseSettings = resolve;
+  });
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/settings') await settingsReady;
+    const data =
+      path === '/api/settings'
+        ? options
+        : path === '/api/providers'
+          ? providers
+          : path === `/api/campaigns/${campaign.id}`
+            ? campaign
+            : [];
+    await route.fulfill({ json: { data } });
+  });
+  await page.goto(`/campaigns/${campaign.id}`);
+  await expect(page.getByRole('heading', { name: campaign.name, exact: true })).toBeVisible();
+  releaseSettings();
+  const transcript = page.getByRole('region', { name: 'Campaign transcript' });
+  await expect(transcript.getByText(/^Scene 11\./)).toBeVisible();
+  await expect
+    .poll(() =>
+      transcript.evaluate((element) => ({
+        overflows: element.scrollHeight > element.clientHeight,
+        remaining: element.scrollHeight - element.clientHeight - element.scrollTop,
+      }))
+    )
+    .toEqual({ overflows: true, remaining: 0 });
+  await transcript.evaluate((element) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  campaign.turns.at(-1)!.narrative = 'Updated latest scene.';
+  await page.evaluate(() => window.dispatchEvent(new Event('rpg-reconnected')));
+  await expect(transcript.getByText('Updated latest scene.')).toBeAttached();
+  expect(await transcript.evaluate((element) => element.scrollTop)).toBe(0);
+});
+
 test('book gameplay allows High and Default without an extra effort gate', async ({ page }) => {
   const campaign = fixtureCampaign();
   campaign.ruleSystemId = 'vampire';
@@ -75,6 +124,14 @@ test('player and NPC sections swap between reading and JSON editing and save ind
         .locator('summary')
         .filter({ hasText: /^Marta$/ })
         .click();
+    await expect(page.getByRole('button', { name: 'Delete character', exact: true })).toHaveCount(
+      tab === 'NPCs' ? 1 : 0
+    );
+    await expect(
+      page
+        .locator('.character-actions')
+        .getByRole('button', { name: 'Save character', exact: true })
+    ).toBeVisible();
     await page.getByRole('button', { name: 'Inventory', exact: true }).click();
     const section = page.getByRole('region', { name: `${name} Inventory`, exact: true });
     await expect(section.getByText('silver', { exact: true })).toBeVisible();
@@ -228,7 +285,9 @@ test('setup submits only explicit campaign fields', async ({ page }) => {
   await expect(page.getByLabel('Source name')).toHaveValue('Unfinished source');
   expect(created).toBe(true);
 });
-test('campaign sidebar scrolls independently at the same height as the chat', async ({ page }) => {
+test('transcript button precedes messages and checkboxes sit below the composer', async ({
+  page,
+}) => {
   const campaign = fixtureCampaign();
   campaign.memory = {
     id: 'long-memory',
@@ -256,14 +315,61 @@ test('campaign sidebar scrolls independently at the same height as the chat', as
     const sidebar = await page.locator('.campaign-aside').boundingBox();
     expect(sidebar!.height).toBe(transcript!.height);
     expect(sidebar!.y).toBe(transcript!.y);
-    const scroll = await page.locator('.campaign-aside').evaluate((element) => {
-      element.scrollTop = 100;
-      return { top: element.scrollTop, height: element.clientHeight, total: element.scrollHeight };
-    });
-    expect(scroll.total).toBeGreaterThan(scroll.height);
-    expect(scroll.top).toBe(100);
-    expect(await page.locator('.transcript').evaluate((element) => element.scrollTop)).toBe(0);
+    await expect(page.locator('.transcript > :first-child')).toBeVisible();
+    await expect(page.locator('.transcript > :first-child')).toHaveText(
+      'Load full saved transcript'
+    );
+    await expect(page.locator('.campaign-aside')).toBeEmpty();
   }
+  const composer = page.locator('.composer');
+  const transcriptOptions = page.locator('.transcript-options');
+  for (const label of [
+    'Show turn audit (including undone and failed attempts)',
+    'Show debug info',
+  ]) {
+    await expect(transcriptOptions.getByLabel(label)).toBeVisible();
+  }
+  await expect(composer.locator('.transcript-options')).toHaveCount(0);
+  const panel = await composer.boundingBox();
+  const checkboxes = await transcriptOptions.boundingBox();
+  expect(checkboxes!.y).toBeGreaterThanOrEqual(panel!.y + panel!.height);
+  await expect(
+    page.getByRole('button', { name: 'Download campaign backup', exact: true })
+  ).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save campaign template' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Utility', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Download campaign backup', exact: true })
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save campaign template' })).toBeVisible();
+  await expect(page.getByLabel('Your action')).not.toBeVisible();
+  await page.getByText('Reusable character templates', { exact: true }).click();
+  await expect(page.getByRole('combobox', { name: /Character template/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Characters', exact: true }).click();
+  await expect(page.getByText('Reusable character templates', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Add a character', { exact: true })).not.toBeVisible();
+  await page.getByRole('button', { name: 'Utility', exact: true }).click();
+  await page.getByText('Add a character', { exact: true }).click();
+  const creator = page
+    .locator('details')
+    .filter({ has: page.locator('summary', { hasText: /^Add a character$/ }) });
+  await creator.getByLabel('Name', { exact: true }).fill('Unfinished character');
+  await page.getByRole('button', { name: 'Characters', exact: true }).click();
+  await page.getByRole('button', { name: 'Utility', exact: true }).click();
+  await expect(creator.getByLabel('Name', { exact: true })).toHaveValue('Unfinished character');
+  await expect(page.getByRole('button', { name: 'Download campaign backup' })).toHaveAttribute(
+    'title',
+    /JSON archive/
+  );
+  await page.getByRole('button', { name: 'Journal', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'GM auxiliary state' })).not.toBeVisible();
+  await expect(page.getByRole('textbox', { name: /^Description/ })).not.toBeVisible();
+  await page.getByRole('button', { name: 'Game master', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'GM auxiliary state' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save GM state' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /^Description/ })).toBeVisible();
+  await expect(page.getByLabel('GM instructions')).toBeVisible();
+  await expect(page.getByText('Pinned campaign facts', { exact: true })).toHaveCount(0);
 });
 
 test('journal layout has no horizontal overflow across standard widths', async ({ page }) => {
@@ -325,10 +431,6 @@ test('journal layout has no horizontal overflow across standard widths', async (
   await expect(page.getByText('silver', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Description', exact: true }).click();
   await expect(page.getByText('A road warden', { exact: true })).toBeVisible();
-  await page
-    .locator('summary')
-    .filter({ hasText: /^Edit character$/ })
-    .click();
   await page.locator('.npc-entry').getByLabel('Name', { exact: true }).fill('Unsaved Marta');
   await page.getByRole('button', { name: 'Characters', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Marta npc' })).toBeHidden();

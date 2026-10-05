@@ -137,7 +137,8 @@ const campaign = z
       )
       .max(1000),
     settings,
-    pinnedFacts: z.array(z.string()),
+    // Import-only compatibility for archives created before facts merged into description.
+    pinnedFacts: z.array(z.string()).optional(),
     pinnedSourceIds: z.array(uuid),
     pinnedSourceSections: z
       .array(
@@ -365,11 +366,14 @@ export function remapArchive(raw: unknown): Archive {
       raw !== null &&
       'version' in raw &&
       raw.version === KNOWLEDGE_ARCHIVE_FORMAT_VERSION);
-  const parsed = isAudited
+  const legacyParsed = isAudited
     ? auditedArchiveSchema.parse(raw)
     : isKnowledge
       ? knowledgeArchiveSchema.parse(raw)
       : archiveSchema.parse(raw);
+  const campaign = { ...legacyParsed.campaign };
+  delete campaign.pinnedFacts;
+  const parsed = { ...legacyParsed, campaign };
   const metadata = [
     'promptContractVersion',
     'digestVersion',
@@ -1428,7 +1432,6 @@ export class LibraryService {
         characters: c.characters,
         sources: c.sources,
         settings: c.settings,
-        pinnedFacts: c.pinnedFacts,
         pinnedSourceIds: c.pinnedSourceIds,
         pinnedSourceSections: c.pinnedSourceSections ?? [],
         budgets: c.budgets,
@@ -1443,7 +1446,9 @@ export class LibraryService {
       const r = await client.query('SELECT document FROM templates WHERE id=$1', [id]);
       if (!r.rows[0]) throw new Problem(404, 'not_found', 'Template not found');
       const template = r.rows[0].document;
-      const c = { ...newCampaign({ name: name ?? template.name }), ...template.setup } as Campaign;
+      const setup = { ...template.setup };
+      delete setup.pinnedFacts;
+      const c = { ...newCampaign({ name: name ?? template.name }), ...setup } as Campaign;
       // Even an older externally stored template cannot transplant another campaign's timeline.
       if (ARCHIVE_FORMAT_VERSION >= KNOWLEDGE_ARCHIVE_FORMAT_VERSION) c.knowledge = [];
       else delete c.knowledge;

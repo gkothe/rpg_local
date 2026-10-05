@@ -18,7 +18,7 @@ import {
   KnowledgeStatus,
 } from '../src/domain/knowledge.js';
 import { createKnowledgeRecall, freezeKnowledge } from '../src/domain/knowledgeRecall.js';
-test('1000-turn synthetic campaign preserves pinned facts and never sends full transcripts to gameplay or memory', () => {
+test('1000-turn synthetic campaign preserves knowledge and excludes player description and full transcripts from gameplay or memory', () => {
   const c = newCampaign({ name: 'Long campaign' });
   c.knowledge = applyKnowledgeChanges(
     [],
@@ -40,7 +40,7 @@ test('1000-turn synthetic campaign preserves pinned facts and never sends full t
     { campaignId: c.id, turnId: randomUUID() }
   ).records;
   const originalFact = structuredClone(c.knowledge[0]!);
-  c.pinnedFacts = ['Marta owes you a favor.'];
+  c.description = 'PLAYER_SUMMARY_CANARY';
   const turns: Turn[] = [];
   let summaries = 0;
   for (let index = 0; index < 1000; index++) {
@@ -48,7 +48,7 @@ test('1000-turn synthetic campaign preserves pinned facts and never sends full t
       const batch = compactionBatch(c, turns);
       assert.ok(estimateTokens(batch.prompt) <= 8000);
       assert.ok(batch.turns.length < turns.length || turns.length < 30);
-      assert.ok(batch.prompt.includes('Marta owes you a favor.'));
+      assert.ok(!batch.prompt.includes('PLAYER_SUMMARY_CANARY'));
       c.memory = {
         id: randomUUID(),
         text: 'Marta owes you a favor. Unresolved: find the silver key.',
@@ -60,7 +60,7 @@ test('1000-turn synthetic campaign preserves pinned facts and never sends full t
     }
     const context = buildContext(c, turns, 'Find the silver key', [], 16000);
     assert.ok(context.estimatedTokens <= 16000);
-    assert.ok(context.prompt.includes('Marta owes you a favor.'));
+    assert.ok(!context.prompt.includes('PLAYER_SUMMARY_CANARY'));
     assert.ok(context.historyIds.length < 30);
     assert.equal(context.historyIds.length, recentGameplayHistory(c, turns).history.length);
     assert.deepEqual(

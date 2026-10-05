@@ -13,6 +13,29 @@ import { randomUUID } from 'node:crypto';
 import { KNOWLEDGE_ARCHIVE_FORMAT_VERSION } from '../src/domain/versions.js';
 import { CharacterType } from '../src/domain/options.js';
 
+test('new archives omit pinned facts and older archives discard the retired field', () => {
+  const campaign = newCampaign({ name: 'Background', description: 'Keep this description.' });
+  const archive = {
+    format: 'local-rpg',
+    version: 6,
+    campaign,
+    turns: [],
+    snapshots: [],
+    memories: [],
+    diceSessions: [],
+    diceRecords: [],
+  };
+  const current = remapArchive(archive);
+  assert.equal(current.campaign.description, campaign.description);
+  assert.equal(Object.hasOwn(current.campaign, 'pinnedFacts'), false);
+  const old = remapArchive({
+    ...archive,
+    campaign: { ...campaign, pinnedFacts: ['Retired fact'] },
+  });
+  assert.equal(old.campaign.description, campaign.description);
+  assert.equal(Object.hasOwn(old.campaign, 'pinnedFacts'), false);
+});
+
 function npcArchive() {
   const input = knowledgeArchive();
   const npcId = input.campaign.knowledge![0]!.characterIds[0]!;

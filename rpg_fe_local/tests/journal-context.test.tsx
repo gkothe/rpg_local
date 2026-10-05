@@ -1,9 +1,72 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import Journal from '../src/features/journal/Journal';
+import CampaignContextSettings from '../src/features/journal/CampaignContextSettings';
 import { fixtureCampaign, fixtureTurn, options } from './fixtures';
 
 afterEach(() => vi.unstubAllGlobals());
+
+it('renders memory bullet points as list items while keeping legacy paragraphs readable', () => {
+  const campaign = fixtureCampaign();
+  campaign.memory = {
+    id: 'summary',
+    text: '- Marta has the key.\n- The gate remains locked.',
+    valid: true,
+    coveredTurnIds: [],
+    createdAt: new Date().toISOString(),
+  };
+  const view = render(<Journal campaign={campaign} options={options} onSaved={async () => {}} />);
+  expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+    'Marta has the key.',
+    'The gate remains locked.',
+  ]);
+  view.rerender(
+    <Journal
+      campaign={{
+        ...campaign,
+        memory: { ...campaign.memory, text: 'An older paragraph summary.' },
+      }}
+      options={options}
+      onSaved={async () => {}}
+    />
+  );
+  expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
+  expect(screen.getByText('An older paragraph summary.')).toBeInTheDocument();
+});
+
+it('saves Description without pinned facts and keeps the draft through refreshes', async () => {
+  const campaign = fixtureCampaign();
+  const fetcher = vi.fn(async (_path: string, init?: RequestInit) => {
+    const patch = JSON.parse(String(init?.body));
+    expect(patch.description).toBe('Marta has a silver key.');
+    expect(patch).not.toHaveProperty('pinnedFacts');
+    return new Response(JSON.stringify({ data: { ...campaign, ...patch, revision: 2 } }));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const onSaved = vi.fn(async () => {});
+  const view = render(
+    <CampaignContextSettings campaign={campaign} options={options} onSaved={onSaved} />
+  );
+  expect(screen.getByText('Description', { exact: true })).toHaveAttribute(
+    'title',
+    expect.stringContaining('It is not sent to the GM.')
+  );
+  fireEvent.change(screen.getByLabelText('Description'), {
+    target: { value: 'Marta has a silver key.' },
+  });
+  view.rerender(
+    <CampaignContextSettings
+      campaign={{ ...campaign, revision: 2 }}
+      options={options}
+      onSaved={onSaved}
+    />
+  );
+  expect(screen.getByLabelText('Description')).toHaveValue('Marta has a silver key.');
+  expect(screen.queryByLabelText('Pinned campaign facts')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Save context settings' }));
+  await screen.findByText('Context settings saved.');
+  expect(onSaved).toHaveBeenCalledOnce();
+});
 
 function expandContext() {
   const details = screen.getByText(/Advanced: inspect last turn context/).closest('details')!;
@@ -66,7 +129,13 @@ it('does not replace a newer inspected turn with an older delayed response', asy
 });
 
 it('shows active context targets without the retired memory setting', () => {
-  render(<Journal campaign={fixtureCampaign()} options={options} onSaved={async () => {}} />);
+  render(
+    <CampaignContextSettings
+      campaign={fixtureCampaign()}
+      options={options}
+      onSaved={async () => {}}
+    />
+  );
   expect(screen.queryByLabelText('Gameplay tokens')).not.toBeInTheDocument();
   expect(screen.getByLabelText('Compaction batch target (UTF-8 bytes)')).toBeInTheDocument();
   expect(screen.queryByLabelText('Memory tokens')).not.toBeInTheDocument();

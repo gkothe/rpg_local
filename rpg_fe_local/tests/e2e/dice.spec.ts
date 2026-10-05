@@ -156,7 +156,8 @@ test('terminal dice stay visible, retry preserves drafts and undo retains the au
   ).toBeVisible();
   await expect(page.getByLabel('Your action')).toHaveValue('Keep this unsent draft');
   const downloaded = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByRole('button', { name: 'Utility', exact: true }).click();
+  await page.getByRole('button', { name: 'Download campaign backup', exact: true }).click();
   const stream = await (await downloaded).createReadStream();
   const chunks: Buffer[] = [];
   for await (const chunk of stream!) chunks.push(chunk);
