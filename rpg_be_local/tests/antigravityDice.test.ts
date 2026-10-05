@@ -47,7 +47,7 @@ else if(args.includes('/hooks')) {
     }
     for(let slot=0;slot<2;slot++) {
       const input={...${JSON.stringify(request)},slot};
-      console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:slot*2,state:'DONE',usage:{input_tokens:10000,output_tokens:50,cache_read_tokens:0}}}));
+      console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:slot*2,state:'DONE',usage:mode==='partial-usage'?{input_tokens:10000}:mode==='invalid-usage'?{input_tokens:'unknown',output_tokens:50}:{input_tokens:10000,output_tokens:50,cache_read_tokens:0}}}));
       console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:slot*2+1,state:'ACTIVE',tool_name:'call_mcp_tool',tool_info:{parameters:{ServerName:'local_rpg',ToolName:'roll_dice',Arguments:input}}}}));
       const reply=await fetch(server.serverUrl,{method:'POST',headers:{...server.headers,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'roll_dice',arguments:input}})});
       const payload=await reply.json(); if(payload.result.isError)throw new Error(JSON.stringify(payload));
@@ -60,7 +60,7 @@ else if(args.includes('/hooks')) {
     const response={version:2,narrative:history.map(r=>r.result.groups[0].faces[0]).join(','),operations:[],rollInterpretations:history.map(r=>({rollId:r.result.rollId,explanation:'Recorded face '+r.result.groups[0].faces[0]}))};
     if(process.env.RPG_TEST_AGY_MODE==='book-success'){response.version=3;response.ruleCitations=[];}
     console.log(JSON.stringify({event:'step_update',step_update:{step_type:'unknown',step_index:5,state:'DONE',duration_seconds:0.1}}));
-    console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:{input_tokens:30000},response:JSON.stringify(response)}}));
+    console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:mode==='partial-usage'?undefined:mode==='invalid-usage'?{input_tokens:'unknown'}:{input_tokens:30000},response:JSON.stringify(response)}}));
   });
 }`;
 
@@ -197,41 +197,42 @@ test('Antigravity rejects intrinsic native tools, error framing and opaque repea
   );
 });
 
-test('Antigravity native MCP accepts High effort output usage and preserves dice identity with bounded inputs', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-dice-test-'));
-  try {
-    const filename = path.join(root, 'cli.mjs');
-    await writeFile(filename, fixture);
-    const ids: string[] = [];
-    const response = (await generateAntigravityDice(
-      { binary: process.execPath, prefix: [filename] },
-      settings,
-      'Synthetic context' + 'x'.repeat(70000),
-      root,
-      process.env,
-      async (input) => {
-        const slot = (input as typeof request).slot;
-        assert.equal(slot, ids.length);
-        const rollId = randomUUID();
-        ids.push(rollId);
-        return {
-          rollId,
-          slot,
-          groups: [{ label: 'check', sides: 6, faces: [slot + 3] }],
-          reused: false,
-        };
-      }
-    )) as { narrative: string; rollInterpretations: { rollId: string }[] };
-    assert.equal(response.narrative, '3,4');
-    assert.deepEqual(
-      response.rollInterpretations.map((entry) => entry.rollId),
-      ids
-    );
-    assert.equal(ids.length, 2);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
+for (const usageMode of ['valid', 'partial-usage', 'invalid-usage'])
+  test(`Antigravity accepts successful native MCP despite ${usageMode} telemetry`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-dice-test-'));
+    try {
+      const filename = path.join(root, 'cli.mjs');
+      await writeFile(filename, fixture);
+      const ids: string[] = [];
+      const response = (await generateAntigravityDice(
+        { binary: process.execPath, prefix: [filename] },
+        settings,
+        'Synthetic context' + 'x'.repeat(70000),
+        root,
+        { ...process.env, RPG_TEST_AGY_MODE: usageMode },
+        async (input) => {
+          const slot = (input as typeof request).slot;
+          assert.equal(slot, ids.length);
+          const rollId = randomUUID();
+          ids.push(rollId);
+          return {
+            rollId,
+            slot,
+            groups: [{ label: 'check', sides: 6, faces: [slot + 3] }],
+            reused: false,
+          };
+        }
+      )) as { narrative: string; rollInterpretations: { rollId: string }[] };
+      assert.equal(response.narrative, '3,4');
+      assert.deepEqual(
+        response.rollInterpretations.map((entry) => entry.rollId),
+        ids
+      );
+      assert.equal(ids.length, 2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 
 test('Antigravity rejects native capabilities before executing application dice', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-dice-isolation-'));

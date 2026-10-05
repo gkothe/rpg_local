@@ -54,6 +54,10 @@ Record, stop, inspect/edit the transcription, then press Send. Transcription nev
 
 Read-aloud uses a browser voice marked as installed/local. It speaks existing committed GM text, with no new AI request. Voice availability differs between Windows and Android; install an Android speech voice if none is available. See [Android LAN setup](lan-setup.md) for trusted HTTPS required by phone microphone access.
 
+Choose read-aloud Voice and Speed in Settings. Changes save automatically in the browser's localStorage and apply when starting any GM message. Preferences are specific to the browser and origin (localhost and 127.0.0.1 have separate storage). If a saved voice is unavailable, playback uses an available local default voice.
+
+During playback, the chat highlights the current sentence and scrolls it into view using the voice's timing events. Pause keeps the highlight; Stop, completion, errors or reading another message clear it. Voices that do not provide timing events still read the text, without synchronized highlighting. This was tested in Windows Chrome with the installed Microsoft George voice; other voices may behave differently.
+
 ## Runtime verification
 
 The synthetic native/scanned/mixed English/Portuguese PDF suite and actual local speech model tests are separate from npm's default offline tests:

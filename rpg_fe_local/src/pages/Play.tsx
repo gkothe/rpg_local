@@ -17,7 +17,7 @@ import CharacterSheet from '../features/characters/CharacterSheet';
 import SourceManager from '../features/sources/SourceManager';
 import Journal from '../features/journal/Journal';
 import { useTurn } from '../features/play/useTurn';
-import { ReadAloud } from '../features/audio/ReadAloud';
+import { NarratedText } from '../features/audio/NarratedText';
 import { Dictation } from '../features/audio/Dictation';
 import { DiceRolls } from '../features/play/DiceRolls';
 import RuleSystemPicker from '../features/rules/RuleSystemPicker';
@@ -307,10 +307,10 @@ export default function PlayPage() {
                       <time className="message-time" dateTime={t.completedAt || t.createdAt}>
                         {new Date(t.completedAt || t.createdAt).toLocaleString()}
                       </time>
-                      <div className="prose">{t.narrative}</div>
-                      {t.narrative && !t.undone && isCompleted(t, settings.data) && (
-                        <ReadAloud text={t.narrative} />
-                      )}
+                      <NarratedText
+                        text={t.narrative ?? ''}
+                        readable={!!t.narrative && !t.undone && isCompleted(t, settings.data)}
+                      />
                     </div>
                     {showDebug && (
                       <DiceRolls

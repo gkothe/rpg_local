@@ -47,9 +47,9 @@ test('Claude leaves model turn count and context capacity to the CLI while valid
     const script = path.join(root, 'cli.mjs');
     await writeFile(
       script,
-      `if(process.argv.includes('--version'))console.log('2.1.232 (Claude Code)');else{process.stdin.resume();process.stdin.on('end',()=>{console.log(JSON.stringify({type:'system',subtype:'init',tools:['mcp__dice__roll_dice'],mcp_servers:[{name:'dice',status:'connected'}]}));console.log(JSON.stringify({type:'result',subtype:'success',is_error:false,num_turns:process.env.RPG_TEST_DICE_MODE==='turns'?26:1,result:JSON.stringify({version:2,narrative:'Done',operations:[],rollInterpretations:[]}),modelUsage:{fixture:{contextWindow:process.env.RPG_TEST_DICE_MODE==='context'?1000:128000,outputTokens:10}}}));});}`
+      `if(process.argv.includes('--version'))console.log('2.1.232 (Claude Code)');else{process.stdin.resume();process.stdin.on('end',()=>{console.log(JSON.stringify({type:'system',subtype:'init',tools:['mcp__dice__roll_dice'],mcp_servers:[{name:'dice',status:'connected'}]}));console.log(JSON.stringify({type:'result',subtype:'success',is_error:false,num_turns:process.env.RPG_TEST_DICE_MODE==='turns'?26:1,result:JSON.stringify({version:2,narrative:'Done',operations:[],rollInterpretations:[]}),modelUsage:process.env.RPG_TEST_DICE_MODE==='missing'?undefined:process.env.RPG_TEST_DICE_MODE==='partial'?{fixture:{outputTokens:10}}:process.env.RPG_TEST_DICE_MODE==='invalid'?{fixture:{contextWindow:'unknown'}}:{fixture:{contextWindow:process.env.RPG_TEST_DICE_MODE==='context'?1000:128000,outputTokens:10}}}));});}`
     );
-    for (const mode of ['turns', 'context']) {
+    for (const mode of ['turns', 'context', 'missing', 'partial', 'invalid']) {
       assert.deepEqual(
         await generateClaudeDice(
           { binary: process.execPath, prefix: [script] },

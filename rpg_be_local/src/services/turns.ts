@@ -44,7 +44,6 @@ import type { Generator } from '../providers/service.js';
 import {
   buildContext,
   compactionBatch,
-  estimateTokens,
   uncovered,
   uncoveredHistoryTokens,
 } from '../domain/context.js';
@@ -1164,8 +1163,6 @@ export class TurnService {
   ): Promise<Campaign> {
     return this.store.edit(id, input.revision, async (c, client) => {
       await this.store.assertIdle(c.id, client);
-      if (estimateTokens(input.text) > c.budgets.memory)
-        throw new Problem(422, 'memory_overflow', 'Memory text exceeds configured budget');
       const turns = await this.store.activeTurns(c.id, client);
       const exact = turns.slice(0, input.coveredTurnIds.length).map((t) => t.id);
       if (

@@ -215,7 +215,7 @@ test('runner streams prompt through stdin with bounded output, no shell interpol
   await assert.rejects(pending, /cancelled/);
 });
 
-test('Antigravity excludes ambient customizations and parses only one bounded isolated result', () => {
+test('Antigravity excludes ambient customizations and accepts one isolated result without token gating', () => {
   const definition = agentDefinition('local-rpg-fixture');
   assert.ok(definition.includes('inheritCustomizations: false'));
   assert.ok(definition.includes('excludeDefaultComponents: true'));
@@ -245,10 +245,9 @@ test('Antigravity excludes ambient customizations and parses only one bounded is
     JSON.stringify(init) + '\n' + JSON.stringify({ event: 'result', result: value });
   assert.deepEqual(parseProviderOutput('agy', output(result)), { text: 'done' });
   assert.throws(() => parseProviderOutput('agy', output({ ...result, num_turns: 2 })), /isolated/);
-  assert.throws(
-    () => parseProviderOutput('agy', output({ ...result, usage: { input_tokens: 16001 } })),
-    /envelope/
-  );
+  for (const usage of [{ input_tokens: 16001 }, { input_tokens: 120000 }, undefined]) {
+    assert.deepEqual(parseProviderOutput('agy', output({ ...result, usage })), { text: 'done' });
+  }
   assert.throws(
     () => parseProviderOutput('agy', output({ ...result, status: 'ERROR' })),
     /isolated/

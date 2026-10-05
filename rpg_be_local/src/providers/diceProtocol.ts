@@ -2,16 +2,6 @@ import { z } from 'zod';
 import { DICE_LIMITS, DICE_TOOL_NAME, diceInputSchema, type DiceResult } from '../domain/dice.js';
 import { Problem } from '../errors.js';
 
-// Claude reserves 25 outputs of 2048 tokens plus bounded prompt/tool history.
-// Codex interrupts each tool phase and starts with a fresh bounded application transcript.
-// No automatic compaction is allowed inside the turn. Existing no-tools calls retain their limits.
-export const DICE_CLI_LIMITS = {
-  contextTokens: 128_000,
-  modelOutputTokens: 2048,
-  modelTurns: DICE_LIMITS.requestsPerAttempt + 1,
-  protocolBytes: 2_000_000,
-  codexPhaseInputBytes: 32_000,
-} as const;
 export { DICE_NARRATOR } from '../domain/dice.js';
 export const diceToolSchema = z.toJSONSchema(diceInputSchema, { unrepresentable: 'any' });
 export type RollCallback = (input: unknown, requestId: string | number) => Promise<DiceResult>;

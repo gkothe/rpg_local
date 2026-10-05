@@ -470,6 +470,14 @@ small {
   width: 100%;
   max-width: 450px;
 }
+.spoken-sentence {
+  color: inherit;
+  background: rgba(210, 170, 83, 0.28);
+  border-radius: 3px;
+  text-decoration: underline;
+  text-decoration-color: var(--ochre);
+  text-underline-offset: 0.2em;
+}
 .read-aloud {
   margin-top: 1rem;
   color: var(--muted);

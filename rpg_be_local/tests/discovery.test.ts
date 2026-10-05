@@ -103,11 +103,12 @@ test('refresh reports failed help inspection and cannot keep a previously usable
     process.env.RPG_MODEL_CATALOG = JSON.stringify([
       {
         provider: 'claude',
-        models: [{ id: 'fixture', label: 'Fixture', efforts: [], inputTokens: 8000 }],
+        models: [{ id: 'fixture', label: 'Fixture', efforts: [], inputTokens: 120000 }],
       },
     ]);
     const service = new ProviderService();
     assert.equal((await service.list())[0]?.supported, true);
+    assert.equal((await service.list())[0]?.models[0]?.inputTokens, 120000);
     await writeFile(entrypoint, 'process.exit(1)');
     const provider = (await service.list(true))[0]!;
     assert.equal(provider.available, true);

@@ -11,7 +11,6 @@ import { MAX_PROVIDER_INPUT_TOKENS } from './options.js';
 import { logPrompt, type PromptTraceContext } from './promptLog.js';
 // Tested evidence baseline only; version differences produce a warning, never a gate.
 export const ANTIGRAVITY_ISOLATED_VERSION = '1.2.14';
-export const ANTIGRAVITY_INPUT_BYTES = 12_800;
 const ANTIGRAVITY_PROCESS_OUTPUT_BYTES = Infinity;
 const ANTIGRAVITY_PROCESS_TIMEOUT_MS = 0;
 const ANTIGRAVITY_MODEL_EFFORTS = ['low', 'medium', 'high', 'max'] as const;

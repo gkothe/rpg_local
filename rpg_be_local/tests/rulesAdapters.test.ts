@@ -35,7 +35,7 @@ const send=x=>console.log(JSON.stringify(x));let book=false,knowledge=false;
 lines.on('line',raw=>{const m=JSON.parse(raw);
 if(m.id===1)send({id:1,result:{}});
 else if(m.id===2){book=m.params.dynamicTools.some(t=>t.name==='rules_get');knowledge=m.params.dynamicTools.some(t=>t.name==='campaign_knowledge_get');send({id:2,result:{thread:{id:'thread'}}});}
-else if(m.id===3){send({id:3,result:{turn:{id:'turn'}}});if(process.env.RPG_ADAPTER_FIND==='1'){send({id:10,method:'item/tool/call',params:{threadId:'thread',turnId:'turn',callId:'find-call',tool:'rules_find',arguments:{query:'movement'}}});return;}finish();}
+else if(m.id===3){send({method:'thread/tokenUsage/updated',params:{threadId:process.env.RPG_ADAPTER_FOREIGN_USAGE==='1'?'foreign':'thread',tokenUsage:{last:{outputTokens:10}}}});send({id:3,result:{turn:{id:'turn'}}});if(process.env.RPG_ADAPTER_FIND==='1'){send({id:10,method:'item/tool/call',params:{threadId:'thread',turnId:'turn',callId:'find-call',tool:'rules_find',arguments:{query:'movement'}}});return;}finish();}
 else if(m.id===10){if(!m.result.success||JSON.parse(m.result.contentItems[0].text).reads[0].text!=='Original movement')throw Error('Original not received');finish();}
 });
 function finish(){send({method:'turn/completed',params:{threadId:'thread',turn:{id:'turn',status:'completed',items:[{type:'agentMessage',text:JSON.stringify({payload_json:JSON.stringify({version:knowledge?(Number(process.env.RPG_ADAPTER_RESPONSE_VERSION)||4):book?3:2,narrative:'Original synthetic response',operations:[],rollInterpretations:[],...((book||knowledge)?{ruleCitations:[]}:{ }),...(knowledge?{knowledgeChanges:JSON.parse(process.env.RPG_ADAPTER_KNOWLEDGE||'[]'),...(process.env.RPG_ADAPTER_RESPONSE_VERSION==='5'?{operationExplanations:[]}:{} )}:{})})})}]}}});}
@@ -310,6 +310,30 @@ test('all native transports dispatch explicit v5 including frozen campaign sourc
         fixtureKnowledge
       );
     }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('Codex usage diagnostics cannot cross the owned thread boundary', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'rpg-usage-owner-'));
+  try {
+    const script = path.join(directory, 'codex.mjs');
+    await writeFile(script, codex);
+    await assert.rejects(
+      runCodexDicePhases(
+        { binary: process.execPath, prefix: [script] },
+        { provider: 'codex', model: 'fixture', effort: null },
+        'Synthetic context',
+        directory,
+        { ...process.env, RPG_ADAPTER_FOREIGN_USAGE: '1' },
+        {},
+        async () => {
+          throw Error('Unexpected dice');
+        }
+      ),
+      (error: unknown) => (error as { code: string }).code === 'dice_isolation'
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

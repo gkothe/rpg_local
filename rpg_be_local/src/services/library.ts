@@ -10,7 +10,6 @@ import { Store } from '../store.js';
 import { newCampaign } from '../domain/campaign.js';
 import type { Campaign, Archive, Snapshot, Memory } from '../domain/types.js';
 import { Problem, conflict } from '../errors.js';
-import { estimateTokens } from '../domain/context.js';
 import { sourceSections } from '../domain/sourceSections.js';
 import {
   ARCHIVE_TURN_STATUSES,
@@ -25,7 +24,6 @@ import {
 import {
   MAX_ARCHIVE_TURNS,
   MAX_ENTITY_NAME_CHARS,
-  MAX_MEMORY_TEXT_CHARS,
   MAX_SOURCE_PAGES,
   MAX_SOURCE_TEXT_CHARS,
 } from '../domain/limits.js';
@@ -87,7 +85,7 @@ const character = z
 const memory = z
   .object({
     id: uuid,
-    text: z.string().max(MAX_MEMORY_TEXT_CHARS),
+    text: z.string(),
     coveredTurnIds: z.array(uuid),
     valid: z.boolean(),
     createdAt: z.iso.datetime(),
@@ -764,8 +762,6 @@ export function remapArchive(raw: unknown): Archive {
   for (const m of archive.memories) {
     if (m.coveredTurnIds.some((id) => !tids.has(id)))
       throw new Problem(422, 'archive_invalid', 'Unresolved memory turn coverage');
-    if (estimateTokens(m.text) > old.budgets.memory)
-      throw new Problem(422, 'archive_invalid', 'Oversized memory checkpoint');
     if (
       m.valid &&
       JSON.stringify(m.coveredTurnIds) !==

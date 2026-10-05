@@ -12,7 +12,7 @@ import {
   narrativeHumanizerJsonSchema,
 } from '../src/domain/narrativeHumanizer.js';
 
-test('Antigravity field repair receives its separately supplied schema without requiring it in caller text', async () => {
+test('Antigravity field repair receives its schema and accepts CLI-successful input above soft capacity', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'rpg-repair-schema-'));
   const schema = {
     type: 'object',
@@ -42,7 +42,7 @@ const name=args[args.indexOf('--agent')+1];
 const definition=readFileSync(path.join(homedir(),'.gemini','config','agents',name,'agent.md'),'utf8');
 if(!definition.includes('tools: []')||!definition.includes('inheritMcp: false')||definition.includes('mcpServers:'))throw Error('Repair tools must remain disabled');
 console.log(JSON.stringify({event:'init',init:{agent:name}}));
-console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:{input_tokens:100},response:JSON.stringify(${JSON.stringify(response)})}}));
+console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:{input_tokens:42000},response:JSON.stringify(${JSON.stringify(response)})}}));
 });}`
     );
     for (const input of [prompt, `${prompt}\nResponse schema: ${JSON.stringify(schema)}`]) {

@@ -85,11 +85,11 @@ export async function generateAntigravityMcpBook(
         });
       }
       check();
-      if (!initialized || !inferences.size)
+      if (!initialized)
         throw new Problem(
-          422,
-          'rules_calls_exhausted',
-          'Antigravity exhausted its native tool allowance'
+          502,
+          'dice_isolation',
+          'Antigravity requested a tool before initialization'
         );
       invocation.claimed = true;
       // Native clients may reuse JSON-RPC IDs across independent tool calls.
@@ -182,19 +182,15 @@ export async function generateAntigravityMcpBook(
               if (step.step_type === 'agent_response') {
                 if (step.usage) {
                   const input = step.usage.input_tokens;
-                  if (
-                    !Number.isInteger(input) ||
-                    input! < 0 ||
-                    !Number.isInteger(step.usage.output_tokens) ||
-                    step.usage.output_tokens! < 0 ||
-                    !Number.isInteger(step.step_index)
-                  )
-                    throw new Problem(
-                      422,
-                      'context_overflow',
-                      `Antigravity reported invalid usage metadata: input=${input ?? 'missing'}, output=${step.usage.output_tokens ?? 'missing'}, step=${step.step_index ?? 'missing'}`
-                    );
-                  if (!inferences.has(step.step_index!)) {
+                  const validUsage =
+                    Number.isInteger(input) &&
+                    input! >= 0 &&
+                    Number.isInteger(step.usage.output_tokens) &&
+                    step.usage.output_tokens! >= 0 &&
+                    Number.isInteger(step.step_index);
+                  if (!validUsage)
+                    await traceEvent(trace, 'usage_unavailable', { provider: 'agy' });
+                  if (validUsage && !inferences.has(step.step_index!)) {
                     inferences.set(step.step_index!, input!);
                     await traceEvent(trace, 'usage', {
                       inputTokens: input,
@@ -289,12 +285,6 @@ export async function generateAntigravityMcpBook(
                       'dice_isolation',
                       'Antigravity reused an invalid native tool identity'
                     );
-                  if (!inferences.size)
-                    throw new Problem(
-                      422,
-                      'rules_calls_exhausted',
-                      'Antigravity exhausted its native tool allowance'
-                    );
                   pending.push({
                     index: step.step_index!,
                     key: `${parameters.ToolName}:${canonicalRuleJson(input)}`,
@@ -334,7 +324,6 @@ export async function generateAntigravityMcpBook(
                 response?: string;
                 usage?: { input_tokens?: number };
               };
-              const total = result.usage?.input_tokens;
               if (initialized && !completed && result.status !== 'SUCCESS')
                 throw cliFailure(typeof result.response === 'string' ? result.response : '');
               if (
@@ -342,9 +331,6 @@ export async function generateAntigravityMcpBook(
                 completed ||
                 result.status !== 'SUCCESS' ||
                 result.num_turns !== 1 ||
-                !inferences.size ||
-                !Number.isInteger(total) ||
-                total! < 0 ||
                 typeof result.response !== 'string' ||
                 pending.some((entry) => !entry.claimed)
               )

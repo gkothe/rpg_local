@@ -2,12 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import { locate } from './discovery.js';
-import {
-  inspectCodex,
-  generateCodex,
-  CODEX_INPUT_TOKENS,
-  CODEX_ISOLATED_VERSION,
-} from './codex.js';
+import { inspectCodex, generateCodex, CODEX_ISOLATED_VERSION } from './codex.js';
 import path from 'node:path';
 import { runProcess } from './processRunner.js';
 import { parseProviderOutput, providerArgs } from './adapters.js';
@@ -116,7 +111,7 @@ const configSchema = z.array(
         id: z.string().regex(/^[\w./:-]{1,120}$/),
         label: z.string().max(100),
         efforts: z.array(z.enum(MODEL_EFFORTS)),
-        inputTokens: z.number().int().min(2000).max(MAX_PROVIDER_INPUT_TOKENS),
+        inputTokens: z.number().int().positive(),
       })
     ),
   })
@@ -284,7 +279,6 @@ export class ProviderService implements Generator {
               ?.filter((option) => codexModels.some((model) => model.id === option.id))
               .map((option) => ({
                 ...option,
-                inputTokens: Math.min(option.inputTokens, CODEX_INPUT_TOKENS),
                 efforts: option.efforts.filter((effort) =>
                   codexModels.find((model) => model.id === option.id)!.efforts.includes(effort)
                 ),
@@ -340,7 +334,7 @@ export class ProviderService implements Generator {
                 ? claudeDiceVerified
                   ? 'Trusted dice is verified only for current CLI model aliases'
                   : 'Claude CLI discovery failed'
-                : 'Trusted dice isolation or context budget is not verified for this model',
+                : 'Trusted dice isolation is not verified for this model',
           },
         };
       });
@@ -377,8 +371,7 @@ export class ProviderService implements Generator {
             : id === PROVIDER_ID.Antigravity
               ? (reason ?? 'Trusted dice requires a model from the verified installed CLI catalog')
               : id === PROVIDER_ID.Codex
-                ? (reason ??
-                  'Trusted dice requires a verified account model with a sufficient context window')
+                ? (reason ?? 'Trusted dice requires a verified account model')
                 : (reason ?? (!claudeDiceVerified ? 'Claude CLI discovery failed' : null)),
         },
         catalogProvenance:
@@ -531,8 +524,7 @@ export class ProviderService implements Generator {
         model.rules?.reason ?? provider.rules?.reason ?? 'Book gameplay is not verified'
       );
     await this.gameplayCapacity(settings, ceiling);
-    // Schema and narrator are already included in book-mode context. Native
-    // continuation reserves are bounded independently by the verified 24 calls.
+    // Capacity is a context-selection target; native continuations use CLI capacity.
     return ceiling;
   }
   async bookGameplayLimits(settings: ProviderSettings): Promise<BookGameplayLimits> {

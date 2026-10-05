@@ -428,3 +428,18 @@ test('v5 archive retains secret metadata, source purpose and remaps frozen sourc
   assert.notEqual(out.turns[0]!.sourceReads![0]!.id, receiptId);
   assert.throws(() => remapArchive({ ...data, version: 4 }));
 });
+
+test('archives preserve memory above the soft campaign target', () => {
+  const archive = knowledgeArchive();
+  const memory = {
+    id: randomUUID(),
+    text: 'Established history. '.repeat(1500),
+    coveredTurnIds: [archive.turns[0]!.id],
+    valid: true,
+    createdAt: archive.campaign.createdAt,
+  };
+  const withMemory = { ...archive, memories: [memory], campaign: { ...archive.campaign, memory } };
+  const imported = remapArchive(withMemory);
+  assert.equal(imported.campaign.memory?.text, memory.text);
+  assert.equal(imported.memories[0]?.text, memory.text);
+});

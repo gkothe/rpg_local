@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import type { Provider, Settings } from '../services/types';
 import { ErrorNotice } from '../components/Controls';
 import LanConnection from '../features/connections/LanConnection';
+import ReadAloudSettings from '../features/audio/ReadAloudSettings';
 export default function SettingsPage() {
   const refreshGuard = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -64,11 +65,7 @@ export default function SettingsPage() {
           Recording is explicit and limited to 60 seconds. Review the resulting text before sending.
           Transcription uses no campaign history.
         </p>
-        <h3>Read aloud</h3>
-        <p className="muted">
-          Use Read aloud on a GM response. Only browser voices marked as installed locally are
-          offered.
-        </p>
+        <ReadAloudSettings />
       </section>
       <LanConnection />
       <section className="panel stack">

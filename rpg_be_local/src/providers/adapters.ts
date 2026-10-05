@@ -1,8 +1,8 @@
 import { cliFailure } from '../processingErrors.js';
 import { Problem } from '../errors.js';
-import { CODEX_INPUT_TOKENS, parseCodexPayload } from './codex.js';
+import { parseCodexPayload } from './codex.js';
 import type { ProviderSettings } from '../domain/types.js';
-import { MAX_PROVIDER_INPUT_TOKENS, PROVIDER_ID } from './options.js';
+import { PROVIDER_ID } from './options.js';
 export function providerArgs(
   id: string,
   settings: ProviderSettings,
@@ -78,15 +78,6 @@ export function parseProviderOutput(id: string, output: string): unknown {
           'provider_isolation',
           'Antigravity did not complete one isolated GM turn'
         );
-      if (
-        !Number.isFinite(result.usage?.input_tokens) ||
-        result.usage.input_tokens > MAX_PROVIDER_INPUT_TOKENS
-      )
-        throw new Problem(
-          502,
-          'provider_budget',
-          'Antigravity exceeded the verified input envelope'
-        );
       const response = result.response.trim();
       const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(response);
       return JSON.parse(fenced ? fenced[1]! : response);
@@ -115,13 +106,6 @@ export function parseProviderOutput(id: string, output: string): unknown {
       );
       if (completed.length !== 1 || messages.length !== 1)
         throw new Problem(502, 'provider_isolation', 'Codex did not complete one isolated GM turn');
-      const inputTokens = completed[0].usage?.input_tokens;
-      if (!Number.isInteger(inputTokens) || inputTokens < 0 || inputTokens > CODEX_INPUT_TOKENS)
-        throw new Problem(
-          502,
-          'provider_budget',
-          'Codex exceeded or did not report the verified input envelope'
-        );
       return parseCodexPayload(messages[0].item.text);
     }
     const envelope = JSON.parse(output);

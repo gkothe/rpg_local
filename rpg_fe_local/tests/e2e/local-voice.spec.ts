@@ -7,7 +7,13 @@ test('installed browser local voice reads existing GM text to completion', async
   );
   const campaign = {
     ...fixtureCampaign(),
-    turns: [{ ...fixtureTurn(), narrative: 'The road is quiet.' }],
+    turns: [
+      {
+        ...fixtureTurn(),
+        narrative:
+          'The road is quiet. Mira waits beside the gate and raises her hand as you approach.',
+      },
+    ],
   };
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -36,18 +42,46 @@ test('installed browser local voice reads existing GM text to completion', async
     .toBeGreaterThan(0);
   await page.evaluate(() => {
     const state = window as unknown as {
-      rpgVoiceResult: { status: string; voice: string; local: boolean; error?: string };
+      rpgVoiceResult: {
+        status: string;
+        voice: string;
+        local: boolean;
+        boundaries: number[];
+        highlights: string[];
+        error?: string;
+      };
     };
-    state.rpgVoiceResult = { status: 'waiting', voice: '', local: false };
+    state.rpgVoiceResult = {
+      status: 'waiting',
+      voice: '',
+      local: false,
+      boundaries: [],
+      highlights: [],
+    };
     const original = window.speechSynthesis.speak.bind(window.speechSynthesis);
     window.speechSynthesis.speak = (utterance) => {
       state.rpgVoiceResult = {
         status: 'started',
         voice: utterance.voice?.name || '',
         local: !!utterance.voice?.localService,
+        boundaries: [],
+        highlights: [],
       };
-      utterance.addEventListener('end', () => (state.rpgVoiceResult.status = 'ended'));
+      const observer = new MutationObserver(() => {
+        const mark = document.querySelector('.spoken-sentence');
+        if (mark?.textContent && !state.rpgVoiceResult.highlights.includes(mark.textContent))
+          state.rpgVoiceResult.highlights.push(mark.textContent);
+      });
+      observer.observe(document.body, { subtree: true, childList: true });
+      utterance.addEventListener('boundary', (e) =>
+        state.rpgVoiceResult.boundaries.push(e.charIndex)
+      );
+      utterance.addEventListener('end', () => {
+        state.rpgVoiceResult.status = 'ended';
+        observer.disconnect();
+      });
       utterance.addEventListener('error', (e) => {
+        observer.disconnect();
         state.rpgVoiceResult.status = 'error';
         state.rpgVoiceResult.error = e.error;
       });
@@ -67,12 +101,21 @@ test('installed browser local voice reads existing GM text to completion', async
     () =>
       (
         window as unknown as {
-          rpgVoiceResult: { status: string; voice: string; local: boolean; error?: string };
+          rpgVoiceResult: {
+            status: string;
+            voice: string;
+            local: boolean;
+            boundaries: number[];
+            highlights: string[];
+            error?: string;
+          };
         }
       ).rpgVoiceResult
   );
   console.log('Installed local voice result:', JSON.stringify(result));
   expect(result.local).toBe(true);
   expect(result.status, result.error).toBe('ended');
+  if (result.boundaries.length) expect(result.highlights.length).toBeGreaterThan(0);
+  await expect(page.locator('.spoken-sentence')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeDisabled();
 });

@@ -497,6 +497,7 @@ OCR warnings do not force an explicit review gate on initial import; users can r
 - **Architectural Boundary on Audio**:
   - Backend provides **speech-to-text dictation only** (`POST /api/audio/transcriptions`).
   - **Text-to-Speech (TTS)** for reading GM narrative is exclusively client-side via the browser's native Web Speech API (`window.speechSynthesis`) using installed operating system voices.
+  - Sentence highlighting follows browser speech boundary events locally without an AI call, and clears on stop, end or error; synchronization depends on the selected voice exposing those events.
 
 The backend has no TTS route; actual voice availability and whether a browser voice uses local synthesis depend on the client. PDF extraction has a 120-second subprocess timeout, OCR invokes Tesseract with a 100-second per-page timeout, and transcription has a 180-second subprocess timeout. These extraction/audio deadlines remain active even though gameplay AI generation has no application deadline.
 
@@ -854,6 +855,8 @@ Because different models have different context window tolerances, the applicati
 - `gameplay`: default 16,000 estimated tokens (optional retrieval target, not a history ceiling).
 - `compaction`: default 8,000 tokens.
 - `memory`: default 2,000 tokens.
+
+These targets never reject a successful CLI result. Ordinary generation, field repair and narrative editing do not require token-usage telemetry or impose a post-response input-token ceiling. Completion, isolation and structured-response validation still apply; reported usage remains available in local diagnostics. Native adapters treat absent, partial or malformed usage telemetry as unavailable diagnostics rather than failing otherwise valid responses. Foreign thread identities still fail isolation checks. Explicit model catalogs accept any positive input-token target without a fixed upper ceiling.
 
 To prevent token estimation errors, the standard estimate is deliberately pessimistic; book mode uses a softer heuristic:
 
@@ -1314,7 +1317,7 @@ For new actions, compaction is considered when uncovered completed history excee
 5. **Reversibility**:
    If an undo rolls back past a compacted turn, the milestone is invalidated (`valid: false`) and prior milestones are restored as described above.
 
-Manual memory (`POST /api/campaigns/:id/memory`) is a separate reviewed path: it requires `confirm: true`, an idle campaign, the current revision, a non-empty exact consecutive prefix of active completed turn IDs, and text whose UTF-8 byte estimate fits the memory budget. Neither automatic nor manual memory mutates canonical character state or knowledge records.
+Manual memory (`POST /api/campaigns/:id/memory`) is a separate reviewed path: it requires `confirm: true`, an idle campaign, the current revision, a non-empty exact consecutive prefix of active completed turn IDs, and non-empty memory text. The memory budget is a soft generation target: saved and imported checkpoints are preserved even above it. Neither automatic nor manual memory mutates canonical character state or knowledge records.
 
 ---
 

@@ -1,33 +1,42 @@
 import { useEffect, useRef, useState } from 'react';
 import { Volume2, Square, Pause, Play } from 'lucide-react';
-export function ReadAloud({ text }: { text: string }) {
+import { readAloudPreferences, useLocalVoices } from './readAloudPreferences';
+export function ReadAloud({
+  text,
+  onPosition,
+}: {
+  text: string;
+  onPosition?: (position: number | null) => void;
+}) {
   const sequence = useRef(0);
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]),
-    [voice, setVoice] = useState(''),
-    [rate, setRate] = useState(1),
-    [state, setState] = useState<'idle' | 'playing' | 'paused'>('idle');
+  const active = useRef(false);
+  const voices = useLocalVoices();
+  const [error, setError] = useState('');
+  const [state, setState] = useState<'idle' | 'playing' | 'paused'>('idle');
   useEffect(() => {
     if (!('speechSynthesis' in window)) return;
     const invalidate = () => {
       sequence.current++;
     };
-    const update = () =>
-      setVoices(window.speechSynthesis.getVoices().filter((v) => v.localService));
     const changed = () => {
       sequence.current++;
+      active.current = false;
+      onPosition?.(null);
       setState('idle');
     };
-    update();
-    window.speechSynthesis.addEventListener('voiceschanged', update);
     window.addEventListener('rpg-speech-start', changed);
     return () => {
       invalidate();
-      window.speechSynthesis.removeEventListener('voiceschanged', update);
       window.removeEventListener('rpg-speech-start', changed);
-      window.speechSynthesis.cancel();
+      onPosition?.(null);
+      if (active.current) window.speechSynthesis.cancel();
+      active.current = false;
     };
-  }, []);
+  }, [text, onPosition]);
   const stop = () => {
+    sequence.current++;
+    active.current = false;
+    onPosition?.(null);
     window.speechSynthesis.cancel();
     setState('idle');
   };
@@ -36,30 +45,11 @@ export function ReadAloud({ text }: { text: string }) {
       <summary>
         <Volume2 size={15} /> Read aloud
       </summary>
+      {error && <p role="alert">{error}</p>}
       {voices.length === 0 ? (
         <p className="muted">No installed local browser voice is available.</p>
       ) : (
         <div className="row wrap">
-          <label>
-            Voice{' '}
-            <select value={voice} onChange={(e) => setVoice(e.target.value)}>
-              {voices.map((v) => (
-                <option key={v.voiceURI} value={v.voiceURI}>
-                  {v.name} ({v.lang})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Speed{' '}
-            <select value={rate} onChange={(e) => setRate(Number(e.target.value))}>
-              {[0.75, 1, 1.25, 1.5].map((r) => (
-                <option key={r} value={r}>
-                  {r}×
-                </option>
-              ))}
-            </select>
-          </label>
           <button
             type="button"
             onClick={() => {
@@ -68,17 +58,50 @@ export function ReadAloud({ text }: { text: string }) {
                 setState('playing');
                 return;
               }
+              let preferences;
+              try {
+                preferences = readAloudPreferences();
+                setError('');
+              } catch {
+                setError(
+                  'Unable to load read-aloud settings. Check your browser storage in Settings.'
+                );
+                return;
+              }
               window.dispatchEvent(new Event('rpg-speech-start'));
               window.speechSynthesis.cancel();
               const token = ++sequence.current;
+              active.current = true;
               const utterance = new SpeechSynthesisUtterance(text);
-              utterance.voice = voices.find((v) => v.voiceURI === voice) || voices[0];
-              utterance.rate = rate;
+              utterance.voice =
+                voices.find((v) => v.voiceURI === preferences.voice) ||
+                voices.find((v) => v.default) ||
+                voices[0];
+              utterance.rate = preferences.rate;
+              utterance.onboundary = (event) => {
+                if (
+                  token === sequence.current &&
+                  Number.isInteger(event.charIndex) &&
+                  event.charIndex >= 0 &&
+                  event.charIndex < text.length
+                )
+                  onPosition?.(event.charIndex);
+              };
               utterance.onend = () => {
-                if (token === sequence.current) setState('idle');
+                if (token === sequence.current) {
+                  sequence.current++;
+                  active.current = false;
+                  onPosition?.(null);
+                  setState('idle');
+                }
               };
               utterance.onerror = () => {
-                if (token === sequence.current) setState('idle');
+                if (token === sequence.current) {
+                  sequence.current++;
+                  active.current = false;
+                  onPosition?.(null);
+                  setState('idle');
+                }
               };
               window.speechSynthesis.speak(utterance);
               setState('playing');

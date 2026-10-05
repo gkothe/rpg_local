@@ -152,7 +152,7 @@ test('Codex output rejects tool events and a failed turn despite an agent messag
   );
 });
 
-test('Codex final output requires one successful turn and a bounded reported input budget', () => {
+test('Codex final output requires one successful turn without an app input-token ceiling', () => {
   const message = JSON.stringify({
     type: 'item.completed',
     item: { type: 'agent_message', text: JSON.stringify({ payload_json: '{"text":"done"}' }) },
@@ -161,10 +161,14 @@ test('Codex final output requires one successful turn and a bounded reported inp
     JSON.stringify({ type: 'turn.completed', usage: { input_tokens } });
   assert.deepEqual(parseProviderOutput('codex', message + '\n' + complete(1000)), { text: 'done' });
   assert.throws(() => parseProviderOutput('codex', message), /complete one/);
-  assert.throws(
-    () => parseProviderOutput('codex', message + '\n' + complete(8001)),
-    /input envelope/
-  );
+  for (const inputTokens of [8001, 120000]) {
+    assert.deepEqual(parseProviderOutput('codex', message + '\n' + complete(inputTokens)), {
+      text: 'done',
+    });
+  }
+  assert.deepEqual(parseProviderOutput('codex', message + '\n{"type":"turn.completed"}'), {
+    text: 'done',
+  });
   assert.throws(
     () => parseProviderOutput('codex', message + '\n' + complete(1000) + '\n' + message),
     /complete one/

@@ -29,6 +29,7 @@ describe('audio boundaries', () => {
     expect(screen.getByRole('button', { name: 'Dictate' })).toBeEnabled();
   });
   it('offers only local voices and reconciles another message taking playback', () => {
+    vi.stubGlobal('localStorage', { getItem: () => null });
     const local = { voiceURI: 'local', name: 'Installed voice', lang: 'en-US', localService: true },
       remote = { voiceURI: 'remote', name: 'Online voice', lang: 'en-US', localService: false };
     const target = new EventTarget();

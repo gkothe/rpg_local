@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { locate } from '../src/providers/discovery.js';
-import { agentDefinition, ANTIGRAVITY_INPUT_BYTES } from '../src/providers/antigravity.js';
+import { agentDefinition } from '../src/providers/antigravity.js';
 import { antigravityDiceEnvironment } from '../src/providers/antigravityDice.js';
 import { startGameplayMcp } from '../src/providers/gameplayMcp.js';
 import { gameplayToolDefinitions } from '../src/providers/gameplayTools.js';
@@ -81,7 +81,6 @@ test(
       const prompt =
         'Call the private local_rpg rules_get exactly once with {"path":"core_rules.original.check","view":"text"}. Then return {"seen":<the complete text returned by that tool>}. Use only that owned MCP tool, no native tools. Do not emit a JSON simulated tool request.';
       const input = JSON.stringify({ event: 'user', message: { content: prompt } }) + '\n';
-      assert.ok(Buffer.byteLength(input) <= ANTIGRAVITY_INPUT_BYTES);
       const wrapper = path.join(directory, 'native-probe.mjs');
       await writeFile(
         wrapper,

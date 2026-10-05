@@ -303,25 +303,30 @@ export async function runCodexDicePhases(
                   }),
                 }),
               })
-              .parse(message.params);
-            if (usage.threadId !== threadId)
+              .safeParse(message.params);
+            const owner = z.object({ threadId: z.string() }).parse(message.params);
+            if (owner.threadId !== threadId)
               throw new Problem(
-                422,
-                'context_overflow',
-                'Codex dice phase exceeded its context budget'
+                502,
+                'dice_isolation',
+                'Codex reported token usage for a foreign thread'
               );
+            if (!usage.success) {
+              await traceEvent(trace, 'usage_unavailable', { provider: 'codex' });
+              return;
+            }
             await traceEvent(trace, 'usage', {
-              inputTokens: usage.tokenUsage.last.inputTokens,
-              outputTokens: usage.tokenUsage.last.outputTokens,
-              cacheReadTokens: usage.tokenUsage.last.cachedInputTokens,
+              inputTokens: usage.data.tokenUsage.last.inputTokens,
+              outputTokens: usage.data.tokenUsage.last.outputTokens,
+              cacheReadTokens: usage.data.tokenUsage.last.cachedInputTokens,
               phase,
             });
             book?.observe?.({
               provider: 'codex',
               phase,
-              inputTokens: usage.tokenUsage.last.inputTokens,
-              outputTokens: usage.tokenUsage.last.outputTokens,
-              cacheReadTokens: usage.tokenUsage.last.cachedInputTokens,
+              inputTokens: usage.data.tokenUsage.last.inputTokens,
+              outputTokens: usage.data.tokenUsage.last.outputTokens,
+              cacheReadTokens: usage.data.tokenUsage.last.cachedInputTokens,
             });
             phase++;
           } else if (message.method === CODEX_DICE_RPC.TurnCompleted) {

@@ -39,7 +39,6 @@ import { accessBoundary, LanAccess } from './security.js';
 import {
   MAX_ENTITY_NAME_CHARS,
   MAX_LONG_TEXT_CHARS,
-  MAX_MEMORY_TEXT_CHARS,
   MAX_SOURCE_TEXT_CHARS,
 } from './domain/limits.js';
 import { SETTINGS_CONTRACT_VERSION } from './domain/versions.js';
@@ -797,7 +796,7 @@ export function createApp(options: AppOptions) {
       const input = z
         .object({
           revision: z.number().int().nonnegative(),
-          text: z.string().trim().min(1).max(MAX_MEMORY_TEXT_CHARS),
+          text: z.string().trim().min(1),
           coveredTurnIds: z.array(idSchema),
           confirm: z.literal(true),
         })

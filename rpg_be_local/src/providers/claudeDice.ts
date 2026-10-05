@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { cliFailure, finishProcessingCleanup } from '../processingErrors.js';
 import type { Executable } from './discovery.js';
 import type { ProviderSettings } from '../domain/types.js';
@@ -171,48 +172,41 @@ export async function generateClaudeDice(
                   'provider_protocol',
                   `Claude did not complete a bounded dice conversation (${typeof event.subtype === 'string' && /^[a-z_]{1,80}$/.test(event.subtype) ? event.subtype : 'invalid result'}; turns=${Number.isInteger(event.num_turns) ? event.num_turns : 'unreported'}; error=${event.is_error === true}; category=${typeof event.result === 'string' && /hit your limit|usage limit|rate limit/i.test(event.result) ? 'subscription_limit' : 'unclassified'})`
                 );
-              const usage = event.modelUsage as Record<
-                string,
-                { contextWindow?: number; outputTokens?: number; cacheReadInputTokens?: number }
-              >;
-              if (
-                !usage ||
-                !Object.keys(usage).length ||
-                !Object.values(usage).every(
-                  (value) =>
-                    typeof value.contextWindow === 'number' &&
-                    value.contextWindow > 0 &&
-                    typeof value.outputTokens === 'number' &&
-                    value.outputTokens >= 0
+              const telemetry = z
+                .record(
+                  z.string(),
+                  z.object({
+                    contextWindow: z.number().positive().optional(),
+                    outputTokens: z.number().nonnegative().optional(),
+                    cacheReadInputTokens: z.number().int().nonnegative().optional(),
+                  })
                 )
-              )
-                throw new Problem(
-                  502,
-                  'provider_protocol',
-                  'Claude did not report a verified dice continuation budget'
-                );
-              await traceEvent(trace, 'usage', { models: usage, modelTurns: event.num_turns });
+                .safeParse(event.modelUsage);
               const text = event.result.trim();
-              book?.observe?.({
-                provider: 'claude',
-                contextWindow: Math.min(
-                  ...Object.values(usage).map((value) => value.contextWindow!)
-                ),
-                outputTokens: Object.values(usage).reduce(
-                  (total, value) => total + value.outputTokens!,
-                  0
-                ),
-                modelTurns: event.num_turns as number,
-                cacheReadTokens: Object.values(usage).every(
-                  (value) =>
-                    Number.isInteger(value.cacheReadInputTokens) && value.cacheReadInputTokens! >= 0
-                )
-                  ? Object.values(usage).reduce(
-                      (sum, value) => sum + value.cacheReadInputTokens!,
-                      0
-                    )
-                  : undefined,
-              });
+              if (telemetry.success) {
+                const usage = telemetry.data;
+                const models = Object.values(usage);
+                await traceEvent(trace, 'usage', { models: usage, modelTurns: event.num_turns });
+                book?.observe?.({
+                  provider: 'claude',
+                  contextWindow:
+                    models.length && models.every((value) => value.contextWindow !== undefined)
+                      ? Math.min(...models.map((value) => value.contextWindow!))
+                      : undefined,
+                  outputTokens:
+                    models.length && models.every((value) => value.outputTokens !== undefined)
+                      ? models.reduce((total, value) => total + value.outputTokens!, 0)
+                      : undefined,
+                  modelTurns: event.num_turns as number,
+                  cacheReadTokens:
+                    models.length &&
+                    models.every((value) => value.cacheReadInputTokens !== undefined)
+                      ? models.reduce((total, value) => total + value.cacheReadInputTokens!, 0)
+                      : undefined,
+                });
+              } else {
+                await traceEvent(trace, 'usage_unavailable', { provider: 'claude' });
+              }
               const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(text);
               final = JSON.parse(fenced ? fenced[1]! : text);
               completed = true;
