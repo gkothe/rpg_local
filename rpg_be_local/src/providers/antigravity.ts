@@ -135,17 +135,17 @@ export async function generateAntigravity(
       }
     );
     written = true;
-    if (!prompt.includes(JSON.stringify(schema)))
-      throw new Problem(
-        422,
-        'provider_contract',
-        'The bounded prompt must include its response schema'
-      );
-    const input = JSON.stringify({ event: 'user', message: { content: prompt } }) + '\n';
+    // Unlike the other ordinary transports, Antigravity has no native schema flag.
+    // Callers pass schemas separately, including field repair and memory generation.
+    const serializedSchema = JSON.stringify(schema);
+    const inputPrompt = prompt.includes(serializedSchema)
+      ? prompt
+      : `${prompt}\n\nResponse JSON schema:\n${serializedSchema}`;
+    const input = JSON.stringify({ event: 'user', message: { content: inputPrompt } }) + '\n';
     await logPrompt(
       'generateAntigravity',
       settings,
-      prompt,
+      inputPrompt,
       options.agentPrompt,
       undefined,
       options.trace

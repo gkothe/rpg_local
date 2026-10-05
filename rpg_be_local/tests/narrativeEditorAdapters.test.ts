@@ -12,6 +12,55 @@ import {
   narrativeHumanizerJsonSchema,
 } from '../src/domain/narrativeHumanizer.js';
 
+test('Antigravity field repair receives its separately supplied schema without requiring it in caller text', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'rpg-repair-schema-'));
+  const schema = {
+    type: 'object',
+    properties: { corrections: { type: 'array' } },
+    required: ['corrections'],
+  };
+  const prompt = JSON.stringify({
+    task: 'Correct only the allowed citation.',
+    allowedPaths: [['ruleCitations', 1]],
+  });
+  const response = {
+    corrections: [{ path: ['ruleCitations', 1], value: { quote: 'Original unique quote' } }],
+  };
+  const filename = path.join(directory, 'cli.mjs');
+  try {
+    await writeFile(
+      filename,
+      `import {readFileSync} from 'node:fs';import {homedir} from 'node:os';import path from 'node:path';
+const args=process.argv.slice(2);
+if(args.includes('/hooks')) console.log(JSON.stringify({command:{data:{hooks:[]}}}));
+else {let raw='';process.stdin.on('data',c=>raw+=c);process.stdin.on('end',()=>{
+const content=JSON.parse(raw).message.content;
+const schema=${JSON.stringify(JSON.stringify(schema))};
+if(content.split(schema).length!==2)throw Error('Schema must appear exactly once');
+if(!content.includes('Correct only the allowed citation.'))throw Error('Repair task lost');
+const name=args[args.indexOf('--agent')+1];
+const definition=readFileSync(path.join(homedir(),'.gemini','config','agents',name,'agent.md'),'utf8');
+if(!definition.includes('tools: []')||!definition.includes('inheritMcp: false')||definition.includes('mcpServers:'))throw Error('Repair tools must remain disabled');
+console.log(JSON.stringify({event:'init',init:{agent:name}}));
+console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:{input_tokens:100},response:JSON.stringify(${JSON.stringify(response)})}}));
+});}`
+    );
+    for (const input of [prompt, `${prompt}\nResponse schema: ${JSON.stringify(schema)}`]) {
+      const output = await generateAntigravity(
+        { binary: process.execPath, prefix: [filename] },
+        { provider: 'agy', model: 'fixture', effort: 'high' },
+        input,
+        schema,
+        directory,
+        process.env
+      );
+      assert.deepEqual(parseProviderOutput('agy', output), response);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('all ordinary editor transports expose no gameplay or external MCP tools', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'rpg-editor-adapters-'));
   const narrative = 'Mira waits.\n\nWhat do you do?';
