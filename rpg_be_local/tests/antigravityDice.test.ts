@@ -69,6 +69,55 @@ else if(args.includes('/hooks')) {
   });
 }`;
 
+for (const mode of ['zero-turns', 'missing-turns']) {
+  test(`Antigravity ${mode} completion records diagnostics without accepting or exposing its response`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-completion-'));
+    try {
+      const filename = path.join(root, 'cli.mjs');
+      const traceFile = path.join(root, 'trace.jsonl');
+      const executionId = randomUUID();
+      const trace = new PromptTrace(traceFile, { executionId });
+      await writeFile(filename, fixture);
+      await assert.rejects(
+        generateAntigravityMcpBook(
+          { binary: process.execPath, prefix: [filename] },
+          settings,
+          'Synthetic',
+          root,
+          { ...process.env, RPG_TEST_AGY_MODE: mode },
+          {
+            definitions: gameplayToolDefinitions(false),
+            dispatch: async () => {
+              throw new Error('No tool is expected');
+            },
+          },
+          undefined,
+          false,
+          { executionId, trace }
+        ),
+        (error: unknown) => {
+          assert.equal((error as { code: string }).code, 'dice_isolation');
+          assert.match((error as Error).message, /reported (0|no) completed turns/);
+          return true;
+        }
+      );
+      const raw = await readFile(traceFile, 'utf8');
+      const entry = raw
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .find((row) => row.kind === 'native_completion');
+      assert.equal(entry.payload.reportedTurns, mode === 'zero-turns' ? 0 : null);
+      assert.equal(entry.payload.initialized, true);
+      assert.equal(entry.payload.unclaimedCalls, 0);
+      assert.equal(entry.payload.hasResponse, true);
+      assert.doesNotMatch(raw, /PRIVATE_RESPONSE/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test('a registered tool called directly fails before dispatch and automatically retries with MCP guidance', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-direct-repair-'));
   try {

@@ -256,6 +256,9 @@ Cancel abandons the pending candidate. Pending editing blocks new actions.
 Local trace records correlate the action, provider attempts, tool requests/results,
 validation, editor and commit. `traceWarning` reports incomplete post-save logging;
 it does not undo a committed turn or trigger another roll.
+Antigravity `native_completion` records completion status, reported turn count, response
+presence/length and pending dispatch count before validation. Rejected completion messages
+identify the failing condition; diagnostics do not store the rejected response text.
 
 ### Rule-read accounting after migration 0011
 

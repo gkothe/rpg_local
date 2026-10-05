@@ -331,7 +331,8 @@ export async function generateAntigravityMcpBook(
                 success: result.status === 'SUCCESS',
                 reportedTurns: Number.isInteger(result.num_turns) ? result.num_turns : null,
                 hasResponse: typeof result.response === 'string',
-                responseCharacters: typeof result.response === 'string' ? result.response.length : null,
+                responseCharacters:
+                  typeof result.response === 'string' ? result.response.length : null,
                 unclaimedCalls,
               });
               if (initialized && !completed && result.status !== 'SUCCESS')
@@ -343,8 +344,7 @@ export async function generateAntigravityMcpBook(
                 result.num_turns !== 1 ||
                 typeof result.response !== 'string' ||
                 unclaimedCalls > 0
-              )
-              {
+              ) {
                 const reason = !initialized
                   ? 'its private agent was not initialized'
                   : completed
