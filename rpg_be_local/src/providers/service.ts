@@ -244,24 +244,19 @@ export class ProviderService implements Generator {
             { timeoutMs: 8000, maxOutputBytes: 200000 }
           );
           version = notes.trim().split(/\r?\n/)[0]!.replace(/:$/, '');
-          const hooks = JSON.parse(
-            await runProcess(
-              executable.binary,
-              [...executable.prefix, '-p', '/hooks', '--output-format', 'json'],
-              '',
-              { timeoutMs: 8000, maxOutputBytes: 100000 }
-            )
-          );
-          agyIsolated =
-            Array.isArray(hooks.command?.data?.hooks) && hooks.command.data.hooks.length === 0;
+          // Discovery inspects CLI capabilities; each generation checks hooks in its launch environment.
+          // An ambient-profile probe timeout must not disable the isolated gameplay adapter.
           antigravityModels = parseModelCatalog(
             await runProcess(executable.binary, [...executable.prefix, 'models'], '', {
               timeoutMs: 15000,
               maxOutputBytes: 100000,
             })
           );
-        } catch {
+          agyIsolated = true;
+        } catch (error) {
           agyIsolated = false;
+          discoveryFailure =
+            error instanceof Problem ? error.message : 'Antigravity CLI discovery failed';
         }
       }
       const isolated =

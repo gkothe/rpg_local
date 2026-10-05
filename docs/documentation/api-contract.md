@@ -266,6 +266,10 @@ and a classified failure code when applicable, using the existing execution/turn
 correlation. `generation_process` includes subprocess startup and all CLI inference/tool
 work; it is not a measurement of model inference alone. Stage diagnostics contain no
 environment, credentials or raw subprocess output and impose no execution deadline.
+Antigravity Settings discovery reads CLI help, version and model catalog without running
+the ambient-profile `/hooks` command. Hook isolation is checked at each actual generation
+in its launch environment; a slow or customized ambient profile does not disable gameplay
+during Settings refresh. CLI discovery failures retain their diagnostic reason.
 
 ### Rule-read accounting after migration 0011
 

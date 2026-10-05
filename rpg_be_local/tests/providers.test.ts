@@ -105,6 +105,52 @@ test('untested Codex version remains usable for dice and books and exposes a com
   }
 });
 
+for (const failedCatalog of [false, true]) {
+  test(`Antigravity discovery skips ambient hooks and preserves catalog ${failedCatalog ? 'failure' : 'readiness'}`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-discovery-'));
+    const before = { ...process.env };
+    try {
+      const script = path.join(root, 'cli.mjs');
+      await writeFile(
+        script,
+        `const args=process.argv.slice(2);
+        if(args.includes('--help'))console.log('--agent');
+        else if(args.includes('changelog'))console.log('1.2.17:');
+        else if(args.includes('/hooks')){console.error('Ambient hooks must not be probed');process.exitCode=1;}
+        else if(args.includes('models')){
+          if(process.env.RPG_TEST_CATALOG_FAILURE==='1')process.exitCode=1;
+          else console.log('fixture-low\\tFixture (Low)');
+        }`
+      );
+      for (const name of ['CODEX', 'CLAUDE', 'AGY']) process.env[`RPG_${name}_BIN`] = script;
+      process.env.RPG_TEST_CATALOG_FAILURE = failedCatalog ? '1' : '0';
+      delete process.env.RPG_MODEL_CATALOG;
+      const service = new ProviderService();
+      const agy = (await service.list()).find((provider) => provider.id === 'agy')!;
+      assert.equal(agy.available, true);
+      assert.equal(agy.version, '1.2.17');
+      assert.equal(agy.supported, !failedCatalog);
+      assert.equal(agy.dice?.supported, !failedCatalog);
+      assert.equal(agy.rules?.supported, !failedCatalog);
+      if (failedCatalog) {
+        assert.ok(agy.reason);
+        assert.doesNotMatch(agy.reason, /isolation is not verified/);
+      } else {
+        assert.equal(agy.reason, null);
+        assert.match(agy.compatibilityWarning!, /Gameplay is allowed/);
+        assert.equal(agy.models[0]!.id, 'fixture');
+        assert.ok(
+          await service.gameplayCapacity({ provider: 'agy', model: 'fixture', effort: 'low' })
+        );
+      }
+    } finally {
+      for (const key of Object.keys(process.env)) if (!(key in before)) delete process.env[key];
+      Object.assign(process.env, before);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test('gameplay rejects provider and model dice gates without disabling no-tools capacity', async () => {
   class FixtureProviders extends ProviderService {
     provider: Provider = {
