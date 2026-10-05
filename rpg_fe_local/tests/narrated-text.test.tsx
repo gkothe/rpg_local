@@ -31,7 +31,6 @@ it('highlights the spoken sentence using original offsets and clears stale event
   const speech = voiceRuntime();
   const text = 'Mira waits.\n\n🐉 The gate opens. What do you do?';
   const view = render(<NarratedText text={text} readable />);
-  fireEvent.click(screen.getByText('Read aloud'));
   fireEvent.click(screen.getByRole('button', { name: 'Read' }));
   const utterance = speech.speak.mock.calls[0][0];
   expect(utterance.text).toBe(text);
@@ -50,7 +49,6 @@ it.each(['onend', 'onerror'])(
   (event) => {
     const speech = voiceRuntime();
     const view = render(<NarratedText text="Mira waits. The gate opens." readable />);
-    fireEvent.click(screen.getByText('Read aloud'));
     fireEvent.click(screen.getByRole('button', { name: 'Read' }));
     const utterance = speech.speak.mock.calls[0][0];
     act(() => utterance.onboundary({ charIndex: 2 }));
@@ -66,7 +64,6 @@ it('switches playback between messages without an inactive message cancelling th
   const first = render(<NarratedText text="First scene." readable />);
   const second = render(<NarratedText text="Second scene." readable />);
   const read = (container: HTMLElement) => {
-    fireEvent.click(container.querySelector('summary')!);
     fireEvent.click(
       Array.from(container.querySelectorAll('button')).find(
         (button) => button.textContent?.trim() === 'Read'

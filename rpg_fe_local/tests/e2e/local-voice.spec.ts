@@ -30,7 +30,6 @@ test('installed browser local voice reads existing GM text to completion', async
     await route.fulfill({ json: { data } });
   });
   await page.goto(`/campaigns/${campaign.id}`);
-  await page.getByText('Read aloud', { exact: true }).click();
   await expect
     .poll(
       () =>

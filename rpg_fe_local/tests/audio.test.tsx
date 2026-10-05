@@ -59,9 +59,12 @@ describe('audio boundaries', () => {
         <ReadAloud text="Second message" />
       </>
     );
-    for (const summary of screen.getAllByText('Read aloud')) fireEvent.click(summary);
+    expect(screen.queryByText('Read aloud')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Read', exact: true })).toHaveLength(2);
     expect(screen.queryByText('Online voice (en-US)')).not.toBeInTheDocument();
-    const rows = screen.getAllByText('Read aloud').map((node) => within(node.closest('details')!));
+    const rows = screen
+      .getAllByRole('group', { name: 'Read aloud controls' })
+      .map((node) => within(node));
     fireEvent.click(rows[0].getByRole('button', { name: /^Read$/ }));
     expect(rows[0].getByRole('button', { name: 'Pause' })).toBeEnabled();
     fireEvent.click(rows[1].getByRole('button', { name: /^Read$/ }));

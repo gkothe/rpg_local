@@ -55,7 +55,10 @@ test('saved voice and speed survive reload and apply to GM playback', async ({ p
   await expect(page.getByRole('combobox', { name: 'Voice', exact: true })).toHaveValue('chosen');
   await expect(page.getByRole('combobox', { name: 'Speed', exact: true })).toHaveValue('1.5');
   await page.goto(`/campaigns/${campaign.id}`);
-  await page.getByText('Read aloud', { exact: true }).click();
+  await expect(page.getByText('Read aloud', { exact: true })).toHaveCount(0);
+  for (const name of ['Read', 'Pause', 'Stop']) {
+    await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+  }
   await expect(page.getByRole('combobox', { name: 'Voice', exact: true })).toHaveCount(0);
   await expect(page.getByRole('combobox', { name: 'Speed', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Read', exact: true }).click();
