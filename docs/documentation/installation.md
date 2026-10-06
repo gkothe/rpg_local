@@ -60,7 +60,7 @@ Install PostgreSQL's server and command-line tools from the [Windows download pa
 .\setup-database.cmd
 ```
 
-Enter the port (default 5432), administrator username (default postgres) and password. Setup creates database rpg_local and non-superuser role rpg_local_owner with a generated password, applies migrations and saves the game URL encrypted in %LOCALAPPDATA%\LocalRPG\database.json. This script does not save the administrator password.
+Enter the port (default 5432), administrator username (default postgres) and password. Setup creates database rpg_local and non-superuser role rpg_local_owner with a generated password, saves `RPG_DATABASE_URL` in the repository-root `.env`, and applies migrations. Existing unrelated `.env` entries are preserved. The file is ignored by Git; `.env.example` contains placeholders only. This script does not save the administrator password.
 
 If the database or role already exists, provisioning stops. Configure its known dedicated game URL instead:
 
@@ -295,16 +295,19 @@ npm.cmd install
 .\start.cmd
 ```
 
-Saved settings let database setup apply pending migrations without asking again for administrator login. Versioned SQL lives in rpg_be_local/migrationssql and execution is recorded in migration_history. Do not edit applied migrations or create tables manually.
+The root `.env` lets database setup apply pending migrations without asking again for administrator login. Versioned SQL lives in rpg_be_local/migrationssql and execution is recorded in migration_history. Do not edit applied migrations or create tables manually.
 
-The app does not load .env automatically. The launcher loads saved Windows settings; explicit environment variables take precedence. To use npm directly:
+The backend automatically loads `.env` from the repository root, including when started from a workspace or compiled output. Explicit process environment variables take precedence. The Windows launcher loads the same file plus saved LAN/speech settings. To use npm directly:
 
 ```powershell
-. .\scripts\local-settings.ps1
 npm.cmd run migrate
 npm.cmd run build
 npm.cmd start
 ```
+
+For manual configuration, copy `.env.example` to `.env` and replace the database placeholders. Restart the backend after changing the file. `npm test` runs the backend with `NODE_ENV=test` and uses `RPG_TEST_DATABASE_URL`, which must target a separate database whose name ends in `_test`; without it the database suites are skipped. `setup-test-database.ps1` asks for the PostgreSQL administrator login once, creates the limited `rpg_local_test_owner` role and `rpg_local_test` database, and writes that line to `.env` (rerunning it resets the role password). The administrator password is not saved. Never point tests at the game database.
+
+Older installations stored the game connection in `%LOCALAPPDATA%\LocalRPG\database.json`. That file is no longer loaded. Transfer the connection privately to the root `.env`, or run `setup-database.ps1 -ConfigureExisting` with your existing URL. Do not print connection credentials in tool output or chat. The bootstrap recovery file for a separately provisioned PostgreSQL server remains separate from the game connection.
 
 ## Installation by a coding agent
 

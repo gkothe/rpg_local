@@ -2,11 +2,11 @@ param([ValidateSet('dev', 'run')][string]$Mode = 'dev')
 $ErrorActionPreference = 'Stop'
 try {
     Set-Location (Split-Path $PSScriptRoot -Parent)
-    . "$PSScriptRoot\local-settings.ps1"
-    if (-not $PSBoundParameters.ContainsKey('Mode') -and $env:RPG_LAN_HOST) { $Mode = 'run' }
     if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) { throw 'Install Node.js 22.13 or newer first.' }
     & node.exe -e "const [major,minor]=process.versions.node.split('.').map(Number);process.exit(major<22||(major===22&&minor<13)?1:0)"
     if ($LASTEXITCODE -ne 0) { throw 'Node.js 22.13 or newer is required.' }
+    . "$PSScriptRoot\local-settings.ps1"
+    if (-not $PSBoundParameters.ContainsKey('Mode') -and $env:RPG_LAN_HOST) { $Mode = 'run' }
     if (-not (Test-Path 'node_modules\.bin\tsc.cmd')) { throw 'Run npm install in this folder first.' }
     if (-not $env:RPG_DATABASE_URL) { Write-Host 'Run setup-database.cmd before creating a campaign.' }
     if ($Mode -eq 'dev') {

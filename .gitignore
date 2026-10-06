@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+# Local environment files contain credentials; only placeholder examples are tracked.
 .env
 .env.*
 !.env.example

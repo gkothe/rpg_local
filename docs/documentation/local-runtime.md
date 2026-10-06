@@ -8,7 +8,7 @@ On Windows, the easy dictation setup is to double-click **`setup-voice.cmd`** in
 
 After setup, stop the running app with Ctrl+C and run `start.cmd` again, then refresh the browser. **Refresh alone cannot update the running backend's environment.** The launcher loads the saved speech settings automatically. Record, stop, review the text and press Send. On this PC, `http://127.0.0.1:4100` supports microphone permission; on Android, use the trusted HTTPS instructions in [LAN setup](lan-setup.md).
 
-Runtime paths are saved for the current Windows account in `%LOCALAPPDATA%\LocalRPG\runtime.json`, outside Git. Database settings remain separate and unchanged. Explicit `RPG_PYTHON_BIN`, `RPG_WHISPER_MODEL_PATH` and `RPG_WHISPER_DEVICE` environment variables take precedence over saved settings. Launching the backend directly with npm bypasses this Windows settings loader; use `start.cmd`, or set these variables yourself.
+Runtime paths are saved for the current Windows account in `%LOCALAPPDATA%\LocalRPG\runtime.json`, outside Git. Database settings live in the repository-root `.env`. Explicit `RPG_PYTHON_BIN`, `RPG_WHISPER_MODEL_PATH` and `RPG_WHISPER_DEVICE` process environment variables take precedence over `.env`, which takes precedence over saved Windows settings. Launching the backend directly with npm loads `.env` but bypasses the Windows runtime settings loader; use `start.cmd`, or add these variables to `.env` yourself.
 
 For an existing local installation, run this from PowerShell using your own paths:
 
@@ -48,7 +48,7 @@ $env:RPG_WHISPER_MODEL_PATH = "$runtime\whisper-base"
 $env:RPG_WHISPER_DEVICE = 'cpu'
 ```
 
-`base` was tested on Windows with CPU/int8 inference. `tiny` is faster and `small` needs more resources; this checkout does not claim measured accuracy for them. Keep the complete model directory, including `model.bin` and tokenizer/configuration files. Restart the backend with these environment variables; its diagnostics report missing dependencies or model files. Manually assigned environment variables apply to the current PowerShell session; `setup-voice.cmd` persists the paths for the Windows launcher. This app does not automatically load `.env` files.
+`base` was tested on Windows with CPU/int8 inference. `tiny` is faster and `small` needs more resources; this checkout does not claim measured accuracy for them. Keep the complete model directory, including `model.bin` and tokenizer/configuration files. Restart the backend with these environment variables; its diagnostics report missing dependencies or model files. Manually assigned environment variables apply to the current PowerShell session; `setup-voice.cmd` persists the paths for the Windows launcher. The backend also automatically loads variables from the repository-root `.env`.
 
 Record, stop, inspect/edit the transcription, then press Send. Transcription never submits a GM turn automatically. Recordings are limited to 120 seconds and deleted after processing. Missing runtime or unrecognized speech leaves typing available.
 

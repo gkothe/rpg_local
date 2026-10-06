@@ -34,7 +34,7 @@ npm.cmd install
 .\start.cmd
 ```
 
-Database setup asks for a local PostgreSQL administrator login, creates a dedicated game database and role, applies migrations and saves the game connection encrypted under your Windows account. The [agent procedure](docs/documentation/installation.md#installation-by-a-coding-agent) can create a separate local PostgreSQL instance when an existing administrator password is unavailable.
+Database setup asks for a local PostgreSQL administrator login, creates a dedicated game database and role, applies migrations and saves `RPG_DATABASE_URL` in `.env` at the repository root. The file is ignored by Git. To configure an existing database manually, copy `.env.example` to `.env` and replace the placeholders, then run `npm.cmd run migrate`. The [agent procedure](docs/documentation/installation.md#installation-by-a-coding-agent) can create a separate local PostgreSQL instance when an existing administrator password is unavailable.
 
 Open **http://127.0.0.1:5174**. Keep the terminal open; Ctrl+C stops the app. This mode reloads frontend and backend source changes automatically.
 
@@ -44,7 +44,7 @@ For a built version served by the backend:
 .\start.cmd run
 ```
 
-Open **http://127.0.0.1:4100**. This command builds both apps before starting them. The launcher loads saved database and speech settings; running npm directly requires setting the environment variables yourself.
+Open **http://127.0.0.1:4100**. This command builds both apps before starting them. The backend loads the root `.env` automatically for npm commands and the Windows launcher; explicit environment variables take precedence. The launcher also loads saved speech settings.
 
 ## Start a game
 
@@ -61,7 +61,7 @@ Dice faces survive a failed attempt. **Retry with saved dice** continues the ori
 
 ## Your data
 
-Campaigns, source documents, characters, dice and undo records live in PostgreSQL. The Windows launcher stores local connection/runtime settings under `%LOCALAPPDATA%\LocalRPG`; database credentials are encrypted with Windows DPAPI. CLI credentials remain managed by the providers' own tools.
+Campaigns, source documents, characters, dice and undo records live in PostgreSQL. The root `.env` contains the local database connection in plain text and is ignored by Git; `.env.example` contains placeholders only. Windows speech and LAN settings remain under `%LOCALAPPDATA%\LocalRPG`. CLI credentials remain managed by the providers' own tools.
 
 GM and AI parsing prompts are written to `log/` at the repository root. These files can contain character sheets, rule text and private campaign details. The folder is ignored by Git. Campaign exports and library backups can contain private material too; keep them outside the checkout when sharing or publishing code.
 

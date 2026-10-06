@@ -25,11 +25,8 @@ try {
     }
     & node.exe -e "try{const u=new URL(process.env.RPG_DATABASE_URL);if(!['postgres:','postgresql:'].includes(u.protocol)||!['127.0.0.1','localhost','[::1]'].includes(u.hostname)||['','/postgres','/template0','/template1'].includes(u.pathname))process.exit(1)}catch{process.exit(1)}"
     if ($LASTEXITCODE -ne 0) { throw 'Use a dedicated database on loopback, not postgres/template databases.' }
-    # Windows DPAPI binds encrypted settings to this account on this computer.
-    $directory = Join-Path $env:LOCALAPPDATA 'LocalRPG'
-    New-Item -ItemType Directory -Path $directory -Force | Out-Null
-    $encrypted = ConvertTo-SecureString $env:RPG_DATABASE_URL -AsPlainText -Force | ConvertFrom-SecureString
-    @{ databaseUrl = $encrypted } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $directory 'database.json') -Encoding UTF8
+    & node.exe scripts/project-env.mjs save-database
+    if ($LASTEXITCODE -ne 0) { throw 'Could not save the database URL to the project .env file.' }
     & npm.cmd run migrate
     if ($LASTEXITCODE -ne 0) { throw 'Migrations failed. Fix the connection and rerun setup-database.cmd.' }
     Write-Host 'Database ready. Run start.cmd (restart it if already running).' -ForegroundColor Green

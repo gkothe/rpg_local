@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --import ./tests/environment.ts --test tests/*.test.ts",
     "migrate": "tsx src/migrate.ts"
   },
   "dependencies": {
