@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { runProcess } from '../src/providers/processRunner.js';
 import { responseRetryFeedback } from '../src/domain/responseRetry.js';
+import { ownedTools } from './ownedGameplayFixture.js';
 
 const run = (script: string, line: (value: unknown) => Promise<void>) =>
   runProcess(process.execPath, ['-e', script], '', {
@@ -151,8 +152,13 @@ for (const mode of ['incomplete', 'quota', 'auth'] as const) {
           'Synthetic',
           root,
           process.env,
-          async () => {
-            assert.fail('Must not roll');
+          {
+            definitions: ownedTools().definitions.filter((tool) => tool.name === 'roll_dice'),
+            schema: {},
+            systemPrompt: 'Synthetic',
+            dispatch: async () => {
+              assert.fail('Must not roll');
+            },
           }
         );
         assert.fail('Must reject');

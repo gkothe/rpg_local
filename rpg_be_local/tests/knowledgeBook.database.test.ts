@@ -1,3 +1,4 @@
+import { emptyResponse, syntheticGenerate } from './ownedGameplayFixture.js';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -51,7 +52,6 @@ function originalBook(): RuleUpload[] {
       bytes: Buffer.from(
         JSON.stringify({
           format: 'rules-book',
-          version: 1,
           source: {
             slug: 'original',
             title: 'Original synthetic keeper',
@@ -109,12 +109,7 @@ test(
       capacity: async () => 16000,
       gameplayCapacity: async () => 16000,
       bookGameplayCapacity: async () => 16000,
-      generate: async () => {
-        throw new Error('Unexpected extraction');
-      },
-      generateBookGameplay: async () => {
-        throw new Error('Unexpected legacy book gameplay');
-      },
+      generate: syntheticGenerate(),
       generateOwnedGameplay: async (_settings, _prompt, _schema, systemPrompt, tools) => {
         assert.ok(systemPrompt);
         const read = await tools(
@@ -130,6 +125,7 @@ test(
             groups: [{ label: 'search', sides: 6, count: 1 }],
             reason: 'Find keeper',
             declaration: 'Four succeeds',
+            scope: 'oracle',
           },
           'original-roll'
         );
@@ -153,9 +149,8 @@ test(
           ...pages,
         };
         return {
-          version: 4,
+          ...emptyResponse,
           narrative: 'The keeper safeguards the key.',
-          operations: [],
           rollInterpretations: [{ rollId: roll.rollId, explanation: 'Search check' }],
           ruleCitations: [citation],
           knowledgeChanges: [
@@ -169,12 +164,13 @@ test(
               status: 'active',
               characterIds: [],
               evidence: [{ type: 'book', citation }],
+              visibility: 'player',
             },
           ],
         };
       },
     };
-    const service = new TurnService(store, generator, 4);
+    const service = new TurnService(store, generator);
     malformed = true;
     const invalid = await service.submit(campaign.id, {
       revision: 0,

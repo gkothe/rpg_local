@@ -79,12 +79,14 @@ function fixtureGenerator() {
           groups: [{ label: 'gate', count: 1, sides: 6 }],
           reason: 'Check the gate',
           declaration: 'A single die records the attempt',
+          scope: 'oracle',
         },
         'roll'
       );
       const id = (result as { rollId: string }).rollId;
       return {
-        version: 5,
+        combatEffects: [],
+        participantReferences: [],
         narrative: 'You stand beside the old gate.',
         operations: [],
         rollInterpretations: [{ rollId: id, explanation: 'The gate remains closed.' }],
@@ -112,7 +114,7 @@ async function begin() {
     await store.reindex(campaign, client);
   });
   const fixture = fixtureGenerator();
-  const service = new TurnService(store, fixture.generator, 5);
+  const service = new TurnService(store, fixture.generator);
   const turn = await service.submit(campaign.id, {
     revision: 0,
     requestId: randomUUID(),
@@ -123,7 +125,7 @@ async function begin() {
 
 for (const mode of ['wrong-offset', 'bad-quote', 'scene-edit'] as const) {
   test(
-    `v5 ${mode}: deterministic citations or restricted repair never regenerates the GM scene`,
+    `${mode}: deterministic citations or restricted repair never regenerates the GM scene`,
     { skip: !enabled },
     async () => {
       const campaign = newCampaign({ name: 'Citation repair fixture' });
@@ -163,12 +165,14 @@ for (const mode of ['wrong-offset', 'bad-quote', 'scene-edit'] as const) {
                 groups: [{ label: 'gate', count: 1, sides: 6 }],
                 reason: 'Check the gate',
                 declaration: 'A single die records the attempt',
+                scope: 'oracle',
               },
               'roll'
             )) as { rollId: string }
           ).rollId;
           return {
-            version: 5,
+            combatEffects: [],
+            participantReferences: [],
             narrative: 'You stand beside the old gate.',
             operations: [],
             ruleCitations: [],
@@ -218,7 +222,7 @@ for (const mode of ['wrong-offset', 'bad-quote', 'scene-edit'] as const) {
           return { narrative: 'You stand beside the old gate.' };
         },
       };
-      const service = new TurnService(store, generator, 5);
+      const service = new TurnService(store, generator);
       const submitted = await service.submit(campaign.id, {
         revision: 0,
         requestId: randomUUID(),

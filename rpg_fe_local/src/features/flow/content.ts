@@ -70,7 +70,7 @@ export const nodes: FlowItem[] = [
     'The app reads PostgreSQL and copies campaign knowledge into memory for the turn. It leaves private notes out of the gameplay context it builds automatically.',
     '4.3',
     ['rpg_be_local/src/domain/context.ts', 'rpg_be_local/src/domain/knowledgeRecall.ts'],
-    'V5 and v6 include a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene, and v6 always includes every participant of an active encounter. It also selects relevant campaign knowledge and searches source text for matching words. Gameplay has no token target: relevant retrieved sections and matching campaign facts are included without size-based omission. History is summarized in consecutive batches independently of gameplay prompt size. Memory summaries request bullet points while preserving the same information as paragraph summaries. Summaries can lose detail, so the app keeps the original turns.'
+    'Every context includes a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene, and always includes every participant of an active encounter. It also selects relevant campaign knowledge and searches source text for matching words. Gameplay has no token target: relevant retrieved sections and matching campaign facts are included without size-based omission. History is summarized in consecutive batches independently of gameplay prompt size. Memory summaries request bullet points while preserving the same information as paragraph summaries. Summaries can lose detail, so the app keeps the original turns.'
   ),
   item(
     'model',
@@ -78,7 +78,7 @@ export const nodes: FlowItem[] = [
     "The selected provider's language model writes the story and proposes campaign changes. It can also ask the app to run one of the allowed tools.",
     'While the app waits for the model, before it opens the transaction that saves the gameplay result.',
     'System instructions, the fixed user prompt, the required response format (schema), allowed tool definitions, and any tool results.',
-    "Tool requests followed by a final JSON proposal in the app's v6 response format.",
+    "Tool requests followed by a final JSON proposal in the app's response format.",
     "The app runs locally, but the model response comes from the provider's cloud service.",
     '2.3',
     [
@@ -109,7 +109,7 @@ export const nodes: FlowItem[] = [
     'Validate and edit narration',
     'The app validates gameplay first, then sends only the final narrative to a separate editor call. No gameplay change reaches the player until both stages succeed.',
     'After the model responds and before the app saves the gameplay result.',
-    'The v6 response: story text, proposed changes, explanations of dice rolls, rule citations, campaign knowledge changes, and combat effects and paragraph references for each combatant.',
+    'The response: story text, proposed changes, explanations of dice rolls, rule citations, campaign knowledge changes, and combat effects and paragraph references for each combatant.',
     'Validated changes, their explanations and a prose-only edited narrative. An editing failure preserves the private candidate for editing-only resume.',
     'A rejected proposal leaves the saved gameplay state unchanged. The app can request up to two corrections, sending evidence linked to the invalid fields. Unresolved references or collection errors retain the complete evidence bundle.',
     '5.1',
@@ -192,7 +192,7 @@ const edgePairs = [
     'model',
     'validate',
     'Final proposal',
-    'A v6 JSON proposal that the app has not yet saved',
+    'A JSON proposal that the app has not yet saved',
   ],
   [
     'write',
@@ -663,7 +663,7 @@ export const branches = [
   },
   {
     label: 'Archives & templates',
-    text: 'Version 7 archives include private notes, unrevealed GM knowledge and combat preparation receipts but leave out original binary files. Import assigns new IDs to structured records. Saved templates may contain notes; creating a campaign from a template clears those notes and leaves out the played knowledge timeline.',
+    text: 'Archives include private notes, unrevealed GM knowledge and combat preparation receipts but leave out original binary files. Import assigns new IDs to structured records and refuses files exported by an older app. Saved templates may contain notes; creating a campaign from a template clears those notes and leaves out the played knowledge timeline.',
     section: '2.8',
   },
   {

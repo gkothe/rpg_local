@@ -11,7 +11,10 @@ import {
   isolatedCodexConfig,
   parseCodexCatalog,
 } from '../src/providers/codex.js';
-import { DICE_NARRATOR } from '../src/providers/diceProtocol.js';
+import { ownedTools } from './ownedGameplayFixture.js';
+
+const SYSTEM_PROMPT = 'Synthetic system prompt';
+const definitions = ownedTools().definitions;
 test(
   'native Codex continues pending owned dice calls in one bounded ephemeral turn',
   { skip: !process.env.RPG_TEST_CODEX_BIN || !process.env.RPG_TEST_CODEX_MODELS },
@@ -52,7 +55,6 @@ test(
                   type: 'output_text',
                   text: JSON.stringify({
                     payload_json: JSON.stringify({
-                      version: 2,
                       narrative: 'Recorded faces 4,5',
                       operations: [],
                       rollInterpretations: [],
@@ -107,13 +109,13 @@ test(
           models: (parsed.metadata as { models: Record<string, unknown>[] }).models.map(
             (model) => ({
               ...model,
-              base_instructions: DICE_NARRATOR,
+              base_instructions: SYSTEM_PROMPT,
               supports_parallel_tool_calls: false,
             })
           ),
         })
       );
-      await writeFile(instructionsPath, DICE_NARRATOR);
+      await writeFile(instructionsPath, SYSTEM_PROMPT);
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
       const address = server.address();
       assert.ok(address && typeof address !== 'string');
@@ -135,14 +137,20 @@ test(
         root,
         { ...codexEnvironment(process.env), CODEX_HOME: home },
         config,
-        async (raw) => {
-          assert.deepEqual(raw, { ...input, slot: calls });
-          return {
-            rollId: randomUUID(),
-            slot: calls,
-            groups: [{ label: 'check', sides: 6, faces: [4 + calls++] }],
-            reused: false,
-          };
+        {
+          definitions,
+          schema: { type: 'object' },
+          systemPrompt: SYSTEM_PROMPT,
+          dispatch: async (name, raw) => {
+            assert.equal(name, 'roll_dice');
+            assert.deepEqual(raw, { ...input, slot: calls });
+            return {
+              rollId: randomUUID(),
+              slot: calls,
+              groups: [{ label: 'check', sides: 6, faces: [4 + calls++] }],
+              reused: false,
+            };
+          },
         }
       );
       assert.equal((result as { narrative: string }).narrative, 'Recorded faces 4,5');
@@ -165,7 +173,7 @@ test(
         );
         assert.deepEqual(
           functions.map((tool) => tool.name),
-          ['roll_dice']
+          definitions.map((definition) => definition.name)
         );
         assert.doesNotMatch(
           JSON.stringify(request.input),

@@ -13,17 +13,14 @@ import {
   KnowledgeOrigin as O,
   KnowledgeCertainty as C,
   KnowledgeStatus as S,
+  KnowledgeVisibility as V,
 } from '../src/domain/knowledge.js';
+import { gmResponse } from './ownedGameplayFixture.js';
 test('recall is frozen across compaction/provider switches; relevance includes unresolved threads; cursors scoped to snapshot/query', () => {
   const c = newCampaign({ name: 'Recall' });
   const r = applyResponse(
     c,
-    {
-      version: 4,
-      narrative: 'Established',
-      operations: [],
-      ruleCitations: [],
-      rollInterpretations: [],
+    gmResponse('Established', [], {
       knowledgeChanges: Array.from({ length: 45 }, (_, i) => ({
         op: 'create' as const,
         kind: i === 0 ? K.Debt : K.Place,
@@ -34,8 +31,9 @@ test('recall is frozen across compaction/provider switches; relevance includes u
         origin: O.Gm,
         characterIds: [],
         evidence: [],
+        visibility: V.Player,
       })),
-    },
+    }),
     randomUUID()
   );
   const frozen = freezeKnowledge(r.campaign);

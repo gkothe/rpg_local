@@ -1,12 +1,10 @@
 import { frozenCampaignSourcesSchema } from './campaignSourceRecall.js';
-import { frozenKnowledgeSchema, frozenKnowledgeV5Schema } from './knowledgeRecall.js';
+import { frozenKnowledgeSchema } from './knowledgeRecall.js';
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
-import { DEFAULT_GAMEPLAY_NARRATOR } from './gameplayNarrator.js';
 import { CombatRollKind, CombatRollScope } from './combat.js';
 
 export const DICE_TOOL_NAME = 'roll_dice';
-export const DICE_NARRATOR = DEFAULT_GAMEPLAY_NARRATOR;
 export const DICE_LIMITS = {
   slots: 12,
   groupsPerCall: 8,
@@ -55,7 +53,6 @@ function checkDiceInput(value: z.infer<typeof diceInputObject>, ctx: z.Refinemen
   if (Buffer.byteLength(JSON.stringify(value), 'utf8') > DICE_LIMITS.inputBytes)
     ctx.addIssue({ code: 'custom', message: 'Dice input exceeds byte limit' });
 }
-export const diceInputSchema = diceInputObject.superRefine(checkDiceInput);
 const combatScopeShape = {
   scope: z.enum(CombatRollScope),
   encounterId: z.uuid().optional(),
@@ -82,19 +79,19 @@ function checkCombatScope(
       issue('Oracle rolls have no actor or target');
   }
 }
-/** Version 6 contract; versions 1–5 keep diceInputSchema and reject these fields. */
-export const diceInputV6Schema = diceInputObject
+export const diceInputSchema = diceInputObject
   .extend(combatScopeShape)
   .strict()
   .superRefine((value, ctx) => {
     checkDiceInput(value, ctx);
     checkCombatScope(value, ctx);
   });
-export type DiceInputV6 = z.infer<typeof diceInputV6Schema>;
 export type DiceInput = z.infer<typeof diceInputSchema>;
+// Rolls recorded before combat tracking carry no scope.
+const unscopedDiceInputSchema = diceInputObject.superRefine(checkDiceInput);
 export type DiceFaces = { label: string; sides: number; faces: number[] };
-export type DiceRecord = Omit<DiceInput, 'groups'> &
-  Partial<Pick<DiceInputV6, 'scope' | 'encounterId' | 'combatKind'>> & {
+export type DiceRecord = Omit<DiceInput, 'groups' | 'scope'> &
+  Partial<Pick<DiceInput, 'scope'>> & {
     id: string;
     sessionId: string;
     campaignId: string;
@@ -122,10 +119,10 @@ const recordShape = {
   groups: recordGroups,
 };
 function checkRecord(
-  input: z.ZodType,
   record: Record<string, unknown> & { groups: z.infer<typeof recordGroups> },
   ctx: z.RefinementCtx
 ): void {
+  const input = record.scope === undefined ? unscopedDiceInputSchema : diceInputSchema;
   const spec: Record<string, unknown> = { ...record };
   for (const key of ['id', 'sessionId', 'campaignId', 'createdAt']) delete spec[key];
   const groups = record.groups;
@@ -143,13 +140,14 @@ function checkRecord(
     ctx.addIssue({ code: 'custom', message: 'Invalid archived dice faces or specification' });
 }
 export const diceRecordSchema = z
-  .object({ ...diceInputObject.shape, ...recordShape })
+  .object({
+    ...diceInputObject.shape,
+    ...combatScopeShape,
+    scope: combatScopeShape.scope.optional(),
+    ...recordShape,
+  })
   .strict()
-  .superRefine((record, ctx) => checkRecord(diceInputSchema, record, ctx));
-export const diceRecordV6Schema = z
-  .object({ ...diceInputObject.shape, ...combatScopeShape, ...recordShape })
-  .strict()
-  .superRefine((record, ctx) => checkRecord(diceInputV6Schema, record, ctx));
+  .superRefine(checkRecord);
 export const diceSessionSchema = z
   .object({
     id: z.uuid(),
@@ -157,10 +155,8 @@ export const diceSessionSchema = z
     rootTurnId: z.uuid(),
     contextDigest: z.string().regex(/^[a-f0-9]{64}$/),
     frozenPrompt: z.string(),
-    promptContractVersion: z.union([z.literal(4), z.literal(5), z.literal(6)]).optional(),
-    digestVersion: z.union([z.literal(2), z.literal(3), z.literal(4)]).optional(),
     systemPrompt: z.string().optional(),
-    frozenKnowledge: z.union([frozenKnowledgeSchema, frozenKnowledgeV5Schema]).optional(),
+    frozenKnowledge: frozenKnowledgeSchema.optional(),
     frozenSources: frozenCampaignSourcesSchema.optional(),
     toolDefinitions: z
       .array(
@@ -179,20 +175,7 @@ export const diceSessionSchema = z
     createdAt: z.iso.datetime(),
     imported: z.boolean(),
   })
-  .strict()
-  .superRefine((session, ctx) => {
-    if (
-      session.promptContractVersion === 4 &&
-      session.frozenKnowledge &&
-      !frozenKnowledgeSchema.safeParse(session.frozenKnowledge).success
-    )
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Legacy session requires its original knowledge contract',
-      });
-    if (session.promptContractVersion === 4 && session.frozenSources)
-      ctx.addIssue({ code: 'custom', message: 'Legacy session cannot contain v5 sources' });
-  });
+  .strict();
 export type DiceSession = z.infer<typeof diceSessionSchema>;
 
 // This internal seam permits deterministic boundary tests; no request selects the RNG.

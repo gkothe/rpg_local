@@ -51,7 +51,6 @@ try {
   if (!files.length) throw new Error('No recognized column files found');
   const manifest = {
     format: 'rules-book',
-    version: 1,
     markerFormatVersion: 1,
     source: {
       slug: source,

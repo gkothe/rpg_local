@@ -5,14 +5,8 @@ import { z } from 'zod';
 import type { ProviderSettings } from '../domain/types.js';
 import type { Executable } from './discovery.js';
 import { Problem } from '../errors.js';
-import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
 import { nativeGameplaySchema } from './gameplayContract.js';
-
-import {
-  gameplayToolDefinitions,
-  type BookGameplayAdapter,
-  type GameplayToolResult,
-} from './gameplayTools.js';
+import { type GameplayAdapter, type GameplayToolResult } from './gameplayTools.js';
 import {
   CODEX_TRANSPORT_SCHEMA,
   codexEnvironment,
@@ -21,17 +15,28 @@ import {
   isolatedCodexConfig,
   parseCodexPayload,
 } from './codex.js';
-import {
-  CODEX_DICE_RPC,
-  CODEX_DICE_ITEM_TYPES,
-  CODEX_DICE_REQUEST_ID,
-  CODEX_DICE_STATUS,
-  DICE_NARRATOR,
-  DiceProtocol,
-  type RollCallback,
-} from './diceProtocol.js';
 import { runProcess } from './processRunner.js';
 import { logPrompt, traceEvent, safeTraceFailure, type PromptTraceContext } from './promptLog.js';
+
+const CODEX_DICE_RPC = {
+  Initialize: 'initialize',
+  Initialized: 'initialized',
+  ThreadStart: 'thread/start',
+  TurnStart: 'turn/start',
+  ToolCall: 'item/tool/call',
+  TokenUsage: 'thread/tokenUsage/updated',
+  TurnCompleted: 'turn/completed',
+  ItemStarted: 'item/started',
+  ItemCompleted: 'item/completed',
+} as const;
+const CODEX_DICE_ITEM_TYPES = [
+  'agentMessage',
+  'userMessage',
+  'reasoning',
+  'dynamicToolCall',
+] as const;
+const CODEX_DICE_REQUEST_ID = { Initialize: 1, Thread: 2, Turn: 3 } as const;
+const CODEX_DICE_STATUS = { Completed: 'completed', Interrupted: 'interrupted' } as const;
 
 const rpcSchema = z
   .object({
@@ -59,12 +64,10 @@ export async function generateCodexDice(
   prompt: string,
   cwd: string,
   env: NodeJS.ProcessEnv,
-  roll: RollCallback,
+  adapter: GameplayAdapter,
   signal?: AbortSignal,
-  book?: BookGameplayAdapter,
   trace?: PromptTraceContext
 ): Promise<unknown> {
-  const narrator = book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR);
   const inspected = await inspectCodex(executable, env);
   const metadata = inspected.metadata as { models: { slug: string; context_window?: number }[] };
   const model = inspected.models.find((option) => option.id === settings.model);
@@ -90,14 +93,14 @@ export async function generateCodexDice(
       JSON.stringify({
         models: metadata.models.map((model) => ({
           ...model,
-          base_instructions: book?.systemPrompt !== undefined ? '' : narrator,
+          base_instructions: '',
           supports_parallel_tool_calls: false,
         })),
       })
     );
     await writeFile(
       instructionsPath,
-      `${narrator} Return a transport object with payload_json encoding the application JSON.`
+      `${adapter.systemPrompt} Return a transport object with payload_json encoding the application JSON.`
     );
     const config = {
       ...isolatedCodexConfig(catalogPath, instructionsPath),
@@ -109,9 +112,8 @@ export async function generateCodexDice(
       cwd,
       { ...codexEnvironment(env), CODEX_HOME: isolatedHome },
       config,
-      roll,
+      adapter,
       signal,
-      book,
       trace
     );
   } catch (error) {
@@ -138,38 +140,26 @@ export async function runCodexDicePhases(
   cwd: string,
   env: NodeJS.ProcessEnv,
   config: Record<string, unknown>,
-  roll: RollCallback,
+  adapter: GameplayAdapter,
   signal?: AbortSignal,
-  book?: BookGameplayAdapter,
   trace?: PromptTraceContext
 ): Promise<unknown> {
   const args = [...executable.prefix, 'app-server', '--stdio'];
   for (const [key, value] of Object.entries(config))
     args.push('-c', `${key}=${JSON.stringify(value)}`);
-  const protocol = new DiceProtocol(roll);
-  const transcript: { tool?: string; arguments: unknown; result: GameplayToolResult }[] = [];
-  const definitions = book?.definitions ?? gameplayToolDefinitions(!!book);
+  const definitions = adapter.definitions;
   {
     let phase = 0;
-    const phasePrompt =
-      prompt +
-      (book?.systemPrompt !== undefined
-        ? ''
-        : '\nApplication-owned gameplay transcript (already executed; do not repeat these calls): ' +
-          JSON.stringify(transcript) +
-          (book
-            ? '\nUse the owned gameplay tools sequentially as needed. Return the final supplied schema response acknowledging every roll ID and any rule citations.'
-            : '\nUse the owned roll tool sequentially as needed. Return the final schema response acknowledging every roll ID. No other tools or external context.'));
     let threadId = '';
     let turnId = '';
     let completed = false;
     const calls = new Map<string, string>();
     let final: unknown;
     await logPrompt(
-      book ? 'generateCodexBookGameplay' : 'generateCodexGameplay',
+      'generateCodexGameplay',
       settings,
-      phasePrompt,
-      `${book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR)} Return a transport object with payload_json encoding the application JSON.`,
+      prompt,
+      `${adapter.systemPrompt} Return a transport object with payload_json encoding the application JSON.`,
       undefined,
       trace
     );
@@ -218,7 +208,7 @@ export async function runCodexDicePhases(
               method: CODEX_DICE_RPC.TurnStart,
               params: {
                 threadId,
-                input: [{ type: 'text', text: phasePrompt }],
+                input: [{ type: 'text', text: prompt }],
                 outputSchema: CODEX_TRANSPORT_SCHEMA,
                 ...(settings.effort ? { effort: settings.effort } : {}),
               },
@@ -246,11 +236,7 @@ export async function runCodexDicePhases(
             calls.set(call.callId, identity);
             let result: GameplayToolResult;
             try {
-              result = await (book ? book.dispatch : protocol.call.bind(protocol))(
-                call.tool,
-                call.arguments,
-                call.callId
-              );
+              result = await adapter.dispatch(call.tool, call.arguments, call.callId);
             } catch (error) {
               if (
                 !(error instanceof Problem) ||
@@ -278,11 +264,6 @@ export async function runCodexDicePhases(
               });
               return;
             }
-            transcript.push({
-              ...(book ? { tool: call.tool } : {}),
-              arguments: call.arguments,
-              result,
-            });
             // Installed app-server DynamicToolCallResponse schema: text content + success.
             send({
               id: message.id,
@@ -323,7 +304,7 @@ export async function runCodexDicePhases(
               cacheReadTokens: usage.data.tokenUsage.last.cachedInputTokens,
               phase,
             });
-            book?.observe?.({
+            adapter.observe?.({
               provider: 'codex',
               phase,
               inputTokens: usage.data.tokenUsage.last.inputTokens,
@@ -392,7 +373,7 @@ export async function runCodexDicePhases(
     });
     if (!completed)
       throw new Problem(502, 'provider_protocol', 'Codex closed before completing its dice phase');
-    const validated = nativeGameplaySchema(book, !!book).parse(final);
+    const validated = nativeGameplaySchema().parse(final);
     await traceEvent(trace, 'final', { response: validated });
     return validated;
   }

@@ -1,12 +1,8 @@
-// Reviewed teaching snapshot; contract test detects schema drift.
+// CLI wire contract; computed citation metadata remains required in persisted responses.
 export const responseSchemaExample = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
-    version: {
-      type: 'number',
-      const: 4,
-    },
     narrative: {
       type: 'string',
       minLength: 1,
@@ -111,16 +107,10 @@ export const responseSchemaExample = {
                               maximum: 9007199254740991,
                             },
                           },
-                          required: [
-                            'type',
-                            'sourceId',
-                            'version',
-                            'sourceName',
-                            'quote',
-                            'start',
-                            'end',
-                          ],
+                          required: ['type', 'sourceId', 'version', 'sourceName', 'quote'],
                           additionalProperties: false,
+                          description:
+                            'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
                         },
                         {
                           type: 'object',
@@ -204,17 +194,14 @@ export const responseSchemaExample = {
                                 'receiptId',
                                 'path',
                                 'quote',
-                                'start',
-                                'end',
                                 'source',
                                 'systemId',
                                 'revision',
                                 'contentHash',
-                                'precision',
-                                'pdfPages',
-                                'printedPages',
                               ],
                               additionalProperties: false,
+                              description:
+                                'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
                             },
                           },
                           required: ['type', 'citation'],
@@ -223,9 +210,25 @@ export const responseSchemaExample = {
                       ],
                     },
                   },
+                  visibility: {
+                    type: 'string',
+                    enum: ['player', 'gm_only'],
+                  },
                 },
-                required: ['origin', 'evidence'],
+                required: ['origin', 'evidence', 'visibility'],
                 additionalProperties: false,
+              },
+              characterId: {
+                type: 'string',
+                format: 'uuid',
+                pattern:
+                  '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+              },
+              preparationReceiptId: {
+                type: 'string',
+                format: 'uuid',
+                pattern:
+                  '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
               },
             },
             required: ['op', 'character', 'introduction'],
@@ -315,6 +318,11 @@ export const responseSchemaExample = {
               additionalProperties: false,
             },
           },
+          afterParagraph: {
+            type: 'integer',
+            exclusiveMinimum: 0,
+            maximum: 9007199254740991,
+          },
         },
         required: ['rollId', 'explanation'],
         additionalProperties: false,
@@ -393,21 +401,10 @@ export const responseSchemaExample = {
             },
           },
         },
-        required: [
-          'receiptId',
-          'path',
-          'quote',
-          'start',
-          'end',
-          'source',
-          'systemId',
-          'revision',
-          'contentHash',
-          'precision',
-          'pdfPages',
-          'printedPages',
-        ],
+        required: ['receiptId', 'path', 'quote', 'source', 'systemId', 'revision', 'contentHash'],
         additionalProperties: false,
+        description:
+          'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
       },
     },
     knowledgeChanges: {
@@ -542,16 +539,10 @@ export const responseSchemaExample = {
                           maximum: 9007199254740991,
                         },
                       },
-                      required: [
-                        'type',
-                        'sourceId',
-                        'version',
-                        'sourceName',
-                        'quote',
-                        'start',
-                        'end',
-                      ],
+                      required: ['type', 'sourceId', 'version', 'sourceName', 'quote'],
                       additionalProperties: false,
+                      description:
+                        'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
                     },
                     {
                       type: 'object',
@@ -635,17 +626,14 @@ export const responseSchemaExample = {
                             'receiptId',
                             'path',
                             'quote',
-                            'start',
-                            'end',
                             'source',
                             'systemId',
                             'revision',
                             'contentHash',
-                            'precision',
-                            'pdfPages',
-                            'printedPages',
                           ],
                           additionalProperties: false,
+                          description:
+                            'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
                         },
                       },
                       required: ['type', 'citation'],
@@ -653,6 +641,10 @@ export const responseSchemaExample = {
                     },
                   ],
                 },
+              },
+              visibility: {
+                type: 'string',
+                enum: ['player', 'gm_only'],
               },
             },
             required: [
@@ -665,6 +657,7 @@ export const responseSchemaExample = {
               'characterIds',
               'origin',
               'evidence',
+              'visibility',
             ],
             additionalProperties: false,
           },
@@ -765,6 +758,10 @@ export const responseSchemaExample = {
                       },
                     ],
                   },
+                  visibility: {
+                    type: 'string',
+                    enum: ['player', 'gm_only'],
+                  },
                 },
                 additionalProperties: false,
               },
@@ -813,16 +810,10 @@ export const responseSchemaExample = {
                           maximum: 9007199254740991,
                         },
                       },
-                      required: [
-                        'type',
-                        'sourceId',
-                        'version',
-                        'sourceName',
-                        'quote',
-                        'start',
-                        'end',
-                      ],
+                      required: ['type', 'sourceId', 'version', 'sourceName', 'quote'],
                       additionalProperties: false,
+                      description:
+                        'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
                     },
                     {
                       type: 'object',
@@ -906,17 +897,14 @@ export const responseSchemaExample = {
                             'receiptId',
                             'path',
                             'quote',
-                            'start',
-                            'end',
                             'source',
                             'systemId',
                             'revision',
                             'contentHash',
-                            'precision',
-                            'pdfPages',
-                            'printedPages',
                           ],
                           additionalProperties: false,
+                          description:
+                            'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
                         },
                       },
                       required: ['type', 'citation'],
@@ -925,6 +913,11 @@ export const responseSchemaExample = {
                   ],
                 },
               },
+              revealReason: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 100000,
+              },
             },
             required: ['op', 'id', 'expectedRevision', 'changes', 'origin', 'evidence'],
             additionalProperties: false,
@@ -932,14 +925,278 @@ export const responseSchemaExample = {
         ],
       },
     },
+    operationExplanations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          operationIndex: {
+            type: 'integer',
+            minimum: 0,
+            maximum: 9007199254740991,
+          },
+          reason: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 100000,
+          },
+          basis: {
+            type: 'string',
+            enum: ['initial_state', 'established_state', 'rule', 'provisional', 'dice', 'source'],
+          },
+          rollIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+              format: 'uuid',
+              pattern:
+                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+            },
+          },
+          evidence: {
+            type: 'array',
+            items: {
+              oneOf: [
+                {
+                  type: 'object',
+                  properties: {
+                    type: {
+                      type: 'string',
+                      const: 'campaign_source',
+                    },
+                    sourceId: {
+                      type: 'string',
+                      format: 'uuid',
+                      pattern:
+                        '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                    },
+                    version: {
+                      type: 'integer',
+                      exclusiveMinimum: 0,
+                      maximum: 9007199254740991,
+                    },
+                    sourceName: {
+                      type: 'string',
+                    },
+                    quote: {
+                      type: 'string',
+                      minLength: 1,
+                      maxLength: 100000,
+                    },
+                    start: {
+                      type: 'integer',
+                      minimum: 0,
+                      maximum: 9007199254740991,
+                    },
+                    end: {
+                      type: 'integer',
+                      exclusiveMinimum: 0,
+                      maximum: 9007199254740991,
+                    },
+                  },
+                  required: ['type', 'sourceId', 'version', 'sourceName', 'quote'],
+                  additionalProperties: false,
+                  description:
+                    'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    type: {
+                      type: 'string',
+                      const: 'book',
+                    },
+                    citation: {
+                      type: 'object',
+                      properties: {
+                        receiptId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        path: {
+                          type: 'string',
+                          minLength: 1,
+                          maxLength: 512,
+                        },
+                        quote: {
+                          type: 'string',
+                          minLength: 1,
+                          maxLength: 600,
+                        },
+                        start: {
+                          type: 'integer',
+                          minimum: 0,
+                          maximum: 9007199254740991,
+                        },
+                        end: {
+                          type: 'integer',
+                          exclusiveMinimum: 0,
+                          maximum: 9007199254740991,
+                        },
+                        source: {
+                          type: 'string',
+                          maxLength: 80,
+                          pattern: '^[a-z0-9][a-z0-9_-]*$',
+                        },
+                        systemId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        revision: {
+                          type: 'integer',
+                          exclusiveMinimum: 0,
+                          maximum: 9007199254740991,
+                        },
+                        contentHash: {
+                          type: 'string',
+                          pattern: '^[a-f0-9]{64}$',
+                        },
+                        precision: {
+                          type: 'string',
+                          enum: ['exact', 'approximate', 'unknown'],
+                        },
+                        pdfPages: {
+                          maxItems: 2000,
+                          type: 'array',
+                          items: {
+                            type: 'integer',
+                            minimum: 1,
+                            maximum: 2000,
+                          },
+                        },
+                        printedPages: {
+                          maxItems: 2000,
+                          type: 'array',
+                          items: {
+                            type: 'string',
+                            maxLength: 120,
+                          },
+                        },
+                      },
+                      required: [
+                        'receiptId',
+                        'path',
+                        'quote',
+                        'source',
+                        'systemId',
+                        'revision',
+                        'contentHash',
+                      ],
+                      additionalProperties: false,
+                      description:
+                        'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                    },
+                  },
+                  required: ['type', 'citation'],
+                  additionalProperties: false,
+                },
+              ],
+            },
+          },
+          visibility: {
+            type: 'string',
+            enum: ['player', 'gm_only'],
+          },
+        },
+        required: ['operationIndex', 'reason', 'basis', 'rollIds', 'evidence', 'visibility'],
+        additionalProperties: false,
+      },
+    },
+    combatEffects: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          characterId: {
+            type: 'string',
+            format: 'uuid',
+            pattern:
+              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+          },
+          operationIndex: {
+            type: 'integer',
+            minimum: 0,
+            maximum: 9007199254740991,
+          },
+          paths: {
+            minItems: 1,
+            maxItems: 64,
+            type: 'array',
+            items: {
+              minItems: 1,
+              maxItems: 16,
+              type: 'array',
+              items: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 200,
+              },
+            },
+          },
+          reason: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 100000,
+          },
+          rollIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+              format: 'uuid',
+              pattern:
+                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+            },
+          },
+          afterParagraph: {
+            type: 'integer',
+            exclusiveMinimum: 0,
+            maximum: 9007199254740991,
+          },
+        },
+        required: ['characterId', 'operationIndex', 'paths', 'reason', 'rollIds', 'afterParagraph'],
+        additionalProperties: false,
+      },
+    },
+    participantReferences: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          afterParagraph: {
+            type: 'integer',
+            exclusiveMinimum: 0,
+            maximum: 9007199254740991,
+          },
+          characterIds: {
+            minItems: 1,
+            maxItems: 1000,
+            type: 'array',
+            items: {
+              type: 'string',
+              format: 'uuid',
+              pattern:
+                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+            },
+          },
+        },
+        required: ['afterParagraph', 'characterIds'],
+        additionalProperties: false,
+      },
+    },
   },
   required: [
-    'version',
     'narrative',
     'operations',
     'rollInterpretations',
     'ruleCitations',
     'knowledgeChanges',
+    'operationExplanations',
+    'combatEffects',
+    'participantReferences',
   ],
   additionalProperties: false,
 };

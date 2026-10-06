@@ -4,36 +4,44 @@ import { sourceSections } from '../src/domain/sourceSections.js';
 import { textSource } from '../src/services/sources.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import { buildContext } from '../src/domain/context.js';
-import { LibraryService, remapArchive, assertNpcArchiveFormat } from '../src/services/library.js';
+import { LibraryService, remapArchive } from '../src/services/library.js';
 import type { Store } from '../src/store.js';
 import { RuleSystemKind } from '../src/domain/rules.js';
 import { createKnowledgeRecall, type FrozenKnowledge } from '../src/domain/knowledgeRecall.js';
 import { privateIpv4 } from '../src/security.js';
 import { randomUUID } from 'node:crypto';
-import { KNOWLEDGE_ARCHIVE_FORMAT_VERSION } from '../src/domain/versions.js';
 import { CharacterType } from '../src/domain/options.js';
+import { Problem } from '../src/errors.js';
 
-test('new archives omit pinned facts and older archives discard the retired field', () => {
+const emptyArchive = (campaign: ReturnType<typeof newCampaign>) => ({
+  format: 'local-rpg',
+  campaign,
+  turns: [],
+  snapshots: [],
+  memories: [],
+  diceSessions: [],
+  diceRecords: [],
+  combatPreparations: [],
+  combatPreparedCharacters: [],
+});
+
+test('archives import without a format version; older exports are refused with a clear message', () => {
   const campaign = newCampaign({ name: 'Background', description: 'Keep this description.' });
-  const archive = {
-    format: 'local-rpg',
-    version: 6,
-    campaign,
-    turns: [],
-    snapshots: [],
-    memories: [],
-    diceSessions: [],
-    diceRecords: [],
-  };
-  const current = remapArchive(archive);
+  const current = remapArchive(emptyArchive(campaign));
   assert.equal(current.campaign.description, campaign.description);
-  assert.equal(Object.hasOwn(current.campaign, 'pinnedFacts'), false);
-  const old = remapArchive({
-    ...archive,
-    campaign: { ...campaign, pinnedFacts: ['Retired fact'] },
-  });
-  assert.equal(old.campaign.description, campaign.description);
-  assert.equal(Object.hasOwn(old.campaign, 'pinnedFacts'), false);
+  assert.equal(Object.hasOwn(current, 'version'), false);
+  for (const version of [1, 4, 6, 7])
+    assert.throws(
+      () => remapArchive({ ...emptyArchive(campaign), version }),
+      (error: unknown) =>
+        error instanceof Problem &&
+        error.code === 'archive_unsupported' &&
+        error.message === 'This file was exported by an older app and can no longer be imported.'
+    );
+  assert.throws(() =>
+    remapArchive({ ...emptyArchive(campaign), campaign: { ...campaign, pinnedFacts: ['Retired'] } })
+  );
+  assert.throws(() => remapArchive({ ...emptyArchive(campaign), format: 'other' }));
 });
 
 function npcArchive() {
@@ -41,11 +49,8 @@ function npcArchive() {
   const npcId = input.campaign.knowledge![0]!.characterIds[0]!;
   return {
     ...input,
-    version: 6,
     diceSessions: input.diceSessions.map((session) => ({
       ...session,
-      promptContractVersion: 5,
-      digestVersion: 3,
       frozenSources: { campaignId: input.campaign.id, sources: [] },
       frozenKnowledge: {
         ...session.frozenKnowledge,
@@ -68,7 +73,6 @@ function npcArchive() {
 test('NPC archive snapshots remap historical identities but preserve incidental sheet strings', () => {
   const input = npcArchive();
   const out = remapArchive(input);
-  assert.equal(out.version, 6);
   const captured: FrozenKnowledge = out.diceSessions![0]!.frozenKnowledge!;
   const npc = captured.npcCharacters![0]!;
   assert.notEqual(npc.id, input.diceSessions[0]!.frozenKnowledge.npcCharacters[0]!.id);
@@ -77,10 +81,6 @@ test('NPC archive snapshots remap historical identities but preserve incidental 
   assert.equal(npc.attributes.literal, input.diceSessions[0]!.frozenKnowledge.npcCharacters[0]!.id);
   assert.equal(npc.inventory.coins, 7);
   assert.equal(npc.revision, 2);
-  assert.throws(() => assertNpcArchiveFormat(5, captured), /version 6/);
-  assert.doesNotThrow(() => assertNpcArchiveFormat(6, captured));
-  assert.doesNotThrow(() => assertNpcArchiveFormat(5, { ...captured, npcCharacters: undefined }));
-  assert.throws(() => remapArchive({ ...input, version: 5 }), /version 6/);
   const reimported = remapArchive(out);
   const restored: FrozenKnowledge = reimported.diceSessions![0]!.frozenKnowledge!;
   assert.equal(restored.npcCharacters![0]!.inventory.coins, 7);
@@ -106,14 +106,6 @@ test('NPC archives reject duplicate, private, player and foreign snapshot identi
   }
 });
 
-test('NPC snapshots cannot be attached to a historical v4 turn context', () => {
-  const input = npcArchive();
-  const context = buildContext(input.campaign, [], 'Continue', [], 16000, true, undefined, 4);
-  Object.assign(input.turns[0]!, {
-    context: { ...context, frozenKnowledge: input.diceSessions[0]!.frozenKnowledge },
-  });
-  assert.throws(() => remapArchive(input), /NPC sheets require version 5 gameplay/);
-});
 import {
   KnowledgeKind,
   KnowledgeOrigin,
@@ -169,7 +161,6 @@ function knowledgeArchive() {
   campaign.knowledge = [record];
   return {
     format: 'local-rpg',
-    version: KNOWLEDGE_ARCHIVE_FORMAT_VERSION,
     campaign,
     turns: [
       {
@@ -203,6 +194,8 @@ function knowledgeArchive() {
     ],
     memories: [],
     diceRecords: [],
+    combatPreparations: [],
+    combatPreparedCharacters: [],
     diceSessions: [
       {
         id: sessionId,
@@ -215,8 +208,6 @@ function knowledgeArchive() {
         newFaces: 0,
         imported: false,
         createdAt: campaign.createdAt,
-        promptContractVersion: 4,
-        digestVersion: 2,
         systemPrompt: '  Exact instructions\n',
         frozenKnowledge: {
           campaignId: campaign.id,
@@ -237,7 +228,7 @@ function knowledgeArchive() {
   };
 }
 
-test('v4 archives remap retained source/character links across records, undo and frozen metadata', () => {
+test('archives remap retained source/character links across records, undo and frozen metadata', () => {
   const input = knowledgeArchive();
   const out = remapArchive(input);
   const original = input.campaign.knowledge![0]!;
@@ -262,7 +253,7 @@ test('v4 archives remap retained source/character links across records, undo and
   assert.equal(out.campaign.sources.length, 0);
 });
 
-test('v4 archives reject dangling attribution, malformed evidence and partial frozen metadata', () => {
+test('archives reject dangling attribution, malformed evidence and partial frozen metadata', () => {
   const input = knowledgeArchive();
   input.campaign.knowledge![0]!.updatedTurnId = randomUUID();
   assert.throws(() => remapArchive(input), /attribution turn/);
@@ -275,7 +266,7 @@ test('v4 archives reject dangling attribution, malformed evidence and partial fr
   assert.throws(() => remapArchive(badQuote), /quote coordinates/);
   const partial = knowledgeArchive();
   delete (partial.diceSessions[0] as { systemPrompt?: string }).systemPrompt;
-  assert.throws(() => remapArchive(partial), /complete version 4/);
+  assert.throws(() => remapArchive(partial), /metadata is incomplete/);
   const collision = knowledgeArchive();
   collision.campaign.knowledge![0]!.characterIds = [collision.campaign.id];
   collision.campaign.knowledge![0]!.characterNames = { [collision.campaign.id]: 'Invalid' };
@@ -312,18 +303,6 @@ test('replaced source versions stay historical after frozen lookup and archive r
   const bad = knowledgeArchive();
   bad.diceSessions[0]!.frozenKnowledge.sourceVersions[0]!.id = randomUUID();
   assert.throws(() => remapArchive(bad), /match captured source identities/);
-});
-
-test('legacy archives reject knowledge and new frozen metadata without inventing historical origins', () => {
-  for (const version of [1, 2, 3]) {
-    const input = knowledgeArchive();
-    input.version = version;
-    assert.throws(() => remapArchive(input));
-    delete input.campaign.knowledge;
-    input.snapshots = [];
-    input.turns[0]!.status = 'failed';
-    assert.throws(() => remapArchive(input), /version 4/);
-  }
 });
 
 test('campaign templates exclude knowledge history and never instantiate transferred facts', async () => {
@@ -377,29 +356,22 @@ test('source sections preserve Unicode, original offsets and page boundaries whi
   const c = newCampaign({ name: 'Test' });
   c.sources = [source];
   c.pinnedSourceSections = [{ sourceId: source.id, version: 1, index: sections.length - 1 }];
-  const context = buildContext(c, [], 'Sneak', [], 16000);
-  assert.match(context.prompt, /move silently/);
-  assert.doesNotMatch(context.prompt, /😀/);
-  const large = buildContext({ ...c, instructions: 'x'.repeat(16000) }, [], 'Sneak', [], 16000);
-  assert.equal(JSON.parse(large.prompt).mandatory.campaignInstructions, 'x'.repeat(16000));
+  const context = buildContext(c, [], 'Sneak', []);
+  const pinned = JSON.stringify(JSON.parse(context.prompt).mandatory.pinnedRules);
+  assert.match(pinned, /move silently/);
+  assert.doesNotMatch(pinned, /😀/);
+  const large = buildContext({ ...c, instructions: 'x'.repeat(16000) }, [], 'Sneak', []);
+  assert.ok(large.systemPrompt!.includes('x'.repeat(16000)));
 });
 test('archive remaps only schema references and preserves UUID-looking narrative/private text', () => {
   const c = newCampaign({ name: 'Archive' });
-  delete c.knowledge;
   c.notes = c.id;
   c.description = c.id;
   c.state = { literal: c.id };
   const source = textSource(c.id, c.id);
   delete source.purpose;
   c.sources = [source];
-  const out = remapArchive({
-    format: 'local-rpg',
-    version: 1,
-    campaign: c,
-    turns: [],
-    snapshots: [],
-    memories: [],
-  });
+  const out = remapArchive(emptyArchive(c));
   assert.notEqual(out.campaign.id, c.id);
   assert.notEqual(out.campaign.sources[0]!.id, source.id);
   assert.equal(out.campaign.notes, c.id);
@@ -417,7 +389,6 @@ test('private IPv4 interface validation rejects invalid octets/public/all-interf
 
 test('archive rejects unresolved undo field references and snapshot entity collisions', () => {
   const c = newCampaign({ name: 'Invalid undo reference' });
-  delete c.knowledge;
   const turnId = randomUUID();
   const char = {
     id: String(randomUUID()),
@@ -430,9 +401,7 @@ test('archive rejects unresolved undo field references and snapshot entity colli
     revision: 0,
   };
   const archive = {
-    format: 'local-rpg',
-    version: 1,
-    campaign: c,
+    ...emptyArchive(c),
     turns: [
       {
         id: turnId,
@@ -461,7 +430,6 @@ test('archive rejects unresolved undo field references and snapshot entity colli
         changedFields: [{ characterId: randomUUID(), fields: ['name'] }],
       },
     ],
-    memories: [],
   };
   assert.throws(() => remapArchive(archive), /Unresolved changed-field/);
   archive.snapshots[0]!.changedFields = [];
@@ -469,19 +437,17 @@ test('archive rejects unresolved undo field references and snapshot entity colli
   assert.throws(() => remapArchive(archive), /collides with another entity/);
 });
 
-test('v5 archive retains secret metadata, source purpose and remaps frozen source receipts', () => {
+test('archive retains secret metadata, source purpose and remaps frozen source receipts', () => {
   const input = knowledgeArchive();
   const source = textSource('Preparation', 'A public corridor. A secret room.');
   input.campaign.sources = [{ ...source, purpose: 'campaign' } as typeof source];
-  const data = { ...input, version: 5 } as unknown as import('../src/domain/types.js').Archive;
+  const data = input as unknown as import('../src/domain/types.js').Archive;
   const r = data.campaign.knowledge![0]!;
   r.visibility = 'gm_only' as import('../src/domain/knowledge.js').KnowledgeVisibility;
   r.introductionVisibility = r.visibility;
   r.attributions[0]!.visibility = r.visibility;
   data.snapshots[0]!.afterKnowledge = [structuredClone(r)];
-  const session = data.diceSessions![0]!;
-  session.promptContractVersion = 5;
-  session.digestVersion = 3;
+  const session = data.diceSessions[0]!;
   session.frozenKnowledge!.records = [structuredClone(r)];
   session.frozenSources = {
     campaignId: data.campaign.id,
@@ -529,7 +495,40 @@ test('v5 archive retains secret metadata, source purpose and remaps frozen sourc
   );
   assert.equal(out.turns[0]!.sourceReads![0]!.payload.receiptId, out.turns[0]!.sourceReads![0]!.id);
   assert.notEqual(out.turns[0]!.sourceReads![0]!.id, receiptId);
-  assert.throws(() => remapArchive({ ...data, version: 4 }));
+});
+
+test('rolls recorded before combat tracking stay valid without a scope and survive a round-trip', () => {
+  const input = knowledgeArchive();
+  const session = input.diceSessions[0]!;
+  session.newFaces = 1;
+  const roll = {
+    id: randomUUID(),
+    sessionId: session.id,
+    campaignId: input.campaign.id,
+    createdAt: input.campaign.createdAt,
+    slot: 0,
+    groups: [{ label: 'check', sides: 6, faces: [4] }],
+    reason: 'Listen',
+    declaration: 'No modifiers',
+  };
+  const archive = {
+    ...input,
+    diceRecords: [roll],
+    turns: [
+      {
+        ...input.turns[0]!,
+        rolls: [structuredClone(roll)],
+        rollInterpretations: [{ rollId: roll.id, explanation: 'Heard' }],
+      },
+    ],
+  };
+  const out = remapArchive(archive);
+  assert.equal(out.diceRecords[0]!.scope, undefined);
+  assert.notEqual(out.diceRecords[0]!.id, roll.id);
+  assert.equal(out.turns[0]!.rolls![0]!.id, out.diceRecords[0]!.id);
+  const again = remapArchive(out);
+  assert.equal(again.diceRecords[0]!.scope, undefined);
+  assert.equal(again.turns[0]!.rollInterpretations![0]!.rollId, again.diceRecords[0]!.id);
 });
 
 test('archives preserve memory above the soft campaign target', () => {

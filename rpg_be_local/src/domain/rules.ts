@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { RULE_BOOK_PACKAGE_VERSION } from './versions.js';
 
 export enum RuleSystemKind {
   Library = 'library',
@@ -62,7 +61,6 @@ export const RULE_LIMITS = {
   searchHits: 10,
   childDescriptors: 20,
   resultBytes: 4096,
-  legacyArchiveTranscriptBytes: 8192,
   calls: 12,
   combinedCalls: 36,
   gameplayDeadlineMs: 180000,
@@ -274,7 +272,6 @@ export type RuleSource = z.infer<typeof ruleSourceSchema>;
 export const ruleBookManifestSchema = z
   .object({
     format: z.literal('rules-book'),
-    version: z.literal(RULE_BOOK_PACKAGE_VERSION),
     source: ruleSourceSchema,
     columns: z
       .array(

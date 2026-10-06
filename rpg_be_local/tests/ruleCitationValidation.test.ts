@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { validateRuleCitations } from '../src/domain/ruleCitationValidation.js';
 import {
-  ruleResponseSchema,
-  validateRuleCitations,
-  gameplayResponseContract,
-} from '../src/domain/ruleResponse.js';
-import { RuleSystemKind, type RuleContext, type RuleRead } from '../src/domain/rules.js';
-test('book schema preserves operations and dice while validating original-text receipt/canonical quote pages', () => {
+  RuleSystemKind,
+  ruleCitationSchema,
+  type RuleContext,
+  type RuleRead,
+} from '../src/domain/rules.js';
+test('rule citations must match an original-text receipt and canonical quote pages', () => {
   const campaignId = randomUUID();
   const turnId = randomUUID();
   const receiptId = randomUUID();
@@ -43,13 +44,9 @@ test('book schema preserves operations and dice while validating original-text r
       ],
     },
   };
-  const response = ruleResponseSchema.parse({
-    version: 3,
-    narrative: 'An original ruling.',
-    operations: [],
-    rollInterpretations: [],
+  const response = {
     ruleCitations: [
-      {
+      ruleCitationSchema.parse({
         receiptId,
         path: 'core_rules.original.check',
         source: 'original',
@@ -62,9 +59,9 @@ test('book schema preserves operations and dice while validating original-text r
         precision: 'exact',
         pdfPages: [1],
         printedPages: ['3'],
-      },
+      }),
     ],
-  });
+  };
   validateRuleCitations(response, [receipt], campaignId, turnId, context);
   for (const invalid of [
     { ...response.ruleCitations[0]!, pdfPages: [2] },
@@ -93,18 +90,4 @@ test('book schema preserves operations and dice while validating original-text r
       () => validateRuleCitations(response, [invalid], campaignId, turnId, context),
       /Citations/
     );
-  assert.equal(gameplayResponseContract(context).schema.safeParse(response).success, true);
-  assert.equal(
-    gameplayResponseContract({ ...context, kind: RuleSystemKind.ModelKnowledge }).schema.safeParse({
-      version: 2,
-      narrative: 'Default',
-      operations: [],
-      rollInterpretations: [],
-    }).success,
-    true
-  );
-  assert.equal(
-    gameplayResponseContract(context).schema.safeParse({ ...response, version: 2 }).success,
-    false
-  );
 });

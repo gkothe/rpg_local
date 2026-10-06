@@ -1,17 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diceResponseSchema, validateRollInterpretations } from '../src/domain/diceResponse.js';
 import {
   placedRollInterpretationSchema,
+  validateRollInterpretations,
   validateRollPlacement,
 } from '../src/domain/diceResponse.js';
+import { gameplayResponseSchema } from '../src/domain/gameplayResponse.js';
 
 const rollId = '12345678-1234-4234-8234-123456789012';
 const response = {
-  version: 2,
   narrative: 'The check succeeds.',
   operations: [],
   rollInterpretations: [{ rollId, explanation: '12 + 3 = 15; target 14.' }],
+  ruleCitations: [],
+  knowledgeChanges: [],
+  operationExplanations: [],
+  combatEffects: [],
+  participantReferences: [],
 };
 
 test('placement accepts saved legacy rolls and rejects invalid paragraph indices', () => {
@@ -37,28 +42,28 @@ test('placement accepts saved legacy rolls and rejects invalid paragraph indices
     () => validateRollPlacement({ ...placed, narrative: 'Only one paragraph.' }),
     /paragraph/i
   );
-  assert.equal(diceResponseSchema.safeParse(placed).success, false);
+  assert.equal(gameplayResponseSchema.safeParse(placed).success, true);
 });
-test('dice gameplay preserves operation constraints and excludes AI-authored faces', () => {
-  assert.equal(diceResponseSchema.safeParse(response).success, true);
-  assert.equal(diceResponseSchema.safeParse({ ...response, faces: [12] }).success, false);
-  assert.equal(diceResponseSchema.safeParse({ ...response, version: 1 }).success, false);
+test('gameplay responses keep operation constraints, exclude AI-authored faces and carry no version', () => {
+  assert.equal(gameplayResponseSchema.safeParse(response).success, true);
+  assert.equal(gameplayResponseSchema.safeParse({ ...response, faces: [12] }).success, false);
+  assert.equal(gameplayResponseSchema.safeParse({ ...response, version: 6 }).success, false);
   assert.equal(
-    diceResponseSchema.safeParse({
+    gameplayResponseSchema.safeParse({
       ...response,
       operations: [{ op: 'delete', characterId: rollId }],
     }).success,
     false
   );
   assert.equal(
-    diceResponseSchema.safeParse({
+    gameplayResponseSchema.safeParse({
       ...response,
       rollInterpretations: [{ ...response.rollInterpretations[0], faces: [12] }],
     }).success,
     false
   );
   assert.equal(
-    diceResponseSchema.safeParse({
+    gameplayResponseSchema.safeParse({
       ...response,
       rollInterpretations: [
         { rollId, explanation: 'Corrected', corrections: [{ explanation: '' }] },
@@ -68,7 +73,7 @@ test('dice gameplay preserves operation constraints and excludes AI-authored fac
   );
 });
 test('final response must acknowledge exactly all recorded rolls', () => {
-  const parsed = diceResponseSchema.parse(response);
+  const parsed = gameplayResponseSchema.parse(response);
   assert.doesNotThrow(() => validateRollInterpretations(parsed, [rollId]));
   assert.throws(() => validateRollInterpretations(parsed, []), /roll/i);
   assert.throws(

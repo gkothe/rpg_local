@@ -13,17 +13,14 @@ import {
   KnowledgeStatus as S,
 } from '../src/domain/knowledge.js';
 import type { Store } from '../src/store.js';
+import { emptyResponse } from './ownedGameplayFixture.js';
 import type { Turn } from '../src/domain/types.js';
 test('ordinary campaign detail/list and turn detail/list/SSE strip frozen secrets; explicit context remains diagnostic', async () => {
   const c = applyResponse(
     newCampaign({ name: 'Example' }),
     {
-      version: 5,
+      ...emptyResponse,
       narrative: 'The inn.',
-      operations: [],
-      rollInterpretations: [],
-      ruleCitations: [],
-      operationExplanations: [],
       knowledgeChanges: [
         {
           op: 'create',

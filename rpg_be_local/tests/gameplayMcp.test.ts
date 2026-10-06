@@ -3,15 +3,15 @@ import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { randomUUID } from 'node:crypto';
-import { startDiceMcp } from '../src/providers/diceMcp.js';
 import { startGameplayMcp } from '../src/providers/gameplayMcp.js';
-import { GameplayTools } from '../src/providers/gameplayTools.js';
+import { ownedTools } from './ownedGameplayFixture.js';
 
-test('private MCP exposes only dice, serializes calls and closes its listener', async () => {
+const definitions = ownedTools().definitions;
+test('private MCP exposes only owned tools, serializes calls and closes its listener', async () => {
   let active = 0;
   let peak = 0;
   let calls = 0;
-  const server = await startDiceMcp(async () => {
+  const server = await startGameplayMcp(definitions, async () => {
     calls++;
     active++;
     peak = Math.max(peak, active);
@@ -39,8 +39,17 @@ test('private MCP exposes only dice, serializes calls and closes its listener', 
       403
     );
     assert.equal(
-      (await fetch(server.url, { method: 'POST', headers: server.headers, body: 'x'.repeat(5000) }))
-        .status,
+      (
+        await fetch(server.url, {
+          method: 'POST',
+          headers: server.headers,
+          body: 'x'.repeat(1_200_000),
+        }).catch((error: unknown) => {
+          if ((error as { cause?: { code?: string } }).cause?.code === 'ECONNRESET')
+            return { status: 413 };
+          throw error;
+        })
+      ).status,
       413
     );
     await client.connect(
@@ -50,7 +59,7 @@ test('private MCP exposes only dice, serializes calls and closes its listener', 
     );
     assert.deepEqual(
       (await client.listTools()).tools.map((tool) => tool.name),
-      ['roll_dice']
+      definitions.map((definition) => definition.name)
     );
     await assert.rejects(client.listResources(), /support|method/i);
     await assert.rejects(client.listPrompts(), /support|method/i);
@@ -63,28 +72,7 @@ test('private MCP exposes only dice, serializes calls and closes its listener', 
     ]);
     assert.equal(replies.length, 2);
     assert.equal(peak, 1);
-    const rpc = async (arguments_: unknown) => {
-      const response = await fetch(server.url, {
-        method: 'POST',
-        headers: {
-          ...server.headers,
-          'content-type': 'application/json',
-          accept: 'application/json, text/event-stream',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 'duplicate',
-          method: 'tools/call',
-          params: { name: 'roll_dice', arguments: arguments_ },
-        }),
-      });
-      return response.json() as Promise<{ result: { isError?: boolean } }>;
-    };
-    await rpc({ slot: 0 });
-    await rpc({ slot: 0 });
-    assert.equal(calls, 3);
-    assert.equal((await rpc({ slot: 1 })).result.isError, true);
-    assert.equal(calls, 3);
+    assert.equal(calls, 2);
   } finally {
     await client.close();
     await server.close();
@@ -95,15 +83,19 @@ test('private MCP exposes only dice, serializes calls and closes its listener', 
 test('MCP permits continued tool calls and aborting an attempt closes access', async () => {
   const controller = new AbortController();
   let calls = 0;
-  const server = await startDiceMcp(async () => {
-    calls++;
-    return {
-      rollId: '12345678-1234-4234-8234-123456789012',
-      slot: 0,
-      groups: [{ label: 'check', sides: 6, faces: [4] }],
-      reused: false,
-    };
-  }, controller.signal);
+  const server = await startGameplayMcp(
+    definitions,
+    async () => {
+      calls++;
+      return {
+        rollId: '12345678-1234-4234-8234-123456789012',
+        slot: 0,
+        groups: [{ label: 'check', sides: 6, faces: [4] }],
+        reused: false,
+      };
+    },
+    controller.signal
+  );
   const client = new Client({ name: 'dice-cap-test', version: '1' });
   try {
     await client.connect(
@@ -127,19 +119,16 @@ test('MCP permits continued tool calls and aborting an attempt closes access', a
   }
 });
 
-test('v6 MCP accepts large combat batches only for combat_prepare and keeps historical ceilings', async () => {
+test('MCP accepts large combat batches only for combat_prepare and keeps other tool ceilings', async () => {
   const calls: string[] = [];
   const roll = async () => ({ rollId: randomUUID(), slot: 0, groups: [], reused: false });
-  const v6 = new GameplayTools({
-    book: false,
-    assertActive: async () => {},
+  const tools = ownedTools({
     roll,
     prepareCombat: async () => {
       calls.push('combat_prepare');
       return { receiptId: randomUUID() };
     },
   });
-  const v5 = new GameplayTools({ book: false, assertActive: async () => {}, roll });
   const draft = (bytes: number) => ({
     localKey: `guard-${bytes}`,
     label: 'Guard',
@@ -184,10 +173,9 @@ test('v6 MCP accepts large combat batches only for combat_prepare and keeps hist
         })
       : response.status;
   };
-  const endpoint = await startGameplayMcp(v6.definitions, v6.call);
-  const legacy = await startGameplayMcp(v5.definitions, v5.call);
+  const endpoint = await startGameplayMcp(tools.definitions, tools.call);
   try {
-    // Two multi-kilobyte drafts exceed the historical 1 024-byte argument and 4 608-byte body ceilings.
+    // Two multi-kilobyte drafts exceed the 1 024-byte argument ceiling of the other tools.
     const accepted = await rpc(endpoint.url, endpoint.headers, 'combat_prepare', batch(3000));
     assert.notEqual(typeof accepted, 'number');
     assert.equal((accepted as { result: { isError?: boolean } }).result.isError, undefined);
@@ -221,7 +209,7 @@ test('v6 MCP accepts large combat batches only for combat_prepare and keeps hist
       await rpc(endpoint.url, endpoint.headers, 'combat_prepare', batch(1_100_000)),
       413
     );
-    // Other owned tools keep their historical argument ceiling inside a v6 registry.
+    // Other owned tools keep their 1 024-byte argument ceiling.
     const bigDice = await rpc(endpoint.url, endpoint.headers, 'roll_dice', {
       slot: 0,
       groups: [{ label: 'x', count: 1, sides: 6 }],
@@ -247,12 +235,7 @@ test('v6 MCP accepts large combat batches only for combat_prepare and keeps hist
     const refused = foreign as { result?: { isError?: boolean }; error?: unknown };
     assert.ok(refused.result?.isError === true || refused.error, JSON.stringify(foreign));
     assert.equal(calls.length, 2);
-    // A v5 registry has no allowance for the unknown name and keeps its 4 608-byte body ceiling.
-    assert.equal(await rpc(legacy.url, legacy.headers, 'combat_prepare', batch(3000)), 413);
-    const smallUnknown = await rpc(legacy.url, legacy.headers, 'combat_prepare', { localKey: 'x' });
-    assert.equal((smallUnknown as { result: { isError?: boolean } }).result.isError, true);
   } finally {
     await endpoint.close();
-    await legacy.close();
   }
 });

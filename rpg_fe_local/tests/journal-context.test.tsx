@@ -77,7 +77,7 @@ function expandContext() {
 it('loads full saved instructions only when context inspection is expanded and renders them literally', async () => {
   const campaign = fixtureCampaign();
   campaign.turns = [fixtureTurn()];
-  campaign.turns[0]!.context = { diceSessionId: 'root', promptContractVersion: 4 };
+  campaign.turns[0]!.context = { diceSessionId: 'root' };
   const systemPrompt = '<script>Saved full system instructions</script>';
   const fetcher = vi
     .fn()

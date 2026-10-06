@@ -5,16 +5,22 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { generateAntigravityMcpBook } from '../src/providers/antigravityMcpBook.js';
-import { gameplayToolDefinitions } from '../src/providers/gameplayTools.js';
+import type { GameplayAdapter, GameplayToolDispatch } from '../src/providers/gameplayTools.js';
+import { ownedTools } from './ownedGameplayFixture.js';
 import { withResponseRetries } from '../src/domain/responseRetry.js';
 import { diceInputSchema } from '../src/domain/dice.js';
 import { PromptTrace } from '../src/providers/promptLog.js';
 import {
   antigravityDiceEnvironment,
   generateAntigravityDice,
-  parseAntigravityDicePhase,
 } from '../src/providers/antigravityDice.js';
 
+const adapter = (dispatch: GameplayToolDispatch, book = false): GameplayAdapter => ({
+  definitions: ownedTools({ book, read: async () => ({}) }).definitions,
+  dispatch,
+  schema: { type: 'object' },
+  systemPrompt: 'Synthetic system prompt',
+});
 const settings = { provider: 'agy', model: 'fixture', effort: null };
 const request = {
   slot: 0,
@@ -62,8 +68,8 @@ else if(args.includes('/hooks')) {
       console.log(JSON.stringify({event:'step_update',step_update:completion}));
     }
     console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:4,state:'DONE',usage:{input_tokens:10000,output_tokens:12417}}}));
-    const response={version:2,narrative:history.map(r=>r.result.groups[0].faces[0]).join(','),operations:[],rollInterpretations:history.map(r=>({rollId:r.result.rollId,explanation:'Recorded face '+r.result.groups[0].faces[0]}))};
-    if(process.env.RPG_TEST_AGY_MODE==='book-success'){response.version=3;response.ruleCitations=[];}
+    const response={narrative:history.map(r=>r.result.groups[0].faces[0]).join(','),operations:[],rollInterpretations:history.map(r=>({rollId:r.result.rollId,explanation:'Recorded face '+r.result.groups[0].faces[0]}))};
+    if(process.env.RPG_TEST_AGY_MODE==='book-success') response.ruleCitations=[];
     console.log(JSON.stringify({event:'step_update',step_update:{step_type:'unknown',step_index:5,state:'DONE',duration_seconds:0.1}}));
     console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:mode==='partial-usage'?undefined:mode==='invalid-usage'?{input_tokens:'unknown'}:{input_tokens:30000},response:JSON.stringify(response)}}));
   });
@@ -85,14 +91,10 @@ for (const mode of ['zero-turns', 'missing-turns']) {
           'Synthetic',
           root,
           { ...process.env, RPG_TEST_AGY_MODE: mode },
-          {
-            definitions: gameplayToolDefinitions(false),
-            dispatch: async () => {
-              throw new Error('No tool is expected');
-            },
-          },
+          adapter(async () => {
+            throw new Error('No tool is expected');
+          }),
           undefined,
-          false,
           { executionId, trace }
         ),
         (error: unknown) => {
@@ -140,26 +142,23 @@ test('a registered tool called directly fails before dispatch and automatically 
           `Synthetic ${feedback ?? ''}`,
           root,
           { ...process.env, RPG_TEST_AGY_MODE: attempt === 0 ? 'direct-owned' : 'book-success' },
-          {
-            definitions: gameplayToolDefinitions(true),
-            dispatch: async (name, input) => {
-              assert.equal(name, 'roll_dice');
-              dispatches++;
-              return {
-                rollId: randomUUID(),
-                slot: diceInputSchema.parse(input).slot,
-                groups: [{ label: 'check', sides: 6, faces: [3] }],
-                reused: false,
-              };
-            },
-          }
+          adapter(async (name, input) => {
+            assert.equal(name, 'roll_dice');
+            dispatches++;
+            return {
+              rollId: randomUUID(),
+              slot: diceInputSchema.shape.slot.parse((input as { slot: unknown }).slot),
+              groups: [{ label: 'check', sides: 6, faces: [3] }],
+              reused: false,
+            };
+          }, true)
         );
       },
       async () => {}
     );
     assert.equal(attempts, 2);
     assert.equal(dispatches, 2);
-    assert.equal((result as { version: number }).version, 3);
+    assert.deepEqual((result as { ruleCitations: unknown[] }).ruleCitations, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -181,12 +180,9 @@ test('a genuinely external direct tool remains non-retryable and never dispatche
             'Synthetic',
             root,
             { ...process.env, RPG_TEST_AGY_MODE: 'direct-foreign' },
-            {
-              definitions: gameplayToolDefinitions(true),
-              dispatch: async () => {
-                assert.fail('External tool must never dispatch');
-              },
-            }
+            adapter(async () => {
+              assert.fail('External tool must never dispatch');
+            }, true)
           );
         },
         async () => {
@@ -199,56 +195,6 @@ test('a genuinely external direct tool remains non-retryable and never dispatche
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
-
-test('Antigravity rejects intrinsic native tools, error framing and opaque repeated inference turns', () => {
-  const response = {
-    kind: 'final',
-    response: {
-      version: 3,
-      narrative: 'Original fixture',
-      operations: [],
-      rollInterpretations: [],
-      ruleCitations: [],
-    },
-  };
-  const events = [
-    { event: 'init', init: { agent: 'local-rpg-original' } },
-    {
-      event: 'result',
-      result: {
-        status: 'SUCCESS',
-        num_turns: 1,
-        usage: { input_tokens: 1000 },
-        response: JSON.stringify(response),
-      },
-    },
-  ];
-  for (const step of [
-    { step_type: 'tool', tool_name: 'manage_task' },
-    { step_type: 'tool', tool_name: 'list_resources' },
-    { step_type: 'error_message' },
-  ])
-    assert.throws(
-      () =>
-        parseAntigravityDicePhase(
-          [events[0], { event: 'step_update', step_update: step }, events[1]]
-            .map((event) => JSON.stringify(event))
-            .join('\n'),
-          true
-        ),
-      /unapproved phase activity/
-    );
-  assert.throws(
-    () =>
-      parseAntigravityDicePhase(
-        [events[0], { event: 'result', result: { ...events[1]!.result, num_turns: 4 } }]
-          .map((event) => JSON.stringify(event))
-          .join('\n'),
-        true
-      ),
-    /one isolated GM turn/
-  );
 });
 
 for (const usageMode of ['valid', 'partial-usage', 'invalid-usage'])
@@ -264,7 +210,7 @@ for (const usageMode of ['valid', 'partial-usage', 'invalid-usage'])
         'Synthetic context' + 'x'.repeat(70000),
         root,
         { ...process.env, RPG_TEST_AGY_MODE: usageMode },
-        async (input) => {
+        adapter(async (_name, input) => {
           const slot = (input as typeof request).slot;
           assert.equal(slot, ids.length);
           const rollId = randomUUID();
@@ -275,7 +221,7 @@ for (const usageMode of ['valid', 'partial-usage', 'invalid-usage'])
             groups: [{ label: 'check', sides: 6, faces: [slot + 3] }],
             reused: false,
           };
-        }
+        })
       )) as { narrative: string; rollInterpretations: { rollId: string }[] };
       assert.equal(response.narrative, '3,4');
       assert.deepEqual(
@@ -301,10 +247,10 @@ test('Antigravity rejects native capabilities before executing application dice'
         'Synthetic',
         root,
         { ...process.env, RPG_TEST_AGY_MODE: 'native' },
-        async () => {
+        adapter(async () => {
           calls++;
           throw new Error('Unexpected callback');
-        }
+        })
       ),
       /unapproved native activity/
     );
@@ -331,7 +277,7 @@ test('Antigravity cancellation during setup cannot draw dice', async () => {
         'Synthetic',
         root,
         { ...process.env, RPG_TEST_AGY_MODE: 'hooks' },
-        roll,
+        adapter(roll),
         AbortSignal.timeout(200)
       ),
       /cancelled/
@@ -342,23 +288,7 @@ test('Antigravity cancellation during setup cannot draw dice', async () => {
   }
 });
 
-test('Antigravity rejects foreign tool envelopes and strips inherited configuration overrides', () => {
-  const envelope = (tool: string) =>
-    [
-      { event: 'init', init: { agent: 'local-rpg-fixture' } },
-      {
-        event: 'result',
-        result: {
-          status: 'SUCCESS',
-          num_turns: 1,
-          usage: { input_tokens: 1000 },
-          response: JSON.stringify({ kind: 'tool_call', tool, arguments: request }),
-        },
-      },
-    ]
-      .map((event) => JSON.stringify(event))
-      .join('\n');
-  assert.throws(() => parseAntigravityDicePhase(envelope('shell')), /invalid application/);
+test('Antigravity strips inherited configuration overrides', () => {
   const env = antigravityDiceEnvironment({
     PATH: 'local',
     GOOGLE_API_KEY: 'fixture',
@@ -382,10 +312,10 @@ test('unavailable MCP server/tools and unmatched completion markers fail before 
           'Synthetic',
           root,
           { ...process.env, RPG_TEST_AGY_MODE: mode },
-          async () => {
+          adapter(async () => {
             calls++;
             throw new Error('Unapproved tool must never dispatch');
-          }
+          })
         ),
         (error: unknown) => (error as { code: string }).code === 'gameplay_tool_unavailable'
       );
@@ -418,7 +348,7 @@ for (const mode of ['malformed-arguments', 'array-arguments', 'null-arguments'])
             feedback,
             root,
             { ...process.env, RPG_TEST_AGY_MODE: attempt === 0 ? mode : 'matching-envelope' },
-            async () => {
+            adapter(async () => {
               calls++;
               return {
                 rollId: randomUUID(),
@@ -426,7 +356,7 @@ for (const mode of ['malformed-arguments', 'array-arguments', 'null-arguments'])
                 groups: [{ label: 'check', sides: 6, faces: [3] }],
                 reused: false,
               };
-            }
+            })
           );
         },
         async () => {}
@@ -456,7 +386,7 @@ for (const [mode, expectedCalls] of [
           'Synthetic',
           root,
           { ...process.env, RPG_TEST_AGY_MODE: mode },
-          async () => {
+          adapter(async () => {
             calls++;
             return {
               rollId: randomUUID(),
@@ -464,7 +394,7 @@ for (const [mode, expectedCalls] of [
               groups: [{ label: 'check', sides: 6, faces: [3] }],
               reused: false,
             };
-          }
+          })
         ),
         (error: unknown) => (error as { code: string }).code === 'dice_isolation'
       );

@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { bindResponseCitations } from '../src/domain/citationBinding.js';
 import {
-  gameplayResponseV5InputSchema,
-  gameplayResponseV5Schema,
-  gameplayResponseV5WireJsonSchema,
+  gameplayResponseInputSchema,
+  gameplayResponseSchema,
+  gameplayResponseWireJsonSchema,
 } from '../src/domain/gameplayResponse.js';
 import {
   validateKnowledgeEvidence,
@@ -31,7 +31,8 @@ const campaignId = randomUUID(),
 const quote = 'The keeper owns the key.';
 function response(evidence: unknown) {
   return {
-    version: 5,
+    combatEffects: [],
+    participantReferences: [],
     narrative: 'The keeper closes the gate. What do you do?',
     operations: [],
     rollInterpretations: [],
@@ -74,9 +75,9 @@ const context: KnowledgeValidation = {
     },
   ],
 };
-test('v5 computes omitted or wrong source offsets using UTF-16; persisted contracts remain strict', () => {
+test('the app computes omitted or wrong source offsets using UTF-16; persisted contracts remain strict', () => {
   for (const evidence of [sourceEvidence(), { ...sourceEvidence(), start: 10, end: 11 }]) {
-    const parsed = gameplayResponseV5InputSchema.parse(response(evidence));
+    const parsed = gameplayResponseInputSchema.parse(response(evidence));
     const bound = bindResponseCitations(parsed, context);
     const item = bound.knowledgeChanges[0]!.evidence[0]!;
     assert.equal(item.type, 'campaign_source');
@@ -87,20 +88,18 @@ test('v5 computes omitted or wrong source offsets using UTF-16; persisted contra
     validateKnowledgeEvidence(bound.knowledgeChanges[0]!, context);
     assert.deepEqual(bound.narrative, parsed.narrative);
     assert.deepEqual(bound.operations, parsed.operations);
-    assert.equal(gameplayResponseV5Schema.safeParse(bound).success, true);
+    assert.equal(gameplayResponseSchema.safeParse(bound).success, true);
   }
-  assert.equal(gameplayResponseV5Schema.safeParse(response(sourceEvidence())).success, false);
-  const schema = JSON.stringify(gameplayResponseV5WireJsonSchema);
+  assert.equal(gameplayResponseSchema.safeParse(response(sourceEvidence())).success, false);
+  const schema = JSON.stringify(gameplayResponseWireJsonSchema);
   assert.match(schema, /application calculates offsets/);
   assert.deepEqual(
-    nativeGameplaySchema({ schema: gameplayResponseV5WireJsonSchema } as never, true).parse(
-      response(sourceEvidence())
-    ),
+    nativeGameplaySchema().parse(response(sourceEvidence())),
     response(sourceEvidence())
   );
 });
 test('quote binding deduplicates overlapping spans but rejects ambiguous, unsupplied and forged evidence', () => {
-  const parsed = gameplayResponseV5InputSchema.parse(response(sourceEvidence()));
+  const parsed = gameplayResponseInputSchema.parse(response(sourceEvidence()));
   assert.doesNotThrow(() =>
     bindResponseCitations(parsed, {
       ...context,
@@ -162,7 +161,7 @@ test('book citations bind newer current-rule receipts without requiring the turn
   };
   const raw = response({ type: 'book', citation });
   raw.ruleCitations = [citation] as never;
-  const parsed = gameplayResponseV5InputSchema.parse(raw);
+  const parsed = gameplayResponseInputSchema.parse(raw);
   const bound = bindResponseCitations(parsed, {
     campaignId,
     turnId,
@@ -209,7 +208,8 @@ test('mutation repair changes only invalid expected value and retains proposed v
     },
   ];
   const raw = {
-    version: 5 as const,
+    combatEffects: [],
+    participantReferences: [],
     narrative: 'Keeper introduces himself as Mira. What do you do?',
     operations: [
       { op: 'set', characterId: id, field: 'name', expected: 'Incorrect name', value: 'Mira' },
@@ -238,7 +238,7 @@ test('mutation repair changes only invalid expected value and retains proposed v
   const repaired = await validateWithFieldRepair(
     raw,
     async (input) => {
-      applyResponse(campaign, gameplayResponseV5InputSchema.parse(input), turnId);
+      applyResponse(campaign, gameplayResponseInputSchema.parse(input), turnId);
     },
     generator,
     settings
@@ -249,7 +249,7 @@ test('mutation repair changes only invalid expected value and retains proposed v
   assert.deepEqual(repaired.operations[1], raw.operations[1]);
   assert.equal(campaign.characters[0]!.name, 'Keeper');
   assert.equal(
-    applyResponse(campaign, gameplayResponseV5InputSchema.parse(repaired), turnId).campaign
+    applyResponse(campaign, gameplayResponseInputSchema.parse(repaired), turnId).campaign
       .characters[0]!.name,
     'Mira'
   );
@@ -272,7 +272,7 @@ test('field repair corrects one citation and preserves narrative, hidden facts a
   const result = await validateWithFieldRepair(
     original,
     async (raw) => {
-      const parsed = gameplayResponseV5InputSchema.parse(raw);
+      const parsed = gameplayResponseInputSchema.parse(raw);
       bindResponseCitations(parsed, context);
     },
     generator,
@@ -322,7 +322,7 @@ test('repairs all invalid citations together before the retry budget, preserving
   ];
   const snapshot = structuredClone(original);
   assert.throws(
-    () => bindResponseCitations(gameplayResponseV5InputSchema.parse(original), context),
+    () => bindResponseCitations(gameplayResponseInputSchema.parse(original), context),
     (error: unknown) =>
       error instanceof ResponseFieldProblems &&
       JSON.stringify(error.problems.map((problem) => problem.path)) === JSON.stringify(paths)
@@ -339,7 +339,7 @@ test('repairs all invalid citations together before the retry budget, preserving
   const result = await validateWithFieldRepair(
     original,
     async (candidate) => {
-      const bound = bindResponseCitations(gameplayResponseV5InputSchema.parse(candidate), context);
+      const bound = bindResponseCitations(gameplayResponseInputSchema.parse(candidate), context);
       applyResponse(campaign, bound, turnId, context);
     },
     generator,
@@ -416,7 +416,7 @@ test('batched citation repair retains the two-call limit when corrections remain
       validateWithFieldRepair(
         original,
         async (candidate) => {
-          bindResponseCitations(gameplayResponseV5InputSchema.parse(candidate), context);
+          bindResponseCitations(gameplayResponseInputSchema.parse(candidate), context);
         },
         generator,
         settings
@@ -471,7 +471,7 @@ test('quota, cancellation and ownership failures stop repair; no generated scene
   assert.equal(KnowledgeOrigin.Source, original.knowledgeChanges[0]!.origin);
 });
 
-test('v6 combat links are correctable but prepared identities and receipts are not', () => {
+test('combat links are correctable but prepared identities and receipts are not', () => {
   const characterId = '11111111-1111-4111-8111-111111111111';
   const receipt = '22222222-2222-4222-8222-222222222222';
   const original = {

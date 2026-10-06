@@ -10,7 +10,9 @@ import { TurnStatus } from '../src/domain/options.js';
 import { RuleSystemKind, DEFAULT_RULE_SYSTEM_ID, emptyRuleColumns } from '../src/domain/rules.js';
 import type { Turn, Memory } from '../src/domain/types.js';
 import type { Generator } from '../src/providers/service.js';
+import { Problem } from '../src/errors.js';
 
+const GAMEPLAY_REACHED = 'Synthetic gameplay reached';
 async function execute(
   count: number,
   options: { missing?: boolean; retry?: boolean; fail?: boolean } = {}
@@ -45,7 +47,7 @@ async function execute(
     settings: campaign.settings,
     createdAt: '',
     completedAt: null,
-    context: buildContext(campaign, prior, 'Current action', [], Infinity),
+    context: buildContext(campaign, prior, 'Current action', []),
     ...(options.retry ? { retryOfTurnId: randomUUID() } : {}),
   };
   if (options.missing) current.context!.prompt = '';
@@ -76,7 +78,27 @@ async function execute(
             },
           ],
         };
-      if (sql.startsWith('INSERT INTO snapshots')) return { rows: [] };
+      if (sql.startsWith('SELECT owner,status,lease_until,document FROM turns'))
+        return {
+          rows: [
+            {
+              owner: ownerId,
+              status: TurnStatus.Running,
+              lease_until: new Date(Date.now() + 60000),
+              document: current,
+            },
+          ],
+        };
+      // Dice session bookkeeping and empty receipt reads for the owned gameplay attempt.
+      if (
+        [
+          'INSERT INTO dice_sessions',
+          'INSERT INTO dice_attempts',
+          'SELECT * FROM dice_records',
+        ].some((prefix) => sql.startsWith(prefix)) ||
+        /FROM combat_prepar/.test(sql)
+      )
+        return { rows: [] };
       throw new Error(`Unexpected synthetic query: ${sql}`);
     },
   } as unknown as PoolClient;
@@ -96,14 +118,15 @@ async function execute(
   } as unknown as Store;
   const generator: Generator = {
     capacity: async (_settings, ceiling = Infinity) => ceiling,
-    generate: async (_settings, prompt, schema) => {
-      if ('text' in (schema as { properties: object }).properties) {
-        summaries.push(JSON.parse(prompt).turns.map((turn: { id: string }) => turn.id));
-        if (options.fail) throw new Error('Synthetic summarizer failure');
-        return { text: 'Summary of older events' };
-      }
+    generate: async (_settings, prompt) => {
+      summaries.push(JSON.parse(prompt).turns.map((turn: { id: string }) => turn.id));
+      if (options.fail) throw new Error('Synthetic summarizer failure');
+      return { text: 'Summary of older events' };
+    },
+    // Records the delivered gameplay prompt; completion is covered by the database tests.
+    generateOwnedGameplay: async (_settings, prompt) => {
       gameplay.push(prompt);
-      return { version: 1, narrative: 'Delivered new scene.', operations: [] };
+      throw new Problem(409, 'synthetic_stop', GAMEPLAY_REACHED);
     },
   };
   const service = new TurnService(store, generator);
@@ -115,7 +138,7 @@ async function execute(
 test('protected-only history never invokes compaction, including a missing initial prompt', async () => {
   for (const count of [0, 1, 3]) {
     const result = await execute(count, { missing: true });
-    assert.equal(result.current.status, TurnStatus.Completed, result.current.error ?? 'failed');
+    assert.equal(result.current.error, GAMEPLAY_REACHED);
     assert.equal(result.summaries.length, 0);
     assert.equal(JSON.parse(result.gameplay[0]!).history.length, count);
   }
@@ -123,7 +146,7 @@ test('protected-only history never invokes compaction, including a missing initi
 test('one older turn compacts and multiple batches stop before the latest three', async () => {
   for (const count of [4, 10]) {
     const result = await execute(count);
-    assert.equal(result.current.status, TurnStatus.Completed, result.current.error ?? 'failed');
+    assert.equal(result.current.error, GAMEPLAY_REACHED);
     assert.deepEqual(
       result.summaries.flat(),
       result.prior.slice(0, -3).map((t) => t.id)
@@ -141,7 +164,7 @@ test('one older turn compacts and multiple batches stop before the latest three'
 });
 test('retry retains frozen context and does not compact history', async () => {
   const result = await execute(4, { retry: true });
-  assert.equal(result.current.status, TurnStatus.Completed, result.current.error ?? 'failed');
+  assert.equal(result.current.error, GAMEPLAY_REACHED);
   assert.equal(result.summaries.length, 0);
   assert.equal(result.gameplay[0], result.frozenPrompt);
 });

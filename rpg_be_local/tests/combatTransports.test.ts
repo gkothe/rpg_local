@@ -6,13 +6,13 @@ import path from 'node:path';
 import { generateClaudeDice } from '../src/providers/claudeDice.js';
 import { runCodexDicePhases } from '../src/providers/codexDice.js';
 import { generateAntigravityDice } from '../src/providers/antigravityDice.js';
-import { GameplayTools } from '../src/providers/gameplayTools.js';
-import { gameplayResponseV6WireJsonSchema } from '../src/domain/gameplayResponse.js';
+import { gameplayResponseWireJsonSchema } from '../src/domain/gameplayResponse.js';
+import { ownedTools } from './ownedGameplayFixture.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import { freezeKnowledge } from '../src/domain/knowledgeRecall.js';
 
 // Synthetic CLIs only; no real provider is called.
-const response = `{version:6,narrative:'Two soldiers step forward.',operations:[],rollInterpretations:[],ruleCitations:[],knowledgeChanges:[],operationExplanations:[],combatEffects:[],participantReferences:[]}`;
+const response = `{narrative:'Two soldiers step forward.',operations:[],rollInterpretations:[],ruleCitations:[],knowledgeChanges:[],operationExplanations:[],combatEffects:[],participantReferences:[]}`;
 const batch = `JSON.parse(process.env.RPG_COMBAT_BATCH)`;
 const claude = `
 const args=process.argv.slice(2);
@@ -81,28 +81,25 @@ function registry(prepared: unknown[]) {
   const unexpected = async (): Promise<never> => {
     throw Error('Unexpected dice');
   };
-  const tools = new GameplayTools({
-    book: false,
+  const tools = ownedTools({
     roll: unexpected,
-    assertActive: async () => {},
-    knowledge: freezeKnowledge(newCampaign({ name: 'Frozen' }), 6, true),
+    knowledge: freezeKnowledge(newCampaign({ name: 'Frozen' }), true),
     prepareCombat: async (input) => {
       prepared.push(input);
       return { receiptId: 'fixture', encounterId: 'fixture' };
     },
   });
   return {
-    unexpected,
     adapter: {
       dispatch: tools.call,
       definitions: tools.definitions,
-      schema: gameplayResponseV6WireJsonSchema,
+      schema: gameplayResponseWireJsonSchema,
       systemPrompt: 'ENVELOPE_NATIVE',
     },
   };
 }
 
-test('all native transports carry a multi-kilobyte v6 combat_prepare batch through the owned registry', async () => {
+test('all native transports carry a multi-kilobyte combat_prepare batch through the owned registry', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'rpg-v6-adapter-test-'));
   try {
     for (const [name, script, string] of [
@@ -112,7 +109,7 @@ test('all native transports carry a multi-kilobyte v6 combat_prepare batch throu
       ['agy', antigravity, true],
     ] as const) {
       const prepared: unknown[] = [];
-      const { adapter, unexpected } = registry(prepared);
+      const { adapter } = registry(prepared);
       const filename = path.join(directory, `${name}.mjs`);
       await writeFile(filename, script);
       const executable = { binary: process.execPath, prefix: [filename] };
@@ -126,39 +123,11 @@ test('all native transports carry a multi-kilobyte v6 combat_prepare batch throu
       };
       const result =
         name === 'claude'
-          ? await generateClaudeDice(
-              executable,
-              settings,
-              'DATA',
-              directory,
-              env,
-              unexpected,
-              undefined,
-              adapter
-            )
+          ? await generateClaudeDice(executable, settings, 'DATA', directory, env, adapter)
           : name === 'codex'
-            ? await runCodexDicePhases(
-                executable,
-                settings,
-                'DATA',
-                directory,
-                env,
-                {},
-                unexpected,
-                undefined,
-                adapter
-              )
-            : await generateAntigravityDice(
-                executable,
-                settings,
-                'DATA',
-                directory,
-                env,
-                unexpected,
-                undefined,
-                adapter
-              );
-      assert.equal((result as { version: number }).version, 6, name);
+            ? await runCodexDicePhases(executable, settings, 'DATA', directory, env, {}, adapter)
+            : await generateAntigravityDice(executable, settings, 'DATA', directory, env, adapter);
+      assert.equal((result as { narrative: string }).narrative, 'Two soldiers step forward.', name);
       assert.deepEqual(prepared, [input], name);
     }
   } finally {
@@ -170,7 +139,7 @@ test('Antigravity rejects an oversize combat_prepare envelope before dispatch', 
   const directory = await mkdtemp(path.join(os.tmpdir(), 'rpg-v6-agy-oversize-'));
   try {
     const prepared: unknown[] = [];
-    const { adapter, unexpected } = registry(prepared);
+    const { adapter } = registry(prepared);
     const filename = path.join(directory, 'agy.mjs');
     await writeFile(filename, antigravity);
     // ~1.2 MB of UTF-8 although well under one million JavaScript characters.
@@ -182,8 +151,6 @@ test('Antigravity rejects an oversize combat_prepare envelope before dispatch', 
         'DATA',
         directory,
         { ...process.env, RPG_COMBAT_BATCH: JSON.stringify(input), RPG_COMBAT_OVERSIZE: '1' },
-        unexpected,
-        undefined,
         adapter
       )
     );

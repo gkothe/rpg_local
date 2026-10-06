@@ -2,7 +2,6 @@ import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
 import { RuleStore, ruleContent, ruleContext } from './ruleStore.js';
 import { RulePreview } from './rulePreview.js';
-import { RULE_BACKUP_FORMAT_VERSION } from '../domain/versions.js';
 import {
   RULE_COLUMNS,
   RULE_LIMITS,
@@ -24,7 +23,6 @@ import { Problem, conflict } from '../errors.js';
 const backupSchema = z
   .object({
     format: z.literal('local-rpg-rules'),
-    version: z.literal(RULE_BACKUP_FORMAT_VERSION),
     system: z
       .object({
         systemKey: ruleSlugSchema,
@@ -61,7 +59,6 @@ export class RuleBackup {
     const system = await this.rules.get(id);
     const backup = {
       format: 'local-rpg-rules',
-      version: RULE_BACKUP_FORMAT_VERSION,
       system: {
         systemKey: system.systemKey,
         systemName: system.systemName,
@@ -81,9 +78,10 @@ export class RuleBackup {
     const started = Date.now();
     let backup: z.infer<typeof backupSchema>;
     try {
-      backup = backupSchema.parse(
-        JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
-      );
+      const raw: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      if (raw && typeof raw === 'object' && 'version' in raw)
+        throw new Error('This backup was exported by an older app and can no longer be restored');
+      backup = backupSchema.parse(raw);
       const { system } = backup;
       validateRuleContent(system.content as RuleContent, system.kind);
       if (

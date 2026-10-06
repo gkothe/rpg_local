@@ -62,7 +62,12 @@ export function parseRuleBook(files: RuleUpload[]): ParsedRuleBook {
   if (totalBytes > RULE_LIMITS.importBytes) throw new Error('Combined import byte limit exceeded');
   const manifestFile = byName.get('manifest.json');
   if (!manifestFile) throw new Error('manifest.json:1: Missing manifest');
-  const manifest = ruleBookManifestSchema.parse(JSON.parse(decode(manifestFile)));
+  const rawManifest: unknown = JSON.parse(decode(manifestFile));
+  if (rawManifest && typeof rawManifest === 'object' && 'version' in rawManifest)
+    throw new Error(
+      'manifest.json:1: This manifest was prepared by an older app; regenerate it with npm run rules:manifest'
+    );
+  const manifest = ruleBookManifestSchema.parse(rawManifest);
   if (byName.size !== manifest.columns.length + 1)
     throw new Error('Manifest must list exactly the uploaded column files');
   const columns = emptyRuleColumns();

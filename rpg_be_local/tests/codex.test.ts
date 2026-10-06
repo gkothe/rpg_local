@@ -12,7 +12,8 @@ import {
   parseCodexPayload,
 } from '../src/providers/codex.js';
 import { parseProviderOutput } from '../src/providers/adapters.js';
-import { responseSchema } from '../src/domain/schemas.js';
+import { gameplayResponseSchema } from '../src/domain/gameplayResponse.js';
+import { emptyResponse } from './ownedGameplayFixture.js';
 
 const metadata = {
   models: [
@@ -181,13 +182,13 @@ test('Codex final output requires one successful turn without an app input-token
 
 test('Codex strict transport preserves arbitrary sheet values without bypassing domain validation', () => {
   const response = {
-    version: 1,
+    ...emptyResponse,
     narrative: 'Mira heals.',
     operations: [{ op: 'state', expected: {}, value: { arbitrary: ['north', { clue: 47 }] } }],
   };
   const decoded = parseCodexPayload(JSON.stringify({ payload_json: JSON.stringify(response) }));
-  assert.deepEqual(responseSchema.parse(decoded), response);
+  assert.deepEqual(gameplayResponseSchema.parse(decoded), response);
   assert.throws(() => parseCodexPayload('{"payload_json":"not JSON"}'));
   assert.throws(() => parseCodexPayload('{"payload_json":"{}","unexpected":true}'));
-  assert.throws(() => responseSchema.parse(parseCodexPayload('{"payload_json":"{}"}')));
+  assert.throws(() => gameplayResponseSchema.parse(parseCodexPayload('{"payload_json":"{}"}')));
 });

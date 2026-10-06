@@ -11,7 +11,7 @@ it('shows how pins, scene mentions and book mode change the illustrated selectio
   expect(screen.getByText('Pinned excerpt included')).toBeVisible();
   await userEvent.click(screen.getByLabelText('Use book mode'));
   expect(screen.getByText('Book overview included')).toBeVisible();
-  await userEvent.click(screen.getByText('Complete v6 final proposal'));
+  await userEvent.click(screen.getByText('Complete final proposal'));
   expect(screen.getByLabelText('Final proposal JSON')).toHaveTextContent('"expected": {');
   await userEvent.click(screen.getByText('Combat example: two soldiers, two sheets'));
   expect(screen.getByLabelText('Combat proposal JSON')).toHaveTextContent('"combatEffects": [');

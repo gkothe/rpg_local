@@ -1,6 +1,4 @@
 import { responseSchemaExample } from './responseSchemaExample';
-import { responseSchemaV5Example } from './responseSchemaV5Example';
-import { responseSchemaV6Example } from './responseSchemaV6Example';
 // Authored teaching fixtures, never submitted to a provider or campaign API.
 export const ids = {
   player: '22222222-2222-4222-8222-222222222222',
@@ -27,8 +25,8 @@ export const npc = {
   inventory: {},
   description: { role: 'Ferryman' },
 };
+// A scene without combat leaves the combat links empty.
 export const proposal = {
-  version: 4 as const,
   narrative: 'Mira crosses the bridge, scraping her arm on the broken rail.',
   operations: [
     {
@@ -44,18 +42,11 @@ export const proposal = {
       rollId: ids.roll,
       explanation:
         'The recorded roll is interpreted as a costly success in this illustrative scene.',
+      afterParagraph: 1,
     },
   ],
   ruleCitations: [],
   knowledgeChanges: [],
-};
-export const proposalV5 = {
-  ...proposal,
-  version: 5 as const,
-  rollInterpretations: proposal.rollInterpretations.map((entry) => ({
-    ...entry,
-    afterParagraph: 1,
-  })),
   operationExplanations: [
     {
       operationIndex: 0,
@@ -67,6 +58,8 @@ export const proposalV5 = {
       visibility: 'player',
     },
   ],
+  combatEffects: [],
+  participantReferences: [],
 };
 export const knowledgeRecord = {
   id: '66666666-6666-4666-8666-666666666666',
@@ -172,20 +165,31 @@ export function examplePayload(pinned: boolean, mentioned: boolean, book: boolea
       ...(book
         ? { rulesOverview: 'Bridge checks: consult the selected book before resolving.' }
         : {}),
+      knowledge: [],
       pinnedRules: pinned
         ? [
             {
               id: ids.source,
               version: 1,
+              text: 'The ferryman offers a safe crossing.',
               name: 'River town notes',
               start: 0,
               end: 36,
-              text: 'The ferryman offers a safe crossing.',
             },
           ]
         : [],
+      campaignSources: [
+        {
+          id: ids.source,
+          version: 1,
+          name: 'River town notes',
+          purpose: 'reference',
+          sectionCount: 1,
+          sections: [{ sectionIndex: 0, title: 'Section 1', headings: [], supplied: pinned }],
+        },
+      ],
+      campaignSourceSeeds: [],
       characters: mentioned ? [player, npc] : [player],
-      knowledge: [],
       state: { location: 'North bridge' },
       schema: responseSchemaExample,
       action: mentioned ? 'I ask Ivo for help and cross the bridge.' : 'I cross the bridge.',
@@ -201,41 +205,7 @@ export function examplePayload(pinned: boolean, mentioned: boolean, book: boolea
   };
 }
 
-export function examplePayloadV5(pinned: boolean, mentioned: boolean, book: boolean) {
-  const legacy = examplePayload(pinned, mentioned, book);
-  return {
-    ...legacy,
-    mandatory: {
-      ...legacy.mandatory,
-      campaignSources: [
-        {
-          id: ids.source,
-          version: 1,
-          name: 'River town notes',
-          purpose: 'reference',
-          sectionCount: 1,
-          sections: [{ sectionIndex: 0, title: 'Section 1', headings: [], supplied: pinned }],
-        },
-      ],
-      campaignSourceSeeds: [],
-      schema: responseSchemaV5Example,
-    },
-  };
-}
-
-export function examplePayloadV6(pinned: boolean, mentioned: boolean, book: boolean) {
-  const v5 = examplePayloadV5(pinned, mentioned, book);
-  return { ...v5, mandatory: { ...v5.mandatory, schema: responseSchemaV6Example } };
-}
-// Version 6 adds combat links; a scene without combat leaves them empty.
-export const proposalV6 = {
-  ...proposalV5,
-  version: 6 as const,
-  combatEffects: [],
-  participantReferences: [],
-};
-
-// Illustrative v6 ambush: two soldiers from one description are two sheets with their own IDs.
+// Illustrative ambush: two soldiers from one description are two sheets with their own IDs.
 export const combatIds = {
   soldierA: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
   soldierB: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
@@ -283,7 +253,6 @@ export const combatPrepareResult = {
   receiptId: combatIds.receipt,
   encounterId: combatIds.encounter,
   encounter: 'new',
-  legacyCombat: false,
   participants: [
     {
       characterId: ids.player,
@@ -315,8 +284,7 @@ export const combatRollArgs = {
   actorId: ids.player,
   targetId: combatIds.soldierA,
 };
-export const combatProposalV6 = {
-  version: 6 as const,
+export const combatProposal = {
   narrative:
     'Two toll soldiers step out with spears raised.\n\nMira lunges past the first spear and cuts the nearest soldier.',
   operations: [
@@ -335,7 +303,6 @@ export const combatProposalV6 = {
       value: {
         location: 'North bridge',
         combat: {
-          trackingVersion: 1,
           id: combatIds.encounter,
           active: true,
           round: 1,

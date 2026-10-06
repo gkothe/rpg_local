@@ -6,7 +6,7 @@ const traceDetails = [
   'The tool registry checks the arguments and confirms that the turn is still active. It rejects unknown tools and runs accepted calls one at a time.',
   'The app service carries out the request. The examples below show which calls use the database and which use the fixed copy in memory.',
   'The app sends the result back through local HTTP MCP for Claude and Antigravity, or stdio tool calls for Codex. The model can then continue its response.',
-  'The final v6 proposal refers to saved rolls, rule-read receipts and prepared combatant IDs. The app still needs to check and save the gameplay changes in a separate transaction.',
+  'The final proposal refers to saved rolls, rule-read receipts and prepared combatant IDs. The app still needs to check and save the gameplay changes in a separate transaction.',
 ];
 export default function ToolExplorer({
   selected,

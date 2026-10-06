@@ -3,14 +3,13 @@ import { z } from 'zod';
 import { Problem } from '../errors.js';
 import { characterInput } from './schemas.js';
 import { CharacterType, OPERATION_KIND, CHARACTER_FIELD } from './options.js';
-import { knowledgeProvenanceV5Schema } from './knowledge.js';
+import { knowledgeIntroductionSchema } from './knowledge.js';
 import { mapResponseCitations } from './citationInput.js';
 import { MAX_ENTITY_NAME_CHARS, MAX_LONG_TEXT_CHARS } from './limits.js';
 import { ResponseFieldProblem, type ResponsePath } from './responseFields.js';
 import type { Campaign, Character, JsonObject } from './types.js';
 import type { DiceRecord } from './dice.js';
 
-export const COMBAT_TRACKING_VERSION = 1;
 export const COMBAT_PREPARE_TOOL_NAME = 'combat_prepare';
 export enum CombatFieldKind {
   Vitality = 'vitality',
@@ -96,7 +95,6 @@ export type CombatParticipant = z.infer<typeof combatParticipantSchema>;
 const uniqueIds = (ids: readonly string[]) => new Set(ids).size === ids.length;
 export const combatEncounterSchema = z
   .object({
-    trackingVersion: z.literal(COMBAT_TRACKING_VERSION),
     id: z.uuid(),
     active: z.boolean(),
     round: z.number().int().nonnegative(),
@@ -121,7 +119,7 @@ export const draftCombatantSchema = z
     localKey,
     label,
     character: npcDraftSchema,
-    introduction: knowledgeProvenanceV5Schema,
+    introduction: knowledgeIntroductionSchema,
     trackedFields: trackedFieldsSchema,
   })
   .strict();
@@ -165,22 +163,17 @@ export const participantReferenceSchema = z
   .strict();
 export type ParticipantReference = z.infer<typeof participantReferenceSchema>;
 
-export type CombatTracking =
-  { kind: 'none' } | { kind: 'legacy' } | { kind: 'structured'; encounter: CombatEncounter };
-/** Only an explicit tracking version is structured; older free-form combat stays legacy data. */
+export type CombatTracking = { kind: 'none' } | { kind: 'structured'; encounter: CombatEncounter };
+/** state.combat holds only the structured encounter; free-form notes belong in state.combatNotes. */
 export function combatTracking(state: JsonObject): CombatTracking {
-  const combat = state.combat;
-  if (combat === undefined) return { kind: 'none' };
-  if (
-    !combat ||
-    typeof combat !== 'object' ||
-    Array.isArray(combat) ||
-    !('trackingVersion' in combat)
-  )
-    return { kind: 'legacy' };
-  const parsed = combatEncounterSchema.safeParse(combat);
+  if (state.combat === undefined) return { kind: 'none' };
+  const parsed = combatEncounterSchema.safeParse(state.combat);
   if (!parsed.success)
-    throw new Problem(422, CombatProblem.State, 'Structured combat state is invalid');
+    throw new Problem(
+      422,
+      CombatProblem.State,
+      'state.combat must be a structured encounter; keep free-form combat notes in state.combatNotes'
+    );
   return { kind: 'structured', encounter: parsed.data };
 }
 export function structuredEncounter(state: JsonObject): CombatEncounter | null {
@@ -230,7 +223,7 @@ export type PreparedDraft = {
   localKey: string;
   label: string;
   character: NpcDraft;
-  introduction: z.infer<typeof knowledgeProvenanceV5Schema>;
+  introduction: z.infer<typeof knowledgeIntroductionSchema>;
   trackedFields: TrackedField[];
 };
 /** Session-scoped registry rebuilt from append-only preparation receipts. */
@@ -497,7 +490,7 @@ export function resolvePreparedCreate(
 
 /**
  * Manual edits may change sheet values and unrelated state, but the structured encounter is
- * owned by validated v6 responses: no creation, replacement or binding removal through PATCH.
+ * owned by validated gameplay responses: no creation, replacement or binding removal through PATCH.
  */
 export function assertManualStateEdit(current: JsonObject, next: JsonObject): void {
   const encounter = structuredEncounter(current);

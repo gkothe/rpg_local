@@ -9,7 +9,7 @@ import {
 } from '../src/domain/context.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import type { Turn } from '../src/domain/types.js';
-import { TurnStatus } from '../src/domain/options.js';
+import { CharacterType, TurnStatus } from '../src/domain/options.js';
 import { RuleSystemKind } from '../src/domain/rules.js';
 import { randomUUID } from 'node:crypto';
 import { campaignPatchSchema } from '../src/domain/schemas.js';
@@ -23,7 +23,7 @@ test('campaign description stays out of gameplay, NPC selection and memory summa
     {
       id: randomUUID(),
       name: 'Marta',
-      type: 'npc',
+      type: CharacterType.Npc,
       attributes: {},
       inventory: {},
       description: {},
@@ -31,11 +31,11 @@ test('campaign description stays out of gameplay, NPC selection and memory summa
       revision: 0,
     },
   ];
-  const prompt = JSON.parse(buildContext(campaign, [], 'Wait', [], 16000).prompt);
+  const prompt = JSON.parse(buildContext(campaign, [], 'Wait', []).prompt);
   assert.equal(Object.hasOwn(prompt.mandatory, 'description'), false);
   assert.deepEqual(prompt.mandatory.characters, []);
   assert.doesNotMatch(JSON.stringify(prompt), /silver key/);
-  const scene = JSON.parse(buildContext(campaign, [], 'Talk to Marta', [], 16000).prompt);
+  const scene = JSON.parse(buildContext(campaign, [], 'Talk to Marta', []).prompt);
   assert.equal(scene.mandatory.characters[0].name, 'Marta');
   assert.equal(Object.hasOwn(prompt.mandatory, 'pinnedFacts'), false);
   assert.equal(Object.hasOwn(campaign, 'pinnedFacts'), false);
@@ -52,35 +52,28 @@ test('campaign description stays out of gameplay, NPC selection and memory summa
   assert.equal(Object.hasOwn(summary, 'pinnedFacts'), false);
 });
 
-test('NPC-enabled v5 context freezes off-prompt sheets without adding them to prompt or changing legacy contexts', () => {
+test('context freezes off-prompt NPC sheets without adding them to the prompt', () => {
   const c = newCampaign({ name: 'NPC snapshot' });
   c.characters.push({
     id: randomUUID(),
     name: 'Marcus',
-    type: 'npc',
+    type: CharacterType.Npc,
     attributes: { strength: 3 },
     inventory: {},
     description: {},
     notes: 'NPC_PRIVATE',
     revision: 2,
   });
-  const legacy = buildContext(c, [], 'Travel', [], 16000, true, undefined, 5);
-  assert.equal(legacy.frozenKnowledge, undefined);
-  assert.doesNotMatch(legacy.systemPrompt!, /campaign_npcs_get/);
-  const context = buildContext(c, [], 'Travel', [], 16000, true, undefined, 5, true);
+  const context = buildContext(c, [], 'Travel', []);
   assert.equal(context.frozenKnowledge!.npcCharacters![0]!.attributes.strength, 3);
   assert.deepEqual(JSON.parse(context.prompt).mandatory.characters, []);
   assert.doesNotMatch(JSON.stringify(context), /NPC_PRIVATE/);
   assert.match(context.systemPrompt!, /campaign_npcs_search/);
   c.characters[0]!.attributes.strength = 9;
   assert.equal(context.frozenKnowledge!.npcCharacters![0]!.attributes.strength, 3);
-  assert.equal(
-    buildContext(c, [], 'Travel', [], 16000, true, undefined, 4, true).frozenKnowledge,
-    undefined
-  );
 });
 
-test('v4 evidence spans identify only supplied source text with absolute Unicode offsets', () => {
+test('evidence spans identify only supplied source text with absolute Unicode offsets', () => {
   const c = newCampaign({ name: 'Evidence spans' });
   const id = randomUUID();
   const text = 'before 🌙 and then repeated and repeated';
@@ -107,27 +100,20 @@ test('v4 evidence spans identify only supplied source text with absolute Unicode
       end: start + 'repeated'.length,
     },
   ];
-  const context = buildContext(c, [], 'look', rules, 16000, true, undefined, 4);
+  // The first action also seeds the source catalog with its bootstrap section.
+  const played = [turn('played', 'Earlier')];
+  const context = buildContext(c, played, 'look', rules);
   assert.deepEqual(context.sourceSpans, rules);
   assert.deepEqual(JSON.parse(context.prompt).rules, rules);
   assert.equal(
     text.slice(context.sourceSpans![0]!.start, context.sourceSpans![0]!.end),
     'repeated'
   );
-  const unknownOffsets = buildContext(
-    c,
-    [],
-    'look',
-    [{ id, version: 1, text: 'repeated' }],
-    16000,
-    true,
-    undefined,
-    4
-  );
+  const unknownOffsets = buildContext(c, played, 'look', [{ id, version: 1, text: 'repeated' }]);
   assert.deepEqual(unknownOffsets.sourceSpans, []);
 });
 
-test('v4 context separates exact instructions from reference data and selects explicit schema', () => {
+test('context separates exact instructions from reference data and supplies the response schema', () => {
   const c = newCampaign({ name: 'Envelope' });
   c.instructions = '  CAMPAIGN_EXACT\n\t';
   const rules = {
@@ -142,7 +128,7 @@ test('v4 context separates exact instructions from reference data and selects ex
     instructions: ' \nSELECTED_EXACT\t ',
     overview: '',
   };
-  const context = buildContext(c, [], 'look', [], 100, true, rules, 4);
+  const context = buildContext(c, [], 'look', [], rules);
   assert.ok(context.systemPrompt?.includes(rules.instructions));
   assert.ok(context.systemPrompt?.includes(c.instructions));
   assert.match(context.systemPrompt!, /Narrative writing guidance:/);
@@ -151,12 +137,12 @@ test('v4 context separates exact instructions from reference data and selects ex
     /SELECTED_EXACT|CAMPAIGN_EXACT|Application integration contract|Narrative writing guidance/
   );
   const data = JSON.parse(context.prompt).mandatory;
-  assert.equal(data.schema.properties.version.const, 4);
+  assert.ok(data.schema.properties.combatEffects);
+  assert.equal(data.schema.properties.version, undefined);
   assert.equal(data.instructions, undefined);
   assert.equal(data.systemInstructions, undefined);
   assert.equal(data.campaignInstructions, undefined);
   assert.deepEqual(data.knowledge, []);
-  assert.equal(context.promptContractVersion, 4);
 });
 
 test('book context fits ordinary instructions and a character without the old byte cap', () => {
@@ -165,7 +151,7 @@ test('book context fits ordinary instructions and a character without the old by
     {
       id: 'player',
       name: 'Sigurd',
-      type: 'player',
+      type: CharacterType.Player,
       attributes: { dossier: 'x'.repeat(2800) },
       inventory: {},
       description: {},
@@ -185,14 +171,16 @@ test('book context fits ordinary instructions and a character without the old by
     instructions: 'x'.repeat(5961),
     overview: 'Available rule categories.',
   };
-  const context = buildContext(c, [], 'start', [], 16000, true, rules);
+  const context = buildContext(c, [], 'start', [], rules);
   assert.ok(Buffer.byteLength(context.prompt) > 8000);
-  assert.ok(context.estimatedTokens <= 16000);
-  assert.equal(JSON.parse(context.prompt).mandatory.systemInstructions, rules.instructions);
+  // Book prompts use the UTF-8 bytes / 2 planning heuristic.
+  assert.equal(context.estimatedTokens, Math.ceil(Buffer.byteLength(context.prompt) / 2));
+  assert.ok(context.systemPrompt!.includes(rules.instructions));
+  assert.equal(JSON.parse(context.prompt).mandatory.rulesOverview, rules.overview);
   c.state = { oversized: 'x'.repeat(40000) };
-  const large = buildContext(c, [], 'start', [], 16000, true, rules);
+  const large = buildContext(c, [], 'start', [], rules);
   assert.equal(JSON.parse(large.prompt).mandatory.state.oversized, c.state.oversized);
-  assert.ok(large.estimatedTokens > 16000);
+  assert.ok(large.estimatedTokens > context.estimatedTokens + 16000);
 });
 const turn = (id: string, narrative: string): Turn => ({
   id,
@@ -223,26 +211,24 @@ test('gameplay history contains only delivered text and excludes failed and undo
   ] as Turn['rolls'];
   const failed = { ...turn('failed', 'FAILED_CANARY'), status: TurnStatus.Failed };
   const undone = { ...turn('undone', 'UNDONE_CANARY'), undone: true };
-  const context = buildContext(c, [completed, failed, undone], 'Next', [], 16000, true);
+  const context = buildContext(c, [completed, failed, undone], 'Next', []);
   assert.match(context.prompt, /rollInterpretations/);
   assert.deepEqual(JSON.parse(context.prompt).history, [{ player: 'look', gm: 'Saved outcome' }]);
   assert.doesNotMatch(context.prompt, /FAILED_CANARY|UNDONE_CANARY/);
   assert.deepEqual(context.historyIds, ['completed']);
-  assert.ok(context.estimatedTokens <= 16000);
   assert.doesNotMatch(compactionBatch(c, [completed], 16000).prompt, /roll_dice/);
 });
 test('preserves uncovered turns and campaign state even above the optional retrieval target', () => {
   const c = newCampaign({ name: 'A' });
   c.state = { establishedFact: 'Marta has a silver key' };
   const history = [turn('1', 'Door open')];
-  const context = buildContext(c, history, 'walk', [], 16000);
+  const context = buildContext(c, history, 'walk', []);
   assert.ok(context.prompt.includes('silver key'));
   assert.deepEqual(context.historyIds, ['1']);
-  assert.ok(context.estimatedTokens <= 16000);
-  const large = buildContext(c, [turn('2', 'x'.repeat(70000))], 'go', [], 16000);
+  const large = buildContext(c, [turn('2', 'x'.repeat(70000))], 'go', []);
   assert.deepEqual(large.historyIds, ['2']);
   assert.ok(large.prompt.includes('x'.repeat(70000)));
-  assert.ok(large.estimatedTokens > 16000);
+  assert.ok(large.estimatedTokens > context.estimatedTokens + 60000);
 });
 test('memory coverage and undone events are excluded and compaction stays bounded without partial turns', () => {
   const c = newCampaign({ name: 'A' });
@@ -254,7 +240,7 @@ test('memory coverage and undone events are excluded and compaction stays bounde
     turn('5', 'recent'),
     turn('6', 'recent'),
   ];
-  const b = buildContext(c, h, 'go', [], 16000);
+  const b = buildContext(c, h, 'go', []);
   assert.deepEqual(b.historyIds, ['2', '4', '5', '6']);
   assert.ok(!b.prompt.includes('secret old'));
   const batch = compactionBatch(c, h, 8000);
@@ -270,7 +256,7 @@ test('memory coverage and undone events are excluded and compaction stays bounde
   );
   assert.ok(largeBatch.prompt.includes('x'.repeat(40000)));
   c.memory.valid = false;
-  assert.deepEqual(buildContext(c, h, 'go', [], 16000).historyIds, ['1', '2', '4', '5', '6']);
+  assert.deepEqual(buildContext(c, h, 'go', []).historyIds, ['1', '2', '4', '5', '6']);
 });
 
 test('retrieved relevant sections are included even when the old capacity estimate is tiny', () => {
@@ -279,7 +265,7 @@ test('retrieved relevant sections are included even when the old capacity estima
     { id: randomUUID(), version: 1, text: 'Relevant rule. '.repeat(3000) },
     { id: randomUUID(), version: 1, text: 'Other relevant rule. '.repeat(3000) },
   ];
-  const prompt = JSON.parse(buildContext(campaign, [], 'act', sections, 1).prompt);
+  const prompt = JSON.parse(buildContext(campaign, [], 'act', sections).prompt);
   assert.deepEqual(prompt.rules, sections);
 });
 
@@ -310,7 +296,7 @@ test('three recent pairs survive legacy memory coverage without adding technical
     valid: true,
     createdAt: '',
   };
-  const manifest = buildContext(c, history, 'Current action', [], 1);
+  const manifest = buildContext(c, history, 'Current action', []);
   const payload = JSON.parse(manifest.prompt);
   assert.deepEqual(
     payload.history,
@@ -321,7 +307,7 @@ test('three recent pairs survive legacy memory coverage without adding technical
   assert.equal(payload.mandatory.action, 'Current action');
   assert.doesNotMatch(manifest.prompt, /RAW_CANARY/);
   c.memory.valid = false;
-  assert.equal(JSON.parse(buildContext(c, history, 'Now', [], 1).prompt).history.length, 10);
+  assert.equal(JSON.parse(buildContext(c, history, 'Now', []).prompt).history.length, 10);
 });
 
 test('selection preserves older uncovered backlog and deduplicates completed turn IDs', () => {
@@ -371,7 +357,7 @@ test('compaction excludes protected pairs even when they are huge; one older tur
   assert.equal(JSON.parse(compactionBatch(c, [old, ...recent]).prompt).priorMemory, 'Prior memory');
 });
 
-test('v6 context includes every active encounter participant by ID without a lexical mention', () => {
+test('context includes every active encounter participant by ID without a lexical mention', () => {
   const c = newCampaign({ name: 'Ambush' });
   const guard = (name: string) => ({
     id: randomUUID(),
@@ -390,7 +376,6 @@ test('v6 context includes every active encounter participant by ID without a lex
   const fields = [{ path: ['health', 'damage'], kind: 'damage', label: 'Damage' }];
   c.state = {
     combat: {
-      trackingVersion: 1,
       id: randomUUID(),
       active: true,
       round: 2,
@@ -401,23 +386,19 @@ test('v6 context includes every active encounter participant by ID without a lex
       })),
     },
   };
-  const ids = (version: number) =>
+  const ids = () =>
     (
-      JSON.parse(buildContext(c, [], 'I dodge', [], 16000, true, undefined, version, true).prompt)
-        .mandatory.characters as { id: string }[]
+      JSON.parse(buildContext(c, [], 'I dodge', []).prompt).mandatory.characters as { id: string }[]
     ).map((x) => x.id);
-  assert.deepEqual(ids(6), [a.id, b.id]);
-  const v6 = buildContext(c, [], 'I dodge', [], 16000, true, undefined, 6, true);
-  assert.equal(v6.promptContractVersion, 6);
-  assert.doesNotMatch(v6.prompt, /PRIVATE/);
-  assert.match(v6.systemPrompt!, /combat_prepare/);
-  assert.doesNotMatch(
-    buildContext(c, [], 'I dodge', [], 16000, true, undefined, 5, true).systemPrompt!,
-    /combat_prepare/
-  );
-  // Legacy free-form combat is never interpreted as identities.
-  c.state = { combat: { enemies: [a.id] } };
-  assert.deepEqual(ids(6), [a.id]);
+  assert.deepEqual(ids(), [a.id, b.id]);
+  const context = buildContext(c, [], 'I dodge', []);
+  assert.doesNotMatch(context.prompt, /PRIVATE/);
+  assert.match(context.systemPrompt!, /combat_prepare/);
+  // Free-form combat notes are never interpreted as identities; an ID mention still selects.
+  c.state = { combatNotes: { enemies: [a.id] } };
+  assert.deepEqual(ids(), [a.id]);
+  c.state = { combatNotes: { enemies: ['two raiders'] } };
+  assert.deepEqual(ids(), []);
   c.state = { combat: { enemies: ['two raiders'] } };
-  assert.deepEqual(ids(6), []);
+  assert.throws(ids, /combatNotes/);
 });

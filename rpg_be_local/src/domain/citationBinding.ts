@@ -7,7 +7,7 @@ import {
 } from './responseFields.js';
 import { citationPages } from './ruleCitationValidation.js';
 import type { KnowledgeValidation } from './knowledge.js';
-import type { AuditedGameplayResponse } from './gameplayResponse.js';
+import type { GameplayResponse } from './gameplayResponse.js';
 
 function occurrences(text: string, quote: string, base: number): number[] {
   const result: number[] = [];
@@ -17,7 +17,7 @@ function occurrences(text: string, quote: string, base: number): number[] {
   return result;
 }
 /** Bind exact quotes only to source material actually supplied in this frozen turn. */
-export function bindResponseCitations<T extends AuditedGameplayResponse>(
+export function bindResponseCitations<T extends GameplayResponse>(
   response: T,
   context: KnowledgeValidation
 ): T {

@@ -107,7 +107,6 @@ export interface Provider {
       supported: boolean;
       reason: string | null;
       efforts?: string[];
-      limits?: { ruleCalls: number; diceCalls: number; combinedCalls: number; promptBytes: number };
     };
   }[];
   catalogProvenance: string;

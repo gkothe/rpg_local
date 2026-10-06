@@ -84,7 +84,6 @@ test('original private book import, instructions, latest selection and explicit 
   );
   const manifest = {
     format: 'rules-book',
-    version: 1,
     markerFormatVersion: 1,
     source: { slug: 'original', title: 'Original synthetic book', pageCount: 1, pdfHash: null },
     converter: { id: 'original-fixture', version: '1' },

@@ -21,6 +21,7 @@ const input = {
   groups: [{ label: 'check', count: 3, sides: 10 }],
   reason: 'Test a check',
   declaration: 'No modifiers; target unknown',
+  scope: 'oracle',
 };
 test('dice generate individual bounded faces sequentially and never perform interpretation', () => {
   const calls: [number, number][] = [];

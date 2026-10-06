@@ -1,4 +1,3 @@
-import { ARCHIVE_FORMAT_VERSION } from '../src/domain/versions.js';
 import type { GameplayToolDispatch } from '../src/providers/gameplayTools.js';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,8 +19,12 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { ProviderService } from '../src/providers/service.js';
 import type { ProviderSettings } from '../src/domain/types.js';
-import type { RollCallback } from '../src/providers/diceProtocol.js';
-import { DICE_LIMITS } from '../src/domain/dice.js';
+import { DICE_LIMITS, type DiceResult } from '../src/domain/dice.js';
+import { emptyKnowledge, gmResponse, syntheticGenerate } from './ownedGameplayFixture.js';
+
+/** Owned roll_dice calls for checks outside combat; the transport ID identifies the request. */
+const rollWith = (tools: GameplayToolDispatch) => (input: object, id: string) =>
+  tools('roll_dice', { scope: 'oracle', ...input }, id) as Promise<DiceResult>;
 
 const enabled = process.env.NODE_ENV === 'test' && !!process.env.RPG_TEST_DATABASE_URL;
 let store: Store;
@@ -59,10 +62,9 @@ test(
     const service = new TurnService(store, {
       capacity: async () => 16000,
       gameplayCapacity: async () => 16000,
-      generate: async () => {
-        throw new Error('Unexpected no-tools call');
-      },
-      generateGameplay: async (_settings, _prompt, roll, signal) => {
+      generate: syntheticGenerate(),
+      generateOwnedGameplay: async (_settings, _prompt, _schema, _system, tools, signal) => {
+        const roll = rollWith(tools);
         await roll(
           {
             slot: 0,
@@ -130,38 +132,15 @@ test(
           throw new Problem(422, 'context_overflow', 'Fixture provider has insufficient capacity');
         return 16000;
       }
-      override async generate() {
-        return { narrative: 'Door opens' };
-      }
+      override generate = syntheticGenerate();
       override async generateOwnedGameplay(
-        settings: ProviderSettings,
-        prompt: string,
+        _settings: ProviderSettings,
+        _prompt: string,
         _schema: unknown,
         _systemPrompt: string,
         tools: GameplayToolDispatch
       ) {
-        const result = await this.generateGameplay(
-          settings,
-          prompt,
-          async (input, id) =>
-            tools('roll_dice', input, id) as Promise<import('../src/domain/dice.js').DiceResult>
-        );
-        return {
-          ...result,
-          version: 6,
-          ruleCitations: [],
-          knowledgeChanges: [],
-          operationExplanations: [],
-          combatEffects: [],
-          participantReferences: [],
-        };
-      }
-      override async generateGameplay(
-        _settings: ProviderSettings,
-        _prompt: string,
-        roll: RollCallback
-      ) {
-        const result = await roll(
+        const result = await rollWith(tools)(
           {
             slot: 0,
             groups: [{ label: 'check', count: 1, sides: 6 }],
@@ -172,12 +151,9 @@ test(
           'first'
         );
         if (this.fail) throw new Problem(502, 'fixture_failure', 'Synthetic failure');
-        return {
-          version: 2,
-          narrative: 'Door',
-          operations: [],
+        return gmResponse('Door', [], {
           rollInterpretations: [{ rollId: result.rollId, explanation: 'Interpretation' }],
-        };
+        });
       }
     }
     const providers = new FixtureProviders();
@@ -252,21 +228,17 @@ test(
     const service = new TurnService(store, {
       capacity: async () => 16000,
       gameplayCapacity: async () => 16000,
-      generate: async () => {
-        throw new Error('Unexpected no-tools call');
-      },
-      generateGameplay: async (_settings, prompt, roll) => {
+      generate: syntheticGenerate(),
+      generateOwnedGameplay: async (_settings, prompt, _schema, _system, tools) => {
+        const roll = rollWith(tools);
         assert.ok(prompt.includes('rollInterpretations'));
         const first = await roll(input, 'first');
         if (mode === 'fail')
           throw new Problem(502, 'fixture_failure', 'Synthetic failure after reveal');
         if (mode === 'unknown')
-          return {
-            version: 2,
-            narrative: 'Invalid',
-            operations: [],
+          return gmResponse('Invalid', [], {
             rollInterpretations: [{ rollId: randomUUID(), explanation: 'Unknown' }],
-          };
+          });
         const second = await roll(
           {
             ...input,
@@ -276,15 +248,16 @@ test(
           },
           'second'
         );
-        return {
-          version: 2,
-          narrative: `Faces ${first.groups[0]!.faces[0]}, ${second.groups[0]!.faces[0]}`,
-          operations: [{ op: 'state', expected: {}, value: { door: 'open' } }],
-          rollInterpretations: [first, second].map((result) => ({
-            rollId: result.rollId,
-            explanation: 'The GM interprets the trusted face',
-          })),
-        };
+        return gmResponse(
+          `Faces ${first.groups[0]!.faces[0]}, ${second.groups[0]!.faces[0]}`,
+          [{ op: 'state', expected: {}, value: { door: 'open' } }],
+          {
+            rollInterpretations: [first, second].map((result) => ({
+              rollId: result.rollId,
+              explanation: 'The GM interprets the trusted face',
+            })),
+          }
+        );
       },
     });
     const finish = async (id: string) => {
@@ -340,7 +313,8 @@ test(
         ).id
       );
       assert.equal(rejected.status, TurnStatus.Failed);
-      assert.match(rejected.error!, /acknowledge exactly/);
+      // Invalid roll references go to field repair; this fixture offers no correction.
+      assert.match(rejected.error!, /Field correction failed/);
       assert.deepEqual((await store.campaign(campaign.id)).state, { door: 'open' });
       await service.undo(campaign.id, 1);
       assert.deepEqual((await store.campaign(campaign.id)).state, {});
@@ -348,7 +322,7 @@ test(
       assert.equal((await store.turn(campaign.id, rejected.id)).diceRetry?.available, true);
       const library = new LibraryService(store);
       const archive = await library.export(campaign.id);
-      assert.equal(archive.version, ARCHIVE_FORMAT_VERSION);
+      assert.equal(Object.hasOwn(archive, 'version'), false);
       assert.equal(archive.diceRecords?.length, 3);
       const malformed = structuredClone(archive);
       malformed.diceRecords![0]!.groups[0]!.faces[0] = 7;
@@ -404,24 +378,20 @@ test(
     const service = new TurnService(store, {
       capacity: async () => 16000,
       gameplayCapacity: async () => 16000,
-      generate: async () => {
-        throw new Error('Unexpected no-tools call');
-      },
-      generateGameplay: async (_settings, _prompt, roll) => {
+      generate: syntheticGenerate(),
+      generateOwnedGameplay: async (_settings, _prompt, _schema, _system, tools) => {
+        const roll = rollWith(tools);
         const result = await roll(input, 'first');
         if (first) {
           first = false;
           reveal();
           await held;
-          await assert.rejects(roll({ ...input, slot: 1 }, 'late'), /active/);
+          await assert.rejects(roll({ ...input, slot: 1 }, 'late'), /active|cancelled/);
           lateRejected = true;
         }
-        return {
-          version: 2,
-          narrative: 'Door check',
-          operations: [],
+        return gmResponse('Door check', [], {
           rollInterpretations: [{ rollId: result.rollId, explanation: 'Interpretation' }],
-        };
+        });
       },
     });
     try {
@@ -557,7 +527,11 @@ test(
         "INSERT INTO turns(id,campaign_id,request_id,payload_hash,status,document,owner,lease_until) VALUES($1,$2,$3,'fixture','running',$4,$5,now()+interval '45 seconds')",
         [turn.id, c.id, turn.requestId, turn, ownerId]
       );
-      const sessionId = await service.createSession(turn, 'a'.repeat(64), []);
+      const sessionId = await service.createSession(turn, 'a'.repeat(64), [], {
+        systemPrompt: 'Fixture instructions',
+        knowledge: emptyKnowledge(c.id),
+        toolDefinitions: [],
+      });
       await assert.rejects(
         store.pool.query('UPDATE dice_sessions SET frozen_prompt=$2 WHERE id=$1', [
           sessionId,
@@ -570,6 +544,7 @@ test(
         groups: [{ label: 'check', count: 3, sides: 10 }],
         reason: 'Check',
         declaration: 'No modifier; target unknown',
+        scope: 'oracle',
       };
       const first = await service.roll(sessionId, turn, input);
       const records = await service.records(sessionId);
@@ -609,7 +584,7 @@ test(
       );
       await assert.rejects(service.roll(sessionId, turn, { ...input, slot: 2 }), /order/i);
       await assert.rejects(
-        service.roll(sessionId, turn, { ...input, actorId: randomUUID() }),
+        service.roll(sessionId, turn, { ...input, scope: 'character', actorId: randomUUID() }),
         /character/i
       );
       await assert.rejects(service.roll(sessionId, turn, { ...input, slot: 12 }), /input/i);
@@ -645,10 +620,9 @@ test(
     const service = new TurnService(store, {
       capacity: async () => 16000,
       gameplayCapacity: async () => 16000,
-      generate: async () => {
-        throw new Error('Unexpected no-tools call');
-      },
-      generateGameplay: async (_settings, prompt, roll) => {
+      generate: syntheticGenerate(),
+      generateOwnedGameplay: async (_settings, prompt, _schema, _system, tools) => {
+        const roll = rollWith(tools);
         calls++;
         const result = await roll(
           {
@@ -664,12 +638,11 @@ test(
         assert.match(prompt, /previous response was rejected/);
         assert.match(prompt, /Replay the original requests/);
         assert.equal(result.reused, true);
-        return {
-          version: 2,
-          narrative: 'Recovered result',
-          operations: [{ op: 'state', expected: {}, value: { recovered: true } }],
-          rollInterpretations: [{ rollId: result.rollId, explanation: 'Saved roll' }],
-        };
+        return gmResponse(
+          'Recovered result',
+          [{ op: 'state', expected: {}, value: { recovered: true } }],
+          { rollInterpretations: [{ rollId: result.rollId, explanation: 'Saved roll' }] }
+        );
       },
     });
     try {

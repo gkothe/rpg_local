@@ -17,12 +17,8 @@ import {
   type CombatAuthorization,
   type PreparedDraft,
 } from '../src/domain/combat.js';
-import { diceInputSchema, diceInputV6Schema, type DiceRecord } from '../src/domain/dice.js';
-import {
-  gameplayResponseV5Schema,
-  gameplayResponseV6Schema,
-  type GameplayResponseV6,
-} from '../src/domain/gameplayResponse.js';
+import { diceInputSchema, diceRecordSchema, type DiceRecord } from '../src/domain/dice.js';
+import { gameplayResponseSchema, type GameplayResponse } from '../src/domain/gameplayResponse.js';
 import { CharacterType } from '../src/domain/options.js';
 import { ExplanationBasis } from '../src/domain/operationExplanations.js';
 import { KnowledgeOrigin, KnowledgeVisibility } from '../src/domain/knowledge.js';
@@ -64,7 +60,6 @@ function authorize(encounterId: string, drafts: PreparedDraft[]): CombatAuthoriz
   };
 }
 const encounter = (id: string, drafts: PreparedDraft[], active = true) => ({
-  trackingVersion: 1,
   id,
   active,
   round: 1,
@@ -74,9 +69,8 @@ const encounter = (id: string, drafts: PreparedDraft[], active = true) => ({
     trackedFields: d.trackedFields,
   })),
 });
-function response(partial: Partial<GameplayResponseV6>): GameplayResponseV6 {
+function response(partial: Partial<GameplayResponse>): GameplayResponse {
   return {
-    version: 6,
     narrative: 'Two guards step forward.\n\nSteel rings out.',
     operations: [],
     rollInterpretations: [],
@@ -191,7 +185,6 @@ test('combat schemas bound paths, require vitality, and reject prototype keys an
   const duplicate = randomUUID();
   assert.equal(
     combatEncounterSchema.safeParse({
-      trackingVersion: 1,
       id: randomUUID(),
       active: true,
       round: 0,
@@ -202,11 +195,13 @@ test('combat schemas bound paths, require vitality, and reject prototype keys an
     }).success,
     false
   );
-  assert.deepEqual(combatTracking({ combat: { enemies: ['soldier'] } }), { kind: 'legacy' });
+  for (const freeForm of [{ enemies: ['soldier'] }, null, 'two raiders'])
+    assert.throws(() => combatTracking({ combat: freeForm }), /combatNotes/);
+  assert.deepEqual(combatTracking({ combatNotes: { enemies: ['soldier'] } }), { kind: 'none' });
   assert.deepEqual(combatTracking({}), { kind: 'none' });
 });
 
-test('dice v6 scopes require combat identity while v5 rejects the new fields', () => {
+test('dice scopes are required and combat rolls require combat identity', () => {
   const roll = {
     slot: 0,
     groups: [{ label: 'attack', count: 3, sides: 10 }],
@@ -216,7 +211,7 @@ test('dice v6 scopes require combat identity while v5 rejects the new fields', (
   const ids = { encounterId: randomUUID(), actorId: randomUUID(), targetId: randomUUID() };
   assert.equal(diceInputSchema.safeParse({ ...roll, scope: 'combat' }).success, false);
   assert.equal(
-    diceInputV6Schema.safeParse({
+    diceInputSchema.safeParse({
       ...roll,
       ...ids,
       scope: CombatRollScope.Combat,
@@ -226,7 +221,7 @@ test('dice v6 scopes require combat identity while v5 rejects the new fields', (
   );
   const noTarget = { ...ids, targetId: undefined };
   assert.equal(
-    diceInputV6Schema.safeParse({
+    diceInputSchema.safeParse({
       ...roll,
       ...noTarget,
       scope: CombatRollScope.Combat,
@@ -235,7 +230,7 @@ test('dice v6 scopes require combat identity while v5 rejects the new fields', (
     false
   );
   assert.equal(
-    diceInputV6Schema.safeParse({
+    diceInputSchema.safeParse({
       ...roll,
       ...noTarget,
       scope: CombatRollScope.Combat,
@@ -243,36 +238,50 @@ test('dice v6 scopes require combat identity while v5 rejects the new fields', (
     }).success,
     true
   );
+  assert.equal(diceInputSchema.safeParse({ ...roll, scope: CombatRollScope.Oracle }).success, true);
   assert.equal(
-    diceInputV6Schema.safeParse({ ...roll, scope: CombatRollScope.Oracle }).success,
-    true
-  );
-  assert.equal(
-    diceInputV6Schema.safeParse({ ...roll, scope: CombatRollScope.Oracle, actorId: ids.actorId })
+    diceInputSchema.safeParse({ ...roll, scope: CombatRollScope.Oracle, actorId: ids.actorId })
       .success,
     false
   );
-  assert.equal(diceInputV6Schema.safeParse(roll).success, false);
-});
-
-test('v6 response schema adds combat links without widening v5', () => {
-  const v6 = response({});
-  assert.equal(gameplayResponseV6Schema.safeParse(v6).success, true);
-  assert.equal(gameplayResponseV5Schema.safeParse({ ...v6, version: 5 }).success, false);
-  const v5: Record<string, unknown> = { ...v6 };
-  delete v5.combatEffects;
-  delete v5.participantReferences;
-  assert.equal(gameplayResponseV5Schema.safeParse({ ...v5, version: 5 }).success, true);
+  assert.equal(diceInputSchema.safeParse(roll).success, false);
+  // Recorded rolls from before combat tracking have no scope and stay readable.
+  const recorded = {
+    ...roll,
+    id: randomUUID(),
+    sessionId: randomUUID(),
+    campaignId: randomUUID(),
+    createdAt: new Date().toISOString(),
+    groups: [{ label: 'attack', sides: 10, faces: [1, 2, 3] }],
+  };
+  assert.equal(diceRecordSchema.safeParse(recorded).success, true);
   assert.equal(
-    gameplayResponseV5Schema.safeParse({
-      ...v5,
-      version: 5,
-      operations: [
-        { op: 'create', characterId: randomUUID(), character: soldier('A'), introduction },
-      ],
-    }).success,
+    diceRecordSchema.safeParse({ ...recorded, scope: CombatRollScope.Combat }).success,
     false
   );
+  assert.equal(
+    diceRecordSchema.safeParse({ ...recorded, scope: CombatRollScope.Oracle }).success,
+    true
+  );
+});
+
+test('response schema carries combat links and prepared create identities, never a version', () => {
+  const current = response({
+    operations: [
+      {
+        op: 'create',
+        characterId: randomUUID(),
+        preparationReceiptId: randomUUID(),
+        character: soldier('A'),
+        introduction,
+      },
+    ],
+  });
+  assert.equal(gameplayResponseSchema.safeParse(current).success, true);
+  assert.equal(gameplayResponseSchema.safeParse({ ...current, version: 6 }).success, false);
+  const missing: Record<string, unknown> = { ...current };
+  delete missing.combatEffects;
+  assert.equal(gameplayResponseSchema.safeParse(missing).success, false);
 });
 
 test('two prepared soldiers from one template keep distinct reserved identities', () => {
@@ -377,7 +386,7 @@ test('damage to A changes only A, needs an effect and a narrative reference, and
     rolls: [roll],
     combat: { authorization: authorize(encounterId, []) },
   };
-  const turn = (partial: Partial<GameplayResponseV6>) =>
+  const turn = (partial: Partial<GameplayResponse>) =>
     applyResponse(
       started,
       response({
@@ -532,14 +541,28 @@ test('encounter transitions: active encounters end explicitly and new IDs come f
       ),
     /cannot be reopened/
   );
-  // Legacy free-form combat is preserved and never converted implicitly.
-  const legacy = newCampaign({ name: 'Old' });
-  legacy.state = { combat: { soldiers: 2 } };
-  const kept = applyResponse(legacy, response({ narrative: 'Quiet.' }), randomUUID(), {
-    campaignId: legacy.id,
+  // Free-form combat notes are preserved and never converted implicitly.
+  const noted = newCampaign({ name: 'Old' });
+  noted.state = { combatNotes: { soldiers: 2 } };
+  const kept = applyResponse(noted, response({ narrative: 'Quiet.' }), randomUUID(), {
+    campaignId: noted.id,
     turnId: randomUUID(),
   });
-  assert.deepEqual(kept.campaign.state, { combat: { soldiers: 2 } });
+  assert.deepEqual(kept.campaign.state, { combatNotes: { soldiers: 2 } });
+  // A GM state write cannot put free-form data into state.combat.
+  assert.throws(
+    () =>
+      applyResponse(
+        noted,
+        response({
+          operations: [{ op: 'state', expected: noted.state, value: { combat: { soldiers: 3 } } }],
+          operationExplanations: [explain(0)],
+        }),
+        randomUUID(),
+        { campaignId: noted.id, turnId: randomUUID() }
+      ),
+    /combatNotes/
+  );
 });
 
 test('manual edits keep the structured encounter and tracked paths but may change values', () => {
@@ -562,12 +585,10 @@ test('manual edits keep the structured encounter and tracked paths but may chang
   const ended = { combat: encounter(id, [a], false) };
   assert.doesNotThrow(() => assertManualStateEdit(ended, {}));
   assert.throws(() => assertManualStateEdit({}, { combat: encounter(id, [a]) }), /combat_prepare/);
-  assert.throws(
-    () => assertManualStateEdit({}, { combat: { trackingVersion: 1, id: 'fake' } }),
-    /invalid/
-  );
-  // Legacy free-form combat keeps its historical CRUD behavior.
-  assert.doesNotThrow(() => assertManualStateEdit({ combat: { soldiers: 2 } }, {}));
+  assert.throws(() => assertManualStateEdit({}, { combat: { id: 'fake' } }), /combatNotes/);
+  // Free-form notes are ordinary manual state.
+  assert.doesNotThrow(() => assertManualStateEdit({}, { combatNotes: { soldiers: 2 } }));
+  assert.throws(() => assertManualStateEdit({}, { combat: { soldiers: 2 } }), /combatNotes/);
   assert.doesNotThrow(() =>
     assertManualAttributesEdit(active, a.characterId, { health: { max: 6, damage: 3 } })
   );

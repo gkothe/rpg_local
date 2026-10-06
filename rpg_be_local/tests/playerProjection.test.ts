@@ -9,16 +9,11 @@ import {
   KnowledgeOrigin as O,
   KnowledgeCertainty as C,
   KnowledgeStatus as S,
-  legacyKnowledge,
 } from '../src/domain/knowledge.js';
 import { publicKnowledge, publicCampaign, publicTurn } from '../src/domain/playerProjection.js';
-import {
-  freezeKnowledge,
-  createKnowledgeRecall,
-  frozenKnowledgeSchema,
-} from '../src/domain/knowledgeRecall.js';
-import { gameplayDigest } from '../src/domain/diceContext.js';
-import type { GameplayResponseV5 } from '../src/domain/gameplayResponse.js';
+import { freezeKnowledge, createKnowledgeRecall } from '../src/domain/knowledgeRecall.js';
+import type { GameplayResponse } from '../src/domain/gameplayResponse.js';
+import { emptyResponse } from './ownedGameplayFixture.js';
 import type { Turn } from '../src/domain/types.js';
 const hidden = () => ({
   op: 'create' as const,
@@ -32,23 +27,18 @@ const hidden = () => ({
   characterIds: [],
   visibility: V.GmOnly,
 });
-const response = (): GameplayResponseV5 => ({
-  version: 5,
+const response = (): GameplayResponse => ({
+  ...emptyResponse,
   narrative: 'A stranger arrives.',
-  operations: [],
-  rollInterpretations: [],
-  ruleCitations: [],
   knowledgeChanges: [hidden()],
-  operationExplanations: [],
 });
 test('hidden continuity is available to GM recall but absent from public changes and projection', () => {
   const c = newCampaign({ name: 'Example' });
   const applied = applyResponse(c, response(), randomUUID());
   assert.deepEqual(applied.changes, []);
   assert.deepEqual(publicCampaign(applied.campaign).knowledge, []);
-  const frozen = freezeKnowledge(applied.campaign, 5);
+  const frozen = freezeKnowledge(applied.campaign);
   assert.match(createKnowledgeRecall(frozen).get({ id: frozen.records[0]!.id }).text, /SECRET/);
-  assert.throws(() => frozenKnowledgeSchema.parse(frozen));
   assert.deepEqual(undoSnapshot(applied.campaign, applied.snapshot).knowledge, []);
 });
 test('partial revelation removes old secret attribution, creation evidence and stale linked names', () => {
@@ -57,7 +47,7 @@ test('partial revelation removes old secret attribution, creation evidence and s
   const r = applied.campaign.knowledge![0]!;
   r.characterNames[randomUUID()] = 'SECRET name';
   r.attributions[0]!.revealReason = 'SECRET reason';
-  const reveal: GameplayResponseV5 = {
+  const reveal: GameplayResponse = {
     ...response(),
     knowledgeChanges: [
       {
@@ -93,7 +83,7 @@ test('partial revelation removes old secret attribution, creation evidence and s
           knowledgeChanges: [
             {
               ...(reveal.knowledgeChanges[0]! as Extract<
-                GameplayResponseV5['knowledgeChanges'][number],
+                GameplayResponse['knowledgeChanges'][number],
                 { op: 'update' }
               >),
               revealReason: undefined,
@@ -104,25 +94,6 @@ test('partial revelation removes old secret attribution, creation evidence and s
       ),
     /Revelation/
   );
-});
-test('v2 digest survives visibility normalization exactly, v3 includes visibility and purpose', () => {
-  const c = applyResponse(
-    newCampaign({ name: 'Example' }),
-    { ...response(), knowledgeChanges: [{ ...hidden(), visibility: V.Player }] },
-    randomUUID()
-  ).campaign;
-  c.knowledge = legacyKnowledge(c.knowledge!);
-  const old = gameplayDigest(c, [], undefined, 2);
-  const upgraded = structuredClone(c);
-  for (const r of upgraded.knowledge!) {
-    r.visibility = V.Player;
-    r.introductionVisibility = V.Player;
-    for (const a of r.attributions) a.visibility = V.Player;
-  }
-  assert.equal(gameplayDigest(upgraded, [], undefined, 2), old);
-  assert.notEqual(gameplayDigest(upgraded, [], undefined, 3), gameplayDigest(c, [], undefined, 3));
-  upgraded.knowledge![0]!.text = 'A real change';
-  assert.notEqual(gameplayDigest(upgraded, [], undefined, 2), old);
 });
 test('ordinary turn DTO omits nested raw candidates and frozen prompts', () => {
   const raw = {

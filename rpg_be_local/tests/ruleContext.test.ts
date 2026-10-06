@@ -19,7 +19,7 @@ function fixture(): RulePrompt {
     overview: 'Derived navigation: discover original passages with owned tools.',
   };
 }
-test('book context preserves event memory and captured identity while injecting only bounded instructions/navigation and the selected v3 contract', () => {
+test('book context preserves event memory and captured identity with navigation in data and instructions in the envelope', () => {
   const campaign = newCampaign({ name: 'Original bounded context' });
   campaign.memory = {
     id: randomUUID(),
@@ -29,41 +29,42 @@ test('book context preserves event memory and captured identity while injecting 
     createdAt: new Date().toISOString(),
   };
   const rules = fixture();
-  const manifest = buildContext(campaign, [], 'Original action', [], 16000, true, rules);
+  const manifest = buildContext(campaign, [], 'Original action', [], rules);
   const payload = JSON.parse(manifest.prompt);
   assert.deepEqual(manifest.ruleContext, rules.context);
   assert.deepEqual(payload.mandatory.ruleContext, rules.context);
   assert.equal(payload.memory, campaign.memory.text);
-  assert.equal(payload.mandatory.systemInstructions, rules.instructions);
   assert.equal(payload.mandatory.rulesOverview, rules.overview);
-  assert.equal(payload.mandatory.schema.properties.version.const, 3);
-  assert.match(payload.mandatory.instructions, /original|Original/);
+  assert.equal(payload.mandatory.systemInstructions, undefined);
+  assert.ok(manifest.systemPrompt!.includes(rules.instructions));
+  assert.match(manifest.systemPrompt!, /rules_find/);
   assert.equal(Object.hasOwn(payload.mandatory, 'core_rules'), false);
-  assert.ok(Buffer.byteLength(manifest.prompt) <= 16000);
 });
-test('default context permits model knowledge and retains its v2 contract without a book overview', () => {
+test('model-knowledge context has no book overview and asks for provisional adjudication labels', () => {
   const campaign = newCampaign({ name: 'Original default context' });
   const rules = fixture();
   rules.context.kind = RuleSystemKind.ModelKnowledge;
-  const payload = JSON.parse(
-    buildContext(campaign, [], 'Original action', [], 16000, true, rules).prompt
-  );
-  assert.match(payload.mandatory.instructions, /model knowledge/);
-  assert.equal(payload.mandatory.schema.properties.version.const, 2);
+  const manifest = buildContext(campaign, [], 'Original action', [], rules);
+  const payload = JSON.parse(manifest.prompt);
+  assert.match(manifest.systemPrompt!, /provisional rule adjudications/);
+  assert.doesNotMatch(manifest.systemPrompt!, /rules_find/);
   assert.equal(Object.hasOwn(payload.mandatory, 'rulesOverview'), false);
 });
 test('large instructions, overview and mandatory state remain intact above soft planning targets', () => {
   const campaign = newCampaign({ name: 'Original overflow context' });
   const rules = fixture();
-  for (const invalid of [
-    { ...rules, instructions: 'x'.repeat(RULE_LIMITS.instructionsBytes + 1) },
-    { ...rules, overview: 'x'.repeat(RULE_LIMITS.overviewBytes + 1) },
-  ])
-    assert.equal(
-      JSON.parse(buildContext(campaign, [], 'Action', [], 16000, true, invalid).prompt).mandatory
-        .systemInstructions,
-      invalid.instructions
-    );
-  const large = buildContext(campaign, [], 'Action', [], 100, true, rules);
+  const instructions = 'x'.repeat(RULE_LIMITS.instructionsBytes + 1);
+  assert.ok(
+    buildContext(campaign, [], 'Action', [], { ...rules, instructions }).systemPrompt!.includes(
+      instructions
+    )
+  );
+  const overview = 'x'.repeat(RULE_LIMITS.overviewBytes + 1);
+  assert.equal(
+    JSON.parse(buildContext(campaign, [], 'Action', [], { ...rules, overview }).prompt).mandatory
+      .rulesOverview,
+    overview
+  );
+  const large = buildContext(campaign, [], 'Action', [], rules);
   assert.ok(large.estimatedTokens > 100);
 });

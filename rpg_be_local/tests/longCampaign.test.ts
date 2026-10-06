@@ -16,8 +16,10 @@ import {
   KnowledgeOrigin,
   KnowledgeCertainty,
   KnowledgeStatus,
+  KnowledgeVisibility,
 } from '../src/domain/knowledge.js';
 import { createKnowledgeRecall, freezeKnowledge } from '../src/domain/knowledgeRecall.js';
+import { gameplayResponseWireJsonSchema } from '../src/domain/gameplayResponse.js';
 test('1000-turn synthetic campaign preserves knowledge and excludes player description and full transcripts from gameplay or memory', () => {
   const c = newCampaign({ name: 'Long campaign' });
   c.knowledge = applyKnowledgeChanges(
@@ -33,6 +35,7 @@ test('1000-turn synthetic campaign preserves knowledge and excludes player descr
         status: KnowledgeStatus.Active,
         characterIds: [],
         evidence: [],
+        visibility: KnowledgeVisibility.Player,
       },
     ],
     [],
@@ -58,8 +61,10 @@ test('1000-turn synthetic campaign preserves knowledge and excludes player descr
       };
       summaries++;
     }
-    const context = buildContext(c, turns, 'Find the silver key', [], 16000);
-    assert.ok(context.estimatedTokens <= 16000);
+    const context = buildContext(c, turns, 'Find the silver key', []);
+    // Everything except the fixed response schema stays within the planning target.
+    const schemaBytes = Buffer.byteLength(JSON.stringify(gameplayResponseWireJsonSchema));
+    assert.ok(context.estimatedTokens - schemaBytes <= 16000);
     assert.ok(!context.prompt.includes('PLAYER_SUMMARY_CANARY'));
     assert.ok(context.historyIds.length < 30);
     assert.equal(context.historyIds.length, recentGameplayHistory(c, turns).history.length);

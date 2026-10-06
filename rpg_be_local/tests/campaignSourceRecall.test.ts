@@ -48,7 +48,7 @@ import {
 } from '../src/domain/campaignSourceRecall.js';
 import { buildContext } from '../src/domain/context.js';
 import { sourceSections } from '../src/domain/sourceSections.js';
-import { GameplayTools } from '../src/providers/gameplayTools.js';
+import { ownedTools } from './ownedGameplayFixture.js';
 
 test('v5 catalog and lookup agree on retrieved, partial, pinned and seeded originals', () => {
   const c = newCampaign({ name: 'Supplied context' });
@@ -72,7 +72,7 @@ test('v5 catalog and lookup agree on retrieved, partial, pinned and seeded origi
       text: partial.text.slice(0, 9),
     },
   ];
-  const context = buildContext(c, [], 'look', rules, 1, true, undefined, 5);
+  const context = buildContext(c, [], 'look', rules);
   const catalog = JSON.parse(context.prompt).mandatory.campaignSources as ReturnType<
     typeof campaignSourceCatalog
   >;
@@ -172,7 +172,7 @@ test('opening bootstrap includes campaign and legacy references but excludes cha
   c.sources[2]!.purpose = SourcePurpose.Character;
   const frozen = freezeCampaignSources(c);
   assert.equal(campaignSourceCatalog(frozen)[1]!.purpose, SourcePurpose.Reference);
-  const context = buildContext(c, [], 'start', [], 1, true, undefined, 5);
+  const context = buildContext(c, [], 'start', []);
   const data = JSON.parse(context.prompt).mandatory;
   assert.equal(data.campaignSources.length, 3);
   assert.deepEqual(
@@ -180,14 +180,9 @@ test('opening bootstrap includes campaign and legacy references but excludes cha
     ['Adventure', 'Legacy']
   );
   assert.equal(context.sourceSelection?.bootstrap, true);
-  assert.equal(context.promptContractVersion, 5);
   assert.equal(context.frozenSources?.sources.length, 3);
   assert.equal(data.campaignSources[0].sections[0].supplied, true);
   assert.equal(data.campaignSources[2].sections[0].supplied, false);
-  const legacy = buildContext(c, [], 'start', [], 1, true, undefined, 4);
-  assert.equal(JSON.parse(legacy.prompt).mandatory.campaignSources, undefined);
-  assert.equal(legacy.frozenSources, undefined);
-  assert.equal(legacy.promptContractVersion, 4);
 });
 
 test('frozen lookup reads original Unicode spans and rejects changed version/cross-campaign IDs', () => {
@@ -249,15 +244,12 @@ test('a completed active turn ends bootstrap, while an undone opening permits it
     action: 'start',
     narrative: 'You see the gate.',
   } as Turn;
-  const context = buildContext(c, [previous], 'wait', [], 16000, true, undefined, 5);
+  const context = buildContext(c, [previous], 'wait', []);
   assert.equal(context.sourceSelection?.bootstrap, false);
   assert.ok(context.sourceSelection?.reasons.includes('no_match'));
   assert.deepEqual(JSON.parse(context.prompt).mandatory.campaignSourceSeeds, []);
   previous.undone = true;
-  assert.equal(
-    buildContext(c, [previous], 'start', [], 16000, true, undefined, 5).sourceSelection?.bootstrap,
-    true
-  );
+  assert.equal(buildContext(c, [previous], 'start', []).sourceSelection?.bootstrap, true);
 });
 test('search pagination is frozen-query scoped and Unicode results remain exact original slices', () => {
   const c = newCampaign({ name: 'Paged sources' });
@@ -284,16 +276,12 @@ test('search pagination is frozen-query scoped and Unicode results remain exact 
   );
 });
 
-test('source tools require explicit v5 handler and work for both default and library gameplay', async () => {
+test('source tools work for both default and library gameplay', async () => {
   for (const book of [false, true]) {
     const calls: string[] = [];
-    const tools = new GameplayTools({
+    const tools = ownedTools({
       book,
-      roll: async () => {
-        throw new Error('No dice');
-      },
       read: async () => ({}),
-      assertActive: async () => {},
       readCampaignSource: async (name) => {
         calls.push(name);
         return { ok: true };
@@ -314,12 +302,4 @@ test('source tools require explicit v5 handler and work for both default and lib
     );
     await assert.rejects(() => tools.call('read_file', {}, 3), /outside/);
   }
-  const legacy = new GameplayTools({
-    book: false,
-    roll: async () => {
-      throw new Error('No dice');
-    },
-    assertActive: async () => {},
-  });
-  assert.ok(!legacy.definitions.some((d) => d.name === CAMPAIGN_SOURCE_SEARCH_TOOL_NAME));
 });

@@ -4,10 +4,6 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { googleDocumentId, textSource } from '../src/services/sources.js';
 import { databaseUrl } from '../src/config.js';
-import {
-  ARCHIVE_FORMAT_VERSION,
-  ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-} from '../src/domain/versions.js';
 
 test('HTTP boundary serves backend-owned capabilities, rejects foreign Host/Origin and unsolicited writes', async () => {
   const { app } = createApp({ store: null });
@@ -15,10 +11,10 @@ test('HTTP boundary serves backend-owned capabilities, rejects foreign Host/Orig
   assert.equal(options.body.data.defaults.characterType, 'player');
   assert.equal(options.body.data.dice.enabled, true);
   assert.equal(options.body.data.dice.limits.requestsPerAttempt, 24);
-  const gameplay = options.body.data.gameplay;
-  assert.equal(gameplay.responseVersion, ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION);
-  assert.equal(gameplay.archiveVersion, ARCHIVE_FORMAT_VERSION);
-  assert.equal(options.body.data.combat.enabled, ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION === 6);
+  for (const retired of ['version', 'gameplay'])
+    assert.equal(retired in options.body.data, false, retired);
+  for (const retired of ['enabled', 'trackingVersion'])
+    assert.equal(retired in options.body.data.combat, false, retired);
   assert.deepEqual(
     options.body.data.combat.fieldKindOptions.map((o: { id: string }) => o.id),
     ['vitality', 'damage', 'condition', 'resource']
@@ -31,7 +27,6 @@ test('HTTP boundary serves backend-owned capabilities, rejects foreign Host/Orig
     options.body.data.combat.rollKindOptions.map((o: { id: string }) => o.id),
     ['attack', 'defense', 'resistance', 'awareness', 'resource', 'other']
   );
-  assert.equal(options.body.data.combat.trackingVersion, 1);
   assert.equal(
     options.body.data.turnStatusOptions.find((o: { id: string }) => o.id === 'running').active,
     true

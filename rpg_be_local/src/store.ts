@@ -1,4 +1,3 @@
-import { KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from './domain/versions.js';
 import { sourceSections } from './domain/sourceSections.js';
 import { selectInitialSourceSections } from './domain/campaignSourceRecall.js';
 import pg, { type PoolClient } from 'pg';
@@ -151,7 +150,7 @@ export class Store {
     // Every Store turn collection belongs to one campaign. Derived retry state is never persisted.
     const campaignId = failures[0]!.campaignId;
     const sessions = await db.query(
-      "SELECT *,to_jsonb(dice_sessions)->>'digest_version' AS saved_digest_version FROM dice_sessions WHERE id=ANY($1::uuid[]) AND campaign_id=$2",
+      'SELECT * FROM dice_sessions WHERE id=ANY($1::uuid[]) AND campaign_id=$2',
       [failures.map((turn) => turn.diceSessionId), campaignId]
     );
     const latest = await db.query(
@@ -172,11 +171,13 @@ export class Store {
       const reason =
         !session || session.imported
           ? 'Imported dice are preserved for audit and cannot be executed'
-          : latest.rows[0]?.id !== turn.id
-            ? 'A later action superseded this attempt'
-            : outdatedRules || campaign.ruleResolution
-              ? 'Rule library changed or is unresolved; start a new action after selecting current rules'
-              : null;
+          : !session.system_prompt
+            ? 'This attempt predates the current game contract; start a new action'
+            : latest.rows[0]?.id !== turn.id
+              ? 'A later action superseded this attempt'
+              : outdatedRules || campaign.ruleResolution
+                ? 'Rule library changed or is unresolved; start a new action after selecting current rules'
+                : null;
       if (turn.editingPending) {
         turn.editingResume = { available: reason === null, reason };
         delete turn.diceRetry;
@@ -186,26 +187,20 @@ export class Store {
   }
   async turnContext(campaignId: string, turnId: string) {
     const turn = await this.turn(campaignId, turnId);
-    if (
-      !turn.context ||
-      (turn.context.promptContractVersion ?? 0) < KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION ||
-      !turn.diceSessionId
-    )
-      return turn.context;
+    if (!turn.context || !turn.diceSessionId) return turn.context;
     const saved = await this.pool.query(
       'SELECT * FROM dice_sessions WHERE id=$1 AND campaign_id=$2',
       [turn.diceSessionId, campaignId]
     );
     const root = saved.rows[0];
-    if (!root || root.prompt_contract_version !== turn.context.promptContractVersion)
-      throw new Problem(409, 'dice_context', 'Frozen turn context is missing');
+    if (!root) throw new Problem(409, 'dice_context', 'Frozen turn context is missing');
+    // Sessions without a system prompt predate the instruction envelope; their turn keeps its context.
+    if (!root.system_prompt) return turn.context;
     return {
       ...turn.context,
       diceSessionId: root.id,
       prompt: root.frozen_prompt,
       revision: root.frozen_revision,
-      promptContractVersion: root.prompt_contract_version,
-      digestVersion: root.digest_version,
       systemPrompt: root.system_prompt,
       frozenKnowledge: root.frozen_knowledge,
       ...(root.frozen_sources ? { frozenSources: root.frozen_sources } : {}),
@@ -216,10 +211,7 @@ export class Store {
     const document = { ...t };
     delete document.diceRetry;
     delete document.editingResume;
-    if (
-      document.context?.diceSessionId &&
-      (document.context.promptContractVersion ?? 0) >= KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
-    ) {
+    if (document.context?.diceSessionId) {
       document.context = { ...document.context };
       delete document.context.systemPrompt;
       delete document.context.frozenKnowledge;

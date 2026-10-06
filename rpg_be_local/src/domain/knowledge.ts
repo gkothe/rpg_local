@@ -78,27 +78,17 @@ const mutable = {
   characterIds: z.array(characterLinkSchema),
   holderId: characterLinkSchema.nullable().optional(),
 };
-export const knowledgeChangeSchema = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('create'), ...mutable, ...knowledgeProvenanceSchema.shape }).strict(),
-  z
-    .object({
-      op: z.literal('update'),
-      id: z.uuid(),
-      expectedRevision: z.number().int().positive(),
-      changes: z
-        .object(mutable)
-        .partial()
-        .strict()
-        .refine((v) => Object.keys(v).length > 0),
-      ...knowledgeProvenanceSchema.shape,
-    })
-    .strict(),
-]);
-export type KnowledgeChange = z.infer<typeof knowledgeChangeSchema>;
 export const knowledgeAttributionSchema = z
-  .object({ ...knowledgeProvenanceSchema.shape, turnId: z.uuid().nullable(), at: z.iso.datetime() })
+  .object({
+    ...knowledgeProvenanceSchema.shape,
+    turnId: z.uuid().nullable(),
+    at: z.iso.datetime(),
+    visibility: z.enum(KnowledgeVisibility).optional(),
+    revealReason: text.optional(),
+  })
   .strict();
-export const knowledgeRecordSchema = z
+// Records introduced before visibility existed have no visibility fields; normalizeKnowledge reads them as player knowledge.
+export const campaignKnowledgeSchema = z
   .object({
     id: z.uuid(),
     ...mutable,
@@ -113,28 +103,17 @@ export const knowledgeRecordSchema = z
     updatedAt: z.iso.datetime(),
     revision: z.number().int().positive(),
     attributions: z.array(knowledgeAttributionSchema),
-  })
-  .strict();
-export const knowledgeAttributionV5Schema = knowledgeAttributionSchema
-  .extend({
-    visibility: z.enum(KnowledgeVisibility).optional(),
-    revealReason: text.optional(),
-  })
-  .strict();
-export const campaignKnowledgeSchema = knowledgeRecordSchema
-  .extend({
     visibility: z.enum(KnowledgeVisibility).optional(),
     introductionVisibility: z.enum(KnowledgeVisibility).optional(),
-    attributions: z.array(knowledgeAttributionV5Schema),
   })
   .strict();
-export const knowledgeProvenanceV5Schema = knowledgeProvenanceSchema
+export const knowledgeIntroductionSchema = knowledgeProvenanceSchema
   .extend({
     visibility: z.enum(KnowledgeVisibility),
   })
   .strict();
-export const knowledgeChangeV5Schema = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('create'), ...mutable, ...knowledgeProvenanceV5Schema.shape }).strict(),
+export const knowledgeChangeSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('create'), ...mutable, ...knowledgeIntroductionSchema.shape }).strict(),
   z
     .object({
       op: z.literal('update'),
@@ -150,7 +129,7 @@ export const knowledgeChangeV5Schema = z.discriminatedUnion('op', [
     })
     .strict(),
 ]);
-export type KnowledgeChangeV5 = z.infer<typeof knowledgeChangeV5Schema>;
+export type KnowledgeChange = z.infer<typeof knowledgeChangeSchema>;
 export type CampaignKnowledge = z.infer<typeof campaignKnowledgeSchema>;
 export function normalizeKnowledge(records: readonly CampaignKnowledge[]): CampaignKnowledge[] {
   return records.map((r) =>
@@ -164,15 +143,6 @@ export function normalizeKnowledge(records: readonly CampaignKnowledge[]): Campa
       })),
     })
   );
-}
-export function legacyKnowledge(
-  records: readonly CampaignKnowledge[]
-): z.infer<typeof knowledgeRecordSchema>[] {
-  // Retain the original key order for frozen v4 digest compatibility.
-  return records.map(({ visibility: _visibility, introductionVisibility: _intro, ...record }) => ({
-    ...record,
-    attributions: record.attributions.map(({ visibility: _v, revealReason: _r, ...a }) => a),
-  }));
 }
 export type KnowledgeValidation = {
   rolls?: readonly import('./dice.js').DiceRecord[];
@@ -211,13 +181,7 @@ export function validateKnowledgeEvidence(
     } else {
       if (!context.ruleContext) invalid('Book knowledge requires a captured rule library');
       validateRuleCitations(
-        {
-          version: 3,
-          narrative: 'evidence',
-          operations: [],
-          rollInterpretations: [],
-          ruleCitations: [evidence.citation],
-        },
+        { ruleCitations: [evidence.citation] },
         context.ruleReads ?? [],
         context.campaignId,
         context.turnId,
@@ -228,11 +192,10 @@ export function validateKnowledgeEvidence(
 }
 export function applyKnowledgeChanges(
   original: readonly CampaignKnowledge[],
-  raw: readonly (KnowledgeChange | KnowledgeChangeV5)[],
+  raw: readonly KnowledgeChange[],
   characters: readonly Character[],
   aliases: ReadonlyMap<number, string>,
   context: KnowledgeValidation,
-  version = 4,
   responsePath?: (index: number) => ResponsePath
 ): {
   records: CampaignKnowledge[];
@@ -253,30 +216,24 @@ export function applyKnowledgeChanges(
   };
   for (const [index, value] of raw.entries()) {
     atResponseField(responsePath?.(index) ?? ['knowledgeChanges', index], () => {
-      const op =
-        version === 5 ? knowledgeChangeV5Schema.parse(value) : knowledgeChangeSchema.parse(value);
+      const op = knowledgeChangeSchema.parse(value);
       validateKnowledgeEvidence(op, context);
       const now = new Date().toISOString();
       const current = op.op === 'update' ? records.find((r) => r.id === op.id) : undefined;
       if (op.op === 'update' && !current) invalid('Knowledge record not found');
-      const modern = version === 5 ? (op as KnowledgeChangeV5) : undefined;
       const requestedVisibility =
-        modern?.op === 'create'
-          ? modern.visibility
-          : modern?.op === 'update'
-            ? (modern.changes.visibility ?? current?.visibility)
-            : current?.visibility;
+        op.op === 'create' ? op.visibility : (op.changes.visibility ?? current?.visibility);
       const revealing =
         current?.visibility === KnowledgeVisibility.GmOnly &&
         requestedVisibility === KnowledgeVisibility.Player;
       if (
         revealing &&
-        (modern?.op !== 'update' ||
-          !modern.revealReason ||
-          !modern.changes.text ||
-          !modern.changes.title ||
-          !modern.changes.characterIds ||
-          modern.changes.holderId === undefined)
+        (op.op !== 'update' ||
+          !op.revealReason ||
+          !op.changes.text ||
+          !op.changes.title ||
+          !op.changes.characterIds ||
+          op.changes.holderId === undefined)
       )
         invalid(
           'Revelation requires a reason and explicit public title, text, character links and holder'
@@ -298,20 +255,14 @@ export function applyKnowledgeChanges(
         evidence: structuredClone(op.evidence),
         turnId: context.turnId,
         at: now,
-        ...(version === 5
-          ? {
-              visibility,
-              ...(modern?.op === 'update' && modern.revealReason
-                ? { revealReason: modern.revealReason }
-                : {}),
-            }
-          : {}),
+        visibility,
+        ...(op.op === 'update' && op.revealReason ? { revealReason: op.revealReason } : {}),
       };
       const record: CampaignKnowledge = current
         ? {
             ...current,
             ...fields,
-            ...(version === 5 ? { visibility } : {}),
+            visibility,
             characterIds: ids,
             characterNames: names,
             holderId: holder,
@@ -322,7 +273,8 @@ export function applyKnowledgeChanges(
           }
         : {
             id: randomUUID(),
-            ...(version === 5 ? { visibility, introductionVisibility: visibility } : {}),
+            visibility,
+            introductionVisibility: visibility,
             kind: op.op === 'create' ? op.kind : KnowledgeKind.Other,
             title: op.op === 'create' ? op.title : '',
             text: op.op === 'create' ? op.text : '',

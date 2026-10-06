@@ -2,16 +2,27 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
-  GameplayTools,
-  gameplayEnvelopeBytes,
-  gameplayToolDefinitions,
+  GAMEPLAY_ENVELOPE_BYTES,
   gameplayToolRequestBytes,
 } from '../src/providers/gameplayTools.js';
 import { freezeKnowledge } from '../src/domain/knowledgeRecall.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import { CharacterType } from '../src/domain/options.js';
+import { ownedTools } from './ownedGameplayFixture.js';
 
-test('owned NPC tools distinguish frozen capability absence from an empty roster and enforce replay/ownership', async () => {
+const DEFAULT_TOOLS = [
+  'campaign_npcs_search',
+  'campaign_npcs_get',
+  'combat_prepare',
+  'roll_dice',
+  'campaign_sources_search',
+  'campaign_sources_get',
+  'campaign_knowledge_search',
+  'campaign_knowledge_get',
+];
+const BOOK_TOOLS = ['rules_map', 'rules_search', 'rules_get', 'rules_list', 'rules_find'];
+
+test('owned NPC tools read the frozen roster, list an empty one and enforce replay/ownership', async () => {
   const c = newCampaign({ name: 'NPC tools' });
   c.characters.push({
     id: randomUUID(),
@@ -33,9 +44,7 @@ test('owned NPC tools distinguish frozen capability absence from an empty roster
         if (!active) throw new Error('Lost ownership');
       },
     };
-    const legacy = new GameplayTools({ ...options, knowledge: freezeKnowledge(c, 5) });
-    assert.ok(!legacy.definitions.some((d) => d.name.startsWith('campaign_npcs_')));
-    const registry = new GameplayTools({ ...options, knowledge: freezeKnowledge(c, 5, true) });
+    const registry = ownedTools({ ...options, knowledge: freezeKnowledge(c, true) });
     assert.equal(registry.definitions.filter((d) => d.name.startsWith('campaign_npcs_')).length, 2);
     const found = await registry.call('campaign_npcs_search', { query: 'merchant' }, 'search');
     assert.deepEqual(
@@ -63,7 +72,7 @@ test('owned NPC tools distinguish frozen capability absence from an empty roster
     );
     c.characters = [];
     active = true;
-    const empty = new GameplayTools({ ...options, knowledge: freezeKnowledge(c, 5, true) });
+    const empty = ownedTools({ ...options, knowledge: freezeKnowledge(c, true) });
     assert.deepEqual(
       ((await empty.call('campaign_npcs_search', { query: '' }, 'empty')) as { npcs: unknown[] })
         .npcs,
@@ -84,9 +93,8 @@ test('owned NPC tools distinguish frozen capability absence from an empty roster
 
 test('combined originals identify supplied receipts and exact continuation arguments without blocking rereads', async () => {
   const reads: unknown[] = [];
-  const registry = new GameplayTools({
+  const registry = ownedTools({
     book: true,
-    ruleFind: true,
     assertActive: async () => {},
     roll: async () => ({ rollId: randomUUID(), slot: 0, groups: [], reused: false }),
     read: async (tool, input) => {
@@ -126,9 +134,8 @@ test('combined originals identify supplied receipts and exact continuation argum
 
 test('rules_find combines eligible original reads with stable child identities and native replay', async () => {
   const calls: { tool: string; input: unknown; id: string }[] = [];
-  const registry = new GameplayTools({
+  const registry = ownedTools({
     book: true,
-    ruleFind: true,
     assertActive: async () => {},
     roll: async () => ({ rollId: randomUUID(), slot: 0, groups: [], reused: false }),
     read: async (tool, input, id) => {
@@ -168,9 +175,8 @@ test('rules_find combines eligible original reads with stable child identities a
 test('rules_find preserves read errors and stops constituent reads after cancellation', async () => {
   const controller = new AbortController();
   let calls = 0;
-  const registry = new GameplayTools({
+  const registry = ownedTools({
     book: true,
-    ruleFind: true,
     signal: controller.signal,
     assertActive: async () => {},
     roll: async () => ({ rollId: randomUUID(), slot: 0, groups: [], reused: false }),
@@ -182,9 +188,8 @@ test('rules_find preserves read errors and stops constituent reads after cancell
   });
   await assert.rejects(registry.call('rules_find', { query: 'test' }, 'cancel'), /cancelled/);
   assert.equal(calls, 1);
-  const errors = new GameplayTools({
+  const errors = ownedTools({
     book: true,
-    ruleFind: true,
     assertActive: async () => {},
     roll: async () => ({ rollId: randomUUID(), slot: 0, groups: [], reused: false }),
     read: async () => ({
@@ -204,18 +209,12 @@ test('rules_find preserves read errors and stops constituent reads after cancell
   assert.deepEqual(result.reads, []);
   assert.deepEqual(result.suppliedOriginals, []);
 });
-test('knowledge tools remain owned without a library and do not consume dice or rules allowance', async () => {
+test('knowledge tools remain owned without a library', async () => {
   const c = newCampaign({ name: 'Frozen recall' });
-  const tools = new GameplayTools({
-    book: false,
-    knowledge: freezeKnowledge(c),
-    roll: async () => ({ rollId: randomUUID(), slot: 0, groups: [], reused: false }),
-    assertActive: async () => {},
-    limits: { diceCalls: 0, ruleCalls: 0, combinedCalls: 3, promptBytes: 100 },
-  });
+  const tools = ownedTools({ knowledge: freezeKnowledge(c) });
   assert.deepEqual(
     tools.definitions.map((d) => d.name),
-    ['roll_dice', 'campaign_knowledge_search', 'campaign_knowledge_get']
+    DEFAULT_TOOLS
   );
   assert.deepEqual(await tools.call('campaign_knowledge_search', { query: '' }, 'search'), {
     campaignId: c.id,
@@ -234,7 +233,7 @@ test('knowledge tools remain owned without a library and do not consume dice or 
 test('registry advertises exactly owned tools, replays once and rechecks active ownership before replay', async () => {
   let reads = 0;
   let active = true;
-  const registry = new GameplayTools({
+  const registry = ownedTools({
     book: true,
     assertActive: async () => {
       if (!active) throw new Error('Inactive');
@@ -247,7 +246,7 @@ test('registry advertises exactly owned tools, replays once and rechecks active 
   });
   assert.deepEqual(
     registry.definitions.map((definition) => definition.name),
-    ['roll_dice', 'rules_map', 'rules_search', 'rules_get', 'rules_list']
+    [...DEFAULT_TOOLS.slice(0, 6), ...BOOK_TOOLS, ...DEFAULT_TOOLS.slice(6)]
   );
   const first = await registry.call('rules_map', {}, 'same');
   assert.deepEqual(await registry.call('rules_map', {}, 'same'), first);
@@ -256,46 +255,17 @@ test('registry advertises exactly owned tools, replays once and rechecks active 
   await assert.rejects(registry.call('shell', {}, 'shell'), /outside/);
   active = false;
   await assert.rejects(registry.call('rules_map', {}, 'same'), /Inactive/);
-  const fallback = new GameplayTools({
-    book: false,
-    assertActive: async () => {},
-    roll: async () => ({ rollId: randomUUID(), slot: 0, groups: [], reused: false }),
-  });
+  const fallback = ownedTools();
   assert.deepEqual(
     fallback.definitions.map((definition) => definition.name),
-    ['roll_dice']
+    DEFAULT_TOOLS
   );
   await assert.rejects(fallback.call('rules_map', {}, 'foreign'), /outside/);
 });
 
-test('explicit opt-in limits independently bound invalid rule requests, dice and combined calls without charging transport replays', async () => {
-  let reads = 0,
-    rolls = 0;
-  const registry = new GameplayTools({
-    book: true,
-    limits: { ruleCalls: 12, diceCalls: 12, combinedCalls: 24, promptBytes: 16000 },
-    assertActive: async () => {},
-    read: async () => {
-      reads++;
-      return { error: { code: 'rules_request_invalid' } };
-    },
-    roll: async () => {
-      rolls++;
-      return { rollId: randomUUID(), slot: 0, groups: [], reused: false };
-    },
-  });
-  for (let index = 0; index < 12; index++)
-    await registry.call('rules_map', { foreign: true }, `invalid-${index}`);
-  await registry.call('rules_map', { foreign: true }, 'invalid-0');
-  assert.equal(reads, 12);
-  await assert.rejects(registry.call('rules_map', {}, 'extra-rule'), /call limit/);
-  for (let index = 0; index < 12; index++) await registry.call('roll_dice', {}, `dice-${index}`);
-  assert.equal(rolls, 12);
-  await assert.rejects(registry.call('roll_dice', {}, 'extra-dice'), /Combined/);
-});
 test('large aggregate tool transcripts are allowed and cancellation still prevents results', async () => {
   const signal = new AbortController();
-  const registry = new GameplayTools({
+  const registry = ownedTools({
     book: true,
     signal: signal.signal,
     assertActive: async () => {},
@@ -309,32 +279,18 @@ test('large aggregate tool transcripts are allowed and cancellation still preven
   await assert.rejects(registry.call('rules_get', {}, 'first'), /cancelled/);
 });
 
-test('combat_prepare exists only in a v6 registry, validates before dispatch and replays by transport identity', async () => {
-  const roll = async () => ({ rollId: randomUUID(), slot: 0, groups: [], reused: false });
-  const v5 = new GameplayTools({ book: false, assertActive: async () => {}, roll });
-  assert.deepEqual(
-    v5.definitions.map((definition) => definition.name),
-    ['roll_dice']
-  );
-  assert.deepEqual(v5.definitions, gameplayToolDefinitions(false));
-  assert.doesNotMatch(JSON.stringify(v5.definitions), /scope|combat/);
+test('combat_prepare validates before dispatch and replays by transport identity', async () => {
   const prepared: unknown[] = [];
-  const v6 = new GameplayTools({
-    book: false,
-    assertActive: async () => {},
-    roll,
+  const tools = ownedTools({
     prepareCombat: async (input) => {
       prepared.push(input);
       return { receiptId: randomUUID() };
     },
   });
-  assert.deepEqual(
-    v6.definitions.map((definition) => definition.name),
-    ['combat_prepare', 'roll_dice']
-  );
-  assert.match(JSON.stringify(v6.definitions[1]!.inputSchema), /scope/);
+  const dice = tools.definitions.find((definition) => definition.name === 'roll_dice')!;
+  assert.match(JSON.stringify(dice.inputSchema), /scope/);
   await assert.rejects(
-    v6.call('combat_prepare', { localKey: 'fight' }, 'bad'),
+    tools.call('combat_prepare', { localKey: 'fight' }, 'bad'),
     /registered schema/
   );
   assert.equal(prepared.length, 0);
@@ -348,16 +304,14 @@ test('combat_prepare exists only in a v6 registry, validates before dispatch and
       },
     ],
   };
-  const first = await v6.call('combat_prepare', batch, 'p1');
-  assert.deepEqual(await v6.call('combat_prepare', batch, 'p1'), first);
+  const first = await tools.call('combat_prepare', batch, 'p1');
+  assert.deepEqual(await tools.call('combat_prepare', batch, 'p1'), first);
   assert.equal(prepared.length, 1);
   await assert.rejects(
-    v6.call('combat_prepare', { ...batch, localKey: 'other' }, 'p1'),
+    tools.call('combat_prepare', { ...batch, localKey: 'other' }, 'p1'),
     /changed tool arguments/
   );
-  assert.equal(gameplayToolRequestBytes(v5.definitions, 'combat_prepare'), 1024);
-  assert.equal(gameplayToolRequestBytes(v6.definitions, 'combat_prepare'), 1_048_576);
-  assert.equal(gameplayToolRequestBytes(v6.definitions, 'roll_dice'), 1024);
-  assert.equal(gameplayEnvelopeBytes(v5.definitions), 4608);
-  assert.equal(gameplayEnvelopeBytes(v6.definitions), 1_048_576 + 65_536);
+  assert.equal(gameplayToolRequestBytes('combat_prepare'), 1_048_576);
+  assert.equal(gameplayToolRequestBytes('roll_dice'), 1024);
+  assert.equal(GAMEPLAY_ENVELOPE_BYTES, 1_048_576 + 65_536);
 });

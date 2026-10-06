@@ -1,7 +1,5 @@
 import { z } from 'zod';
 import { Problem } from '../errors.js';
-import { responseSchema } from './schemas.js';
-import { DICE_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from './versions.js';
 import { DICE_LIMITS } from './dice.js';
 
 export const rollInterpretationSchema = z
@@ -20,17 +18,9 @@ export const rollInterpretationSchema = z
       .optional(),
   })
   .strict();
-export const diceResponseSchema = responseSchema
-  .extend({
-    version: z.literal(DICE_GAMEPLAY_RESPONSE_SCHEMA_VERSION),
-    rollInterpretations: z.array(rollInterpretationSchema).max(DICE_LIMITS.slots),
-  })
-  .strict();
-export const diceResponseJsonSchema = z.toJSONSchema(diceResponseSchema);
-export type DiceResponse = z.infer<typeof diceResponseSchema>;
 export type RollInterpretation = z.infer<typeof rollInterpretationSchema>;
 
-// Stored turns can predate inline placement; versions 2–4 retain their frozen schema.
+// Interpretations recorded before inline placement have no afterParagraph.
 export const placedRollInterpretationSchema = rollInterpretationSchema.extend({
   afterParagraph: z.number().int().positive().optional(),
 });
@@ -49,8 +39,8 @@ export function validateRollPlacement(response: {
     );
 }
 
-export function validateRollInterpretations<T extends Pick<DiceResponse, 'rollInterpretations'>>(
-  response: T,
+export function validateRollInterpretations(
+  response: { rollInterpretations: readonly RollInterpretation[] },
   rollIds: readonly string[]
 ): void {
   const actual = response.rollInterpretations.map((entry) => entry.rollId);

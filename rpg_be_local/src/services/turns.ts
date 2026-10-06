@@ -1,4 +1,3 @@
-import { RULE_FIND_TOOL_NAME } from '../providers/rulesFind.js';
 import { bindResponseCitations } from '../domain/citationBinding.js';
 import { atResponseField } from '../domain/responseFields.js';
 import { validateWithFieldRepair } from './responseRepair.js';
@@ -7,18 +6,10 @@ import { CampaignSourceLookup } from './campaignSourceLookup.js';
 import { NarrativeCandidateRepository, humanizeNarrative } from './narrativeHumanizer.js';
 import { createPromptTrace, traceEvent, type PromptTraceContext } from '../providers/promptLog.js';
 import {
-  AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-  gameplayDigestVersion,
-  usesAuditedContract,
-  usesCombatContract,
-} from '../domain/versions.js';
-import {
-  auditedResponseInputSchema,
-  auditedResponseSchema,
-  gameplayResponseV5WireJsonSchema,
-  gameplayResponseV6WireJsonSchema,
-  type AuditedGameplayResponse,
-  type GameplayResponseV6,
+  gameplayResponseInputSchema,
+  gameplayResponseSchema,
+  gameplayResponseWireJsonSchema,
+  type GameplayResponse,
 } from '../domain/gameplayResponse.js';
 import { CombatPreparationService } from './combatPreparation.js';
 import {
@@ -26,55 +17,38 @@ import {
   reportProcessingFailure,
   safeProcessingFailure,
 } from '../processingErrors.js';
-import { KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from '../domain/versions.js';
 import { isDeepStrictEqual } from 'node:util';
-import {
-  gameplayResponseSchema,
-  gameplayResponseJsonSchema,
-  type GameplayResponse,
-} from '../domain/gameplayResponse.js';
 import { freezeKnowledge } from '../domain/knowledgeRecall.js';
-import { ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from '../domain/versions.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { Store, ownerId } from '../store.js';
 import { withResponseRetries } from '../domain/responseRetry.js';
 import { Problem, conflict } from '../errors.js';
-import type { Campaign, Turn, ProviderSettings, Memory, GMResponse } from '../domain/types.js';
+import type { Campaign, Turn, ProviderSettings, Memory } from '../domain/types.js';
 import type { Generator } from '../providers/service.js';
+import type { GameplayToolDefinition } from '../providers/gameplayTools.js';
 import {
   buildContext,
   compactionBatch,
   recentGameplayHistory,
   olderHistoryBytes,
 } from '../domain/context.js';
-import {
-  responseSchema,
-  responseJsonSchema,
-  memoryJsonSchema,
-  memorySchema,
-} from '../domain/schemas.js';
+import { memoryJsonSchema, memorySchema } from '../domain/schemas.js';
 import { applyResponse, undoSnapshot } from '../domain/state.js';
 import { TurnStatus } from '../domain/options.js';
 import { DiceService, gameplayDigest } from './dice.js';
-import {
-  diceResponseSchema,
-  validateRollInterpretations,
-  validateRollPlacement,
-  type DiceResponse,
-} from '../domain/diceResponse.js';
-import { GM_RESPONSE_SCHEMA_VERSION } from '../domain/versions.js';
+import { validateRollInterpretations, validateRollPlacement } from '../domain/diceResponse.js';
+import { validateRuleCitations } from '../domain/ruleCitationValidation.js';
 import { RuleStore, ruleContext } from './ruleStore.js';
 import { RuleLookup } from './ruleLookup.js';
 import { generateRuleMapping } from '../domain/ruleMapping.js';
-import { RuleSystemKind, type RuleSystem, type RulePrompt } from '../domain/rules.js';
-import { GameplayTools } from '../providers/gameplayTools.js';
 import {
-  ruleResponseSchema,
-  ruleResponseJsonSchema,
-  validateRuleCitations,
-  type RuleResponse,
-} from '../domain/ruleResponse.js';
+  RuleSystemKind,
+  type RuleSystem,
+  type RulePrompt,
+  type RuleRead,
+} from '../domain/rules.js';
+import { GameplayTools } from '../providers/gameplayTools.js';
 const TURN_LEASE_SECONDS = 45;
 const TURN_HEARTBEAT_INTERVAL_MS = 10_000;
 const AUTO_COMPACTION_HISTORY_THRESHOLD_BYTES = 6_000;
@@ -82,8 +56,7 @@ export class TurnService {
   private aborts = new Map<string, AbortController>();
   constructor(
     readonly store: Store,
-    readonly generator: Generator,
-    readonly responseVersion = ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+    readonly generator: Generator
   ) {}
   private gameplayCapacity(settings: ProviderSettings, ceiling: number): Promise<number> {
     return (
@@ -105,7 +78,7 @@ export class TurnService {
   ): Promise<number> {
     const selected = await new RuleStore(this.store).resolve(campaign);
     if (selected.kind !== RuleSystemKind.Library) return this.gameplayCapacity(settings, ceiling);
-    if (!this.generator.generateBookGameplay || !this.generator.bookGameplayCapacity)
+    if (!this.generator.bookGameplayCapacity)
       throw new Problem(
         503,
         'rules_provider_unavailable',
@@ -130,7 +103,7 @@ export class TurnService {
       return this.store.turn(campaignId, prior.rows[0].document.id);
     }
     const initialCampaign = await this.store.campaign(campaignId);
-    const capacity = await this.selectedCapacity(
+    await this.selectedCapacity(
       initialCampaign,
       input.settings ?? initialCampaign.settings,
       Infinity
@@ -167,31 +140,10 @@ export class TurnService {
         ruleContext: ruleContext(system),
       };
       const history = await this.store.activeTurns(c.id, client);
-      const rules = await this.store.retrieve(
-        c,
-        t.action,
-        client,
-        this.responseVersion >= AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
-          ? typeof c.state.scene === 'string'
-            ? c.state.scene
-            : ''
-          : undefined
-      );
+      const rules = await this.store.retrieve(c, t.action, client, sceneText(c));
       let context = null;
       try {
-        context = buildContext(
-          c,
-          history,
-          t.action,
-          rules,
-          capacity,
-          !!this.generator.generateOwnedGameplay ||
-            !!this.generator.generateGameplay ||
-            system.kind === RuleSystemKind.Library,
-          this.rulePrompt(system),
-          this.generator.generateOwnedGameplay ? this.responseVersion : undefined,
-          !!this.generator.generateOwnedGameplay && usesAuditedContract(this.responseVersion)
-        );
+        context = buildContext(c, history, t.action, rules, this.rulePrompt(system));
       } catch (e) {
         if (!(e instanceof Problem && e.code === 'context_overflow')) throw e;
       }
@@ -300,7 +252,7 @@ export class TurnService {
         [previous.diceSessionId, campaignId]
       );
       const saved = session.rows[0];
-      if (!saved || saved.imported)
+      if (!saved || saved.imported || !saved.system_prompt)
         throw conflict(
           'Game context changed or this archive session is non-executable; start a new action'
         );
@@ -321,15 +273,10 @@ export class TurnService {
           ...previous.context,
           prompt: saved.frozen_prompt,
           revision: campaign.revision,
-          ...((saved.prompt_contract_version ?? 0) >= KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
-            ? {
-                diceSessionId: saved.id,
-                promptContractVersion: saved.prompt_contract_version as 4 | 5 | 6,
-                systemPrompt: saved.system_prompt,
-                frozenKnowledge: saved.frozen_knowledge,
-                ...(saved.frozen_sources ? { frozenSources: saved.frozen_sources } : {}),
-              }
-            : {}),
+          diceSessionId: saved.id,
+          systemPrompt: saved.system_prompt,
+          frozenKnowledge: saved.frozen_knowledge,
+          ...(saved.frozen_sources ? { frozenSources: saved.frozen_sources } : {}),
         },
         createdAt: new Date().toISOString(),
         completedAt: null,
@@ -386,8 +333,7 @@ export class TurnService {
         [t.diceSessionId, campaignId]
       );
       const session = saved.rows[0];
-      if (!session || !usesAuditedContract(session.prompt_contract_version))
-        throw conflict('Saved editing context is missing');
+      if (!session?.system_prompt) throw conflict('Saved editing context is missing');
       t.context = {
         ...t.context!,
         prompt: session.frozen_prompt,
@@ -460,7 +406,7 @@ export class TurnService {
       });
       let c = await this.store.campaign(t.campaignId);
       let history = await this.store.activeTurns(c.id);
-      const capacity = await this.selectedCapacity(c, t.settings, Infinity);
+      await this.selectedCapacity(c, t.settings, Infinity);
       let needs =
         olderHistoryBytes(c, history) > AUTO_COMPACTION_HISTORY_THRESHOLD_BYTES ||
         !t.context?.prompt;
@@ -500,30 +446,15 @@ export class TurnService {
         await this.store.transaction(async (client) => {
           const { campaign, turn } = await this.lockedOwned(t, client);
           const h = await this.store.activeTurns(campaign.id, client);
-          const rules = await this.store.retrieve(
-            campaign,
-            t.action,
-            client,
-            this.responseVersion >= AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
-              ? typeof campaign.state.scene === 'string'
-                ? campaign.state.scene
-                : ''
-              : undefined
-          );
+          const rules = await this.store.retrieve(campaign, t.action, client, sceneText(campaign));
           turn.context = buildContext(
             campaign,
             h,
             t.action,
             rules,
-            capacity,
-            !!this.generator.generateOwnedGameplay ||
-              !!this.generator.generateGameplay ||
-              t.ruleContext?.kind === RuleSystemKind.Library,
             t.ruleContext
               ? this.rulePrompt(await new RuleStore(this.store).guard(t.ruleContext, client))
-              : undefined,
-            this.generator.generateOwnedGameplay ? this.responseVersion : undefined,
-            !!this.generator.generateOwnedGameplay && usesAuditedContract(this.responseVersion)
+              : undefined
           );
           t.context = turn.context;
           await this.store.saveTurn(turn, client);
@@ -537,288 +468,180 @@ export class TurnService {
           }
           await traceEvent(trace, 'execution_attempt', { attempt });
           const dice = new DiceService(this.store);
-          let diceResponse:
-            DiceResponse | RuleResponse | GameplayResponse | AuditedGameplayResponse | undefined;
-          let response: GMResponse | GameplayResponse | AuditedGameplayResponse;
-          const contract = t.context?.promptContractVersion;
-          const v5 = usesAuditedContract(contract);
-          const v6 = usesCombatContract(contract);
-          const v4 = v5 || contract === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
           const combat = new CombatPreparationService(this.store);
-          let registry: GameplayTools | undefined;
-          let frozenDefinitions:
-            import('../providers/gameplayTools.js').GameplayToolDefinition[] | undefined;
-          if (v4 && t.diceSessionId) {
+          let frozenDefinitions: GameplayToolDefinition[] | undefined;
+          if (t.diceSessionId) {
             const saved = await this.store.pool.query(
               'SELECT * FROM dice_sessions WHERE id=$1 AND campaign_id=$2',
               [t.diceSessionId, t.campaignId]
             );
             const root = saved.rows[0];
-            if (
-              !root ||
-              root.prompt_contract_version !== contract ||
-              root.digest_version !== gameplayDigestVersion(contract)
-            )
-              throw new Problem(409, 'dice_context', 'Frozen v4 session metadata is missing');
+            if (!root?.system_prompt)
+              throw new Problem(409, 'dice_context', 'Frozen session metadata is missing');
             t.context!.systemPrompt = root.system_prompt;
             t.context!.frozenKnowledge = root.frozen_knowledge;
-            if (v5) t.context!.frozenSources = root.frozen_sources;
+            t.context!.frozenSources = root.frozen_sources ?? undefined;
             frozenDefinitions = root.tool_definitions;
           }
-          if (v4) {
-            if (!this.generator.generateOwnedGameplay)
-              throw new Problem(
-                503,
-                'gameplay_unavailable',
-                'Owned knowledge gameplay is not available for this provider'
-              );
-            c = await this.store.campaign(t.campaignId);
-            const frozen = t.context!.frozenKnowledge ?? freezeKnowledge(c, contract);
-            const rules = new RuleStore(this.store);
-            const lookup = new RuleLookup();
-            const sourceLookup = new CampaignSourceLookup(this.store);
-            registry = new GameplayTools({
-              ruleFind:
-                v5 &&
-                (!frozenDefinitions ||
-                  frozenDefinitions.some((tool) => tool.name === RULE_FIND_TOOL_NAME)),
-              book: t.ruleContext?.kind === RuleSystemKind.Library,
-              knowledge: frozen,
-              readCampaignSource: v5
-                ? (tool, input, requestId) =>
-                    sourceLookup.read(t, tool, input, `repair:${attempt}:${requestId}`, ctl.signal)
-                : undefined,
-              signal: ctl.signal,
-              roll: (input) => dice.roll(t.diceSessionId!, t, input),
-              read: async (tool, input, requestId) =>
-                (
-                  await rules.read(
-                    t,
-                    tool,
-                    input,
-                    `repair:${attempt}:${requestId}`,
-                    lookup,
-                    ctl.signal
-                  )
-                ).payload,
-              assertActive: async () => {
-                await this.store.transaction(async (client) => {
-                  await this.lockedOwned(t, client);
-                });
-              },
-              ...(v6 ? { prepareCombat: (input: unknown) => combat.prepare(t, input) } : {}),
-            });
-          }
-          if (
-            v4 ||
-            this.generator.generateGameplay ||
-            t.ruleContext?.kind === RuleSystemKind.Library
-          ) {
-            if (!t.diceSessionId) {
-              c = await this.store.campaign(t.campaignId);
-              history = await this.store.activeTurns(c.id);
-              const characters = JSON.parse(t.context!.prompt).mandatory.characters as {
-                id: string;
-              }[];
-              t.diceSessionId = await dice.createSession(
-                t,
-                gameplayDigest(c, history, t.ruleContext, gameplayDigestVersion(contract)),
-                [
-                  ...new Set([
-                    ...characters.map((character) => character.id),
-                    ...(t.context!.frozenKnowledge?.npcCharacters ?? []).map((npc) => npc.id),
-                  ]),
-                ],
-                v4
-                  ? {
-                      promptContractVersion: contract,
-                      digestVersion: gameplayDigestVersion(contract),
-                      frozenSources: t.context!.frozenSources,
-                      systemPrompt: t.context!.systemPrompt!,
-                      knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c, contract),
-                      toolDefinitions: registry!.definitions,
-                    }
-                  : undefined
-              );
-            }
-            if (v4 && frozenDefinitions) {
-              const actual = registry!.definitions;
-              if (!isDeepStrictEqual(actual, frozenDefinitions))
-                throw new Problem(
-                  409,
-                  'dice_context',
-                  'Frozen gameplay tool definitions changed; start a new action'
-                );
-              registry!.call.definitions = frozenDefinitions;
-            }
-            const existing = await dice.records(t.diceSessionId);
-            const specifications = existing.map(
-              ({
-                id: _id,
-                sessionId: _sessionId,
-                campaignId: _campaignId,
-                createdAt: _createdAt,
-                groups,
-                ...input
-              }) => ({
-                ...input,
-                groups: groups.map((group) => ({
-                  label: group.label,
-                  sides: group.sides,
-                  count: group.faces.length,
-                })),
-              })
+          if (!this.generator.generateOwnedGameplay)
+            throw new Problem(
+              503,
+              'gameplay_unavailable',
+              'Owned gameplay is not available for this provider'
             );
-            // Preparation receipts belong to the logical session; retries reuse their identities.
-            const preparations = v6
-              ? (await combat.authorization(t.diceSessionId)).preparations.map(
-                  ({ preparationKey, payload }) => ({
-                    localKey: preparationKey,
-                    encounterId: payload.encounterId,
-                    participants: payload.participants.map(({ characterId, label }) => ({
-                      characterId,
-                      label,
-                    })),
-                    createOperations: payload.createOperations,
-                  })
+          c = await this.store.campaign(t.campaignId);
+          const rules = new RuleStore(this.store);
+          const lookup = new RuleLookup();
+          const sourceLookup = new CampaignSourceLookup(this.store);
+          const registry = new GameplayTools({
+            book: t.ruleContext?.kind === RuleSystemKind.Library,
+            knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c, true),
+            readCampaignSource: (tool, input, requestId) =>
+              sourceLookup.read(t, tool, input, `repair:${attempt}:${requestId}`, ctl.signal),
+            signal: ctl.signal,
+            roll: (input) => dice.roll(t.diceSessionId!, t, input),
+            read: async (tool, input, requestId) =>
+              (
+                await rules.read(
+                  t,
+                  tool,
+                  input,
+                  `repair:${attempt}:${requestId}`,
+                  lookup,
+                  ctl.signal
                 )
-              : [];
-            const prompt =
-              t.context!.prompt +
-              (feedback ? `\nResponse correction: ${feedback}` : '') +
-              (specifications.length
-                ? '\nReplay the original requests in order with exactly these specifications before appending any dice: ' +
-                  JSON.stringify(specifications)
-                : '') +
-              (preparations.length
-                ? '\nCombat preparations already recorded for this action; reuse these IDs and repeat combat_prepare only with identical arguments: ' +
-                  JSON.stringify(preparations)
-                : '');
-            if (v4) {
-              const raw = await this.generator.generateOwnedGameplay!(
-                t.settings,
-                prompt,
-                v6
-                  ? gameplayResponseV6WireJsonSchema
-                  : v5
-                    ? gameplayResponseV5WireJsonSchema
-                    : gameplayResponseJsonSchema,
-                t.context!.systemPrompt!,
-                this.tracedTools(registry!, trace),
-                ctl.signal,
-                trace
-              );
-              diceResponse = v5
-                ? (raw as AuditedGameplayResponse)
-                : gameplayResponseSchema.parse(raw);
-            } else if (t.ruleContext?.kind === RuleSystemKind.Library) {
-              const rules = new RuleStore(this.store);
-              const lookup = new RuleLookup();
-              const registry = new GameplayTools({
-                book: true,
-                limits: await this.generator.bookGameplayLimits?.(t.settings),
-                signal: ctl.signal,
-                roll: (input) => dice.roll(t.diceSessionId!, t, input),
-                read: async (tool, input, requestId) =>
-                  (
-                    await rules.read(
-                      t,
-                      tool,
-                      input,
-                      `repair:${attempt}:${requestId}`,
-                      lookup,
-                      ctl.signal
-                    )
-                  ).payload,
-                assertActive: async () => {
-                  await this.store.transaction(async (client) => {
-                    await this.lockedOwned(t, client);
-                  });
-                },
+              ).payload,
+            assertActive: async () => {
+              await this.store.transaction(async (client) => {
+                await this.lockedOwned(t, client);
               });
-              diceResponse = ruleResponseSchema.parse(
-                await this.generator.generateBookGameplay!(
-                  t.settings,
-                  prompt,
-                  ruleResponseJsonSchema,
-                  registry.call,
-                  ctl.signal
-                )
-              );
-            } else
-              diceResponse = diceResponseSchema.parse(
-                await this.generator.generateGameplay!(
-                  t.settings,
-                  prompt,
-                  (input) => dice.roll(t.diceSessionId!, t, input),
-                  ctl.signal
-                )
-              );
-            response = v4
-              ? (diceResponse as GameplayResponse | AuditedGameplayResponse)
-              : {
-                  version: GM_RESPONSE_SCHEMA_VERSION,
-                  narrative: diceResponse.narrative,
-                  operations: diceResponse.operations,
-                };
-          } else {
-            response = responseSchema.parse(
-              await this.generator.generate(
-                t.settings,
-                t.context!.prompt + (feedback ? `\nResponse correction: ${feedback}` : ''),
-                responseJsonSchema,
-                ctl.signal
-              )
+            },
+            prepareCombat: (input) => combat.prepare(t, input),
+          });
+          if (!t.diceSessionId) {
+            c = await this.store.campaign(t.campaignId);
+            history = await this.store.activeTurns(c.id);
+            const characters = JSON.parse(t.context!.prompt).mandatory.characters as {
+              id: string;
+            }[];
+            t.diceSessionId = await dice.createSession(
+              t,
+              gameplayDigest(c, history, t.ruleContext),
+              [
+                ...new Set([
+                  ...characters.map((character) => character.id),
+                  ...(t.context!.frozenKnowledge?.npcCharacters ?? []).map((npc) => npc.id),
+                ]),
+              ],
+              {
+                frozenSources: t.context!.frozenSources,
+                systemPrompt: t.context!.systemPrompt!,
+                knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c, true),
+                toolDefinitions: registry.definitions,
+              }
             );
           }
-          try {
-            if (v5) {
-              await validateWithFieldRepair(
-                response,
-                async (candidate) => {
-                  const parsed = auditedResponseInputSchema(contract!).parse(candidate);
-                  await this.persistResponse(t, parsed, parsed, true);
-                  response = parsed;
-                  diceResponse = parsed;
-                },
-                this.generator,
-                t.settings,
-                ctl.signal,
-                trace,
-                async () =>
-                  this.store.transaction(async (client) => {
-                    const { campaign } = await this.lockedOwned(t, client);
-                    const sources = await new CampaignSourceLookup(this.store).records(
-                      t.campaignId,
-                      t.id,
-                      client
-                    );
-                    const rules = await client.query(
-                      'SELECT id,payload FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
-                      [t.id]
-                    );
-                    return {
-                      sourceSpans: [
-                        ...(t.context?.sourceSpans ?? []),
-                        ...sources.flatMap((read) =>
-                          read.payload.sourceSpan ? [read.payload.sourceSpan] : []
-                        ),
-                      ],
-                      ruleReads: rules.rows,
-                      characters: campaign.characters,
-                      knowledge: campaign.knowledge,
-                      state: campaign.state,
-                      rolls: t.diceSessionId
-                        ? await new DiceService(this.store).records(t.diceSessionId, client)
-                        : [],
-                      ...(v6 && t.diceSessionId
-                        ? { combat: await combat.authorization(t.diceSessionId, client) }
-                        : {}),
-                    };
-                  })
+          if (frozenDefinitions) {
+            if (!isDeepStrictEqual(registry.definitions, frozenDefinitions))
+              throw new Problem(
+                409,
+                'dice_context',
+                'Frozen gameplay tool definitions changed; start a new action'
               );
-            } else await this.persistResponse(t, response, diceResponse, false);
-            await traceEvent(trace, 'validated_candidate', { response, editingPending: v5 });
+            registry.call.definitions = frozenDefinitions;
+          }
+          const existing = await dice.records(t.diceSessionId);
+          const specifications = existing.map(
+            ({
+              id: _id,
+              sessionId: _sessionId,
+              campaignId: _campaignId,
+              createdAt: _createdAt,
+              groups,
+              ...input
+            }) => ({
+              ...input,
+              groups: groups.map((group) => ({
+                label: group.label,
+                sides: group.sides,
+                count: group.faces.length,
+              })),
+            })
+          );
+          // Preparation receipts belong to the logical session; retries reuse their identities.
+          const preparations = (await combat.authorization(t.diceSessionId)).preparations.map(
+            ({ preparationKey, payload }) => ({
+              localKey: preparationKey,
+              encounterId: payload.encounterId,
+              participants: payload.participants.map(({ characterId, label }) => ({
+                characterId,
+                label,
+              })),
+              createOperations: payload.createOperations,
+            })
+          );
+          const prompt =
+            t.context!.prompt +
+            (feedback ? `\nResponse correction: ${feedback}` : '') +
+            (specifications.length
+              ? '\nReplay the original requests in order with exactly these specifications before appending any dice: ' +
+                JSON.stringify(specifications)
+              : '') +
+            (preparations.length
+              ? '\nCombat preparations already recorded for this action; reuse these IDs and repeat combat_prepare only with identical arguments: ' +
+                JSON.stringify(preparations)
+              : '');
+          const raw = await this.generator.generateOwnedGameplay(
+            t.settings,
+            prompt,
+            gameplayResponseWireJsonSchema,
+            t.context!.systemPrompt!,
+            this.tracedTools(registry, trace),
+            ctl.signal,
+            trace
+          );
+          let response = raw as GameplayResponse;
+          try {
+            await validateWithFieldRepair(
+              response,
+              async (candidate) => {
+                const parsed = gameplayResponseInputSchema.parse(candidate);
+                await this.persistResponse(t, parsed, true);
+                response = parsed;
+              },
+              this.generator,
+              t.settings,
+              ctl.signal,
+              trace,
+              async () =>
+                this.store.transaction(async (client) => {
+                  const { campaign } = await this.lockedOwned(t, client);
+                  const sources = await new CampaignSourceLookup(this.store).records(
+                    t.campaignId,
+                    t.id,
+                    client
+                  );
+                  const rules = await client.query(
+                    'SELECT id,payload FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
+                    [t.id]
+                  );
+                  return {
+                    sourceSpans: [
+                      ...(t.context?.sourceSpans ?? []),
+                      ...sources.flatMap((read) =>
+                        read.payload.sourceSpan ? [read.payload.sourceSpan] : []
+                      ),
+                    ],
+                    ruleReads: rules.rows,
+                    characters: campaign.characters,
+                    knowledge: campaign.knowledge,
+                    state: campaign.state,
+                    rolls: await new DiceService(this.store).records(t.diceSessionId!, client),
+                    combat: await combat.authorization(t.diceSessionId!, client),
+                  };
+                })
+            );
+            await traceEvent(trace, 'validated_candidate', { response, editingPending: true });
           } catch (error) {
             await traceEvent(trace, 'candidate_rejected', { code: operationalProblem(error).code });
             throw error;
@@ -836,8 +659,7 @@ export class TurnService {
         },
         ctl.signal
       );
-      if (usesAuditedContract(t.context?.promptContractVersion))
-        await this.finishEditing(t, ctl.signal, trace);
+      await this.finishEditing(t, ctl.signal, trace);
     } catch (e) {
       await traceEvent(trace, 'execution_failed', {
         code: operationalProblem(heartbeatFailure ?? e).code,
@@ -889,11 +711,9 @@ export class TurnService {
     if (!candidate || candidate.status === 'abandoned')
       throw conflict('No saved narrative is available for editing');
     const campaign = await this.store.campaign(t.campaignId);
-    const raw = candidate.rawResponse as { version?: number };
-    const savedResponse = auditedResponseSchema(raw.version ?? 0).parse(raw);
+    const savedResponse = gameplayResponseSchema.parse(candidate.rawResponse);
     const combatLinks =
-      savedResponse.version === 6 &&
-      (savedResponse.combatEffects.length > 0 || savedResponse.participantReferences.length > 0);
+      savedResponse.combatEffects.length > 0 || savedResponse.participantReferences.length > 0;
     const narrative =
       candidate.editedNarrative ??
       (await humanizeNarrative(this.generator, candidate.settings, candidate.rawNarrative, {
@@ -914,7 +734,7 @@ export class TurnService {
       await this.lockedOwned(t, client);
       await repository.complete(t.id, ownerId, candidate.candidateDigest, narrative, client);
     });
-    await this.persistResponse(t, savedResponse, savedResponse, false, narrative);
+    await this.persistResponse(t, savedResponse, false, narrative);
     await traceEvent(trace, 'committed', { narrative, turnId: t.id });
     if (trace?.trace?.incomplete)
       await this.store.pool.query(
@@ -928,153 +748,82 @@ export class TurnService {
   }
   private async persistResponse(
     t: Turn,
-    response: GMResponse | GameplayResponse | AuditedGameplayResponse,
-    diceResponse:
-      DiceResponse | RuleResponse | GameplayResponse | AuditedGameplayResponse | undefined,
+    response: GameplayResponse,
     prepare = false,
     editedNarrative?: string
   ): Promise<void> {
     const dice = new DiceService(this.store);
     await this.store.transaction(async (client) => {
-      const v4 = response.version >= KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
       const { campaign, turn } = await this.lockedOwned(t, client);
-      if (usesAuditedContract(response.version)) {
-        const sourceReads = await new CampaignSourceLookup(this.store).records(
-          t.campaignId,
-          t.id,
-          client
-        );
-        const rows = await client.query(
-          'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
-          [t.id]
-        );
-        const bound = bindResponseCitations(response as AuditedGameplayResponse, {
+      const sessionId = t.diceSessionId!;
+      const sourceReads = await new CampaignSourceLookup(this.store).records(
+        t.campaignId,
+        t.id,
+        client
+      );
+      const ruleReads = await turnRuleReads(t.id, client);
+      const sourceSpans = [
+        ...(t.context?.sourceSpans ?? []),
+        ...sourceReads.flatMap((read) =>
+          read.payload.sourceSpan ? [sourceSpanSchema.parse(read.payload.sourceSpan)] : []
+        ),
+      ];
+      Object.assign(
+        response,
+        bindResponseCitations(response, {
           campaignId: t.campaignId,
           turnId: t.id,
           ruleContext: t.ruleContext,
-          sourceSpans: [
-            ...(t.context?.sourceSpans ?? []),
-            ...sourceReads.flatMap((read) =>
-              read.payload.sourceSpan ? [sourceSpanSchema.parse(read.payload.sourceSpan)] : []
-            ),
-          ],
-          ruleReads: rows.rows.map((row) => ({
-            id: row.id,
-            campaignId: row.campaign_id,
-            turnId: row.turn_id,
-            context: row.captured_context,
-            tool: row.tool_name,
-            transportRequestId: row.transport_request_id,
-            argumentDigest: row.argument_digest,
-            resultHash: row.result_hash,
-            payload: row.payload,
-            createdAt: new Date(row.created_at).toISOString(),
-          })),
+          sourceSpans,
+          ruleReads,
+        })
+      );
+      const records = await dice.records(sessionId, client);
+      const attempt = await client.query('SELECT next_slot FROM dice_attempts WHERE turn_id=$1', [
+        t.id,
+      ]);
+      if (attempt.rows[0]?.next_slot !== records.length)
+        throw new Problem(
+          409,
+          'dice_replay',
+          'Replay every original roll before completing the retry'
+        );
+      atResponseField(['rollInterpretations'], () => {
+        validateRollInterpretations(
+          response,
+          records.map((record) => record.id)
+        );
+        validateRollPlacement({
+          narrative: editedNarrative ?? response.narrative,
+          rollInterpretations: response.rollInterpretations,
         });
-        Object.assign(response, bound);
-      }
-      if (diceResponse && t.diceSessionId) {
-        const records = await dice.records(t.diceSessionId, client);
-        const attempt = await client.query('SELECT next_slot FROM dice_attempts WHERE turn_id=$1', [
-          t.id,
-        ]);
-        if (attempt.rows[0]?.next_slot !== records.length)
-          throw new Problem(
-            409,
-            'dice_replay',
-            'Replay every original roll before completing the retry'
-          );
-        atResponseField(['rollInterpretations'], () => {
-          validateRollInterpretations(
-            diceResponse!,
-            records.map((record) => record.id)
-          );
-          validateRollPlacement({
-            narrative: editedNarrative ?? diceResponse!.narrative,
-            rollInterpretations: diceResponse!.rollInterpretations,
-          });
-        });
-        turn.rollInterpretations = diceResponse.rollInterpretations;
-        turn.rolls = records;
-        if ('ruleCitations' in diceResponse && t.ruleContext?.kind === RuleSystemKind.Library) {
-          const rows = await client.query(
-            'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
-            [t.id]
-          );
-          const reads = rows.rows.map((row) => ({
-            id: row.id,
-            campaignId: row.campaign_id,
-            turnId: row.turn_id,
-            context: row.captured_context,
-            tool: row.tool_name,
-            transportRequestId: row.transport_request_id,
-            argumentDigest: row.argument_digest,
-            resultHash: row.result_hash,
-            payload: row.payload,
-            createdAt: new Date(row.created_at).toISOString(),
-          }));
-          validateRuleCitations(diceResponse, reads, t.campaignId, t.id, t.ruleContext);
-          turn.ruleCitations = diceResponse.ruleCitations;
-        }
-      }
-      if (
-        v4 &&
-        t.ruleContext?.kind !== RuleSystemKind.Library &&
-        (diceResponse as GameplayResponse | AuditedGameplayResponse).ruleCitations.length
-      )
+      });
+      turn.rollInterpretations = response.rollInterpretations;
+      turn.rolls = records;
+      if (t.ruleContext?.kind === RuleSystemKind.Library) {
+        validateRuleCitations(response, ruleReads, t.campaignId, t.id, t.ruleContext);
+        turn.ruleCitations = response.ruleCitations;
+      } else if (response.ruleCitations.length)
         throw new Problem(
           502,
           'rules_citations_invalid',
           'No original-book citations are available without a library'
         );
-      const knowledgeReads = v4
-        ? await client.query(
-            'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
-            [t.id]
-          )
-        : undefined;
-      if (usesAuditedContract(response.version))
-        turn.sourceReads = await new CampaignSourceLookup(this.store).records(
-          t.campaignId,
-          t.id,
-          client
-        );
+      turn.sourceReads = sourceReads;
       const applied = applyResponse(campaign, response, t.id, {
         campaignId: campaign.id,
         turnId: t.id,
-        sourceSpans: [
-          ...(t.context?.sourceSpans ?? []),
-          ...(usesAuditedContract(response.version)
-            ? (turn.sourceReads ?? []).flatMap((read) =>
-                read.payload.sourceSpan ? [sourceSpanSchema.parse(read.payload.sourceSpan)] : []
-              )
-            : []),
-        ],
+        sourceSpans,
         rolls: turn.rolls,
         ruleContext: t.ruleContext,
-        ruleReads: knowledgeReads?.rows.map((row) => ({
-          id: row.id,
-          campaignId: row.campaign_id,
-          turnId: row.turn_id,
-          context: row.captured_context,
-          tool: row.tool_name,
-          transportRequestId: row.transport_request_id,
-          argumentDigest: row.argument_digest,
-          resultHash: row.result_hash,
-          payload: row.payload,
-          createdAt: new Date(row.created_at).toISOString(),
-        })),
-        ...(usesCombatContract(response.version) && t.diceSessionId
-          ? {
-              combat: {
-                authorization: await new CombatPreparationService(this.store).authorization(
-                  t.diceSessionId,
-                  client
-                ),
-                narrative: editedNarrative ?? response.narrative,
-              },
-            }
-          : {}),
+        ruleReads,
+        combat: {
+          authorization: await new CombatPreparationService(this.store).authorization(
+            sessionId,
+            client
+          ),
+          narrative: editedNarrative ?? response.narrative,
+        },
       });
       if (prepare) {
         await new NarrativeCandidateRepository(this.store.pool).save(
@@ -1099,12 +848,9 @@ export class TurnService {
       applied.campaign.revision++;
       turn.narrative = editedNarrative ?? response.narrative;
       turn.editingPending = false;
-      if (usesAuditedContract(response.version))
-        turn.operationExplanations = (response as AuditedGameplayResponse).operationExplanations;
-      if (usesCombatContract(response.version)) {
-        turn.combatEffects = (response as GameplayResponseV6).combatEffects;
-        turn.participantReferences = (response as GameplayResponseV6).participantReferences;
-      }
+      turn.operationExplanations = response.operationExplanations;
+      turn.combatEffects = response.combatEffects;
+      turn.participantReferences = response.participantReferences;
       turn.changes = applied.changes;
       turn.status = TurnStatus.Completed;
       turn.completedAt = new Date().toISOString();
@@ -1202,4 +948,23 @@ export class TurnService {
       );
     });
   }
+}
+const sceneText = (c: Campaign) => (typeof c.state.scene === 'string' ? c.state.scene : '');
+async function turnRuleReads(turnId: string, client: PoolClient): Promise<RuleRead[]> {
+  const rows = await client.query(
+    'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
+    [turnId]
+  );
+  return rows.rows.map((row) => ({
+    id: row.id,
+    campaignId: row.campaign_id,
+    turnId: row.turn_id,
+    context: row.captured_context,
+    tool: row.tool_name,
+    transportRequestId: row.transport_request_id,
+    argumentDigest: row.argument_digest,
+    resultHash: row.result_hash,
+    payload: row.payload,
+    createdAt: new Date(row.created_at).toISOString(),
+  }));
 }

@@ -8,10 +8,6 @@ import { Problem } from '../errors.js';
 import { appRoot, uploadBytes } from '../config.js';
 import type { Source } from '../domain/types.js';
 import { OCR_LANGUAGE_CODES, SourceKind, SourceStatus, SourcePurpose } from '../domain/options.js';
-import {
-  ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-  AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-} from '../domain/versions.js';
 import { ocrLanguageSchema, transcriptionLanguageSchema } from '../domain/schemas.js';
 import {
   MAX_SOURCE_PAGES,
@@ -42,9 +38,7 @@ export function textSource(
     version: 1,
     pages: [],
     warnings: [],
-    ...(ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION >= AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
-      ? { purpose: purpose ?? SourcePurpose.Reference }
-      : {}),
+    purpose: purpose ?? SourcePurpose.Reference,
   };
 }
 export async function extractFile(

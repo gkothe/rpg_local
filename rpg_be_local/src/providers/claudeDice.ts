@@ -3,23 +3,16 @@ import { cliFailure, finishProcessingCleanup } from '../processingErrors.js';
 import type { Executable } from './discovery.js';
 import type { ProviderSettings } from '../domain/types.js';
 import { Problem } from '../errors.js';
-import { DICE_TOOL_NAME } from '../domain/dice.js';
-import {
-  DICE_NARRATOR,
-  DiceProtocol,
-  type RollCallback,
-  CLAUDE_DICE_EVENT,
-  CLAUDE_DICE_SUBTYPE,
-  CLAUDE_DICE_SERVER_STATUS,
-  CLAUDE_DICE_CONTENT_TYPE,
-} from './diceProtocol.js';
-import { startDiceMcp } from './diceMcp.js';
 import { runProcess } from './processRunner.js';
 import { logPrompt, traceEvent, safeTraceFailure, type PromptTraceContext } from './promptLog.js';
 import { startGameplayMcp } from './gameplayMcp.js';
-import { gameplayToolDefinitions, type BookGameplayAdapter } from './gameplayTools.js';
-import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
+import { type GameplayAdapter } from './gameplayTools.js';
 import { nativeGameplaySchema } from './gameplayContract.js';
+
+const CLAUDE_DICE_EVENT = { System: 'system', Assistant: 'assistant', Result: 'result' } as const;
+const CLAUDE_DICE_SUBTYPE = { Init: 'init', Success: 'success' } as const;
+const CLAUDE_DICE_SERVER_STATUS = { Connected: 'connected' } as const;
+const CLAUDE_DICE_CONTENT_TYPE = { ToolUse: 'tool_use' } as const;
 
 // Tested evidence baseline only; version differences produce a warning, never a gate.
 export const CLAUDE_DICE_VERSION = '2.1.232';
@@ -46,23 +39,13 @@ export async function generateClaudeDice(
   prompt: string,
   cwd: string,
   env: NodeJS.ProcessEnv,
-  roll: RollCallback,
+  adapter: GameplayAdapter,
   signal?: AbortSignal,
-  book?: BookGameplayAdapter,
   trace?: PromptTraceContext
 ): Promise<unknown> {
-  const names = (book?.definitions ?? gameplayToolDefinitions(!!book)).map(
-    (definition) => `mcp__dice__${definition.name}`
-  );
+  const names = adapter.definitions.map((definition) => `mcp__dice__${definition.name}`);
   const isolated = claudeDiceEnvironment(env);
-  const protocol = new DiceProtocol(roll);
-  const endpoint = book
-    ? await startGameplayMcp(
-        book.definitions ?? gameplayToolDefinitions(true),
-        book.dispatch,
-        signal
-      )
-    : await startDiceMcp((input, id) => protocol.call(DICE_TOOL_NAME, input, id), signal);
+  const endpoint = await startGameplayMcp(adapter.definitions, adapter.dispatch, signal);
   let failed = false;
   try {
     const config = JSON.stringify({
@@ -72,10 +55,10 @@ export async function generateClaudeDice(
     let completed = false;
     let final: unknown;
     await logPrompt(
-      book ? 'generateClaudeBookGameplay' : 'generateClaudeGameplay',
+      'generateClaudeGameplay',
       settings,
       prompt,
-      book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR),
+      adapter.systemPrompt,
       undefined,
       trace
     );
@@ -107,7 +90,7 @@ export async function generateClaudeDice(
         settings.model,
         ...(settings.effort ? ['--effort', settings.effort] : []),
         '--system-prompt',
-        book?.systemPrompt ?? (book ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR),
+        adapter.systemPrompt,
       ],
       '',
       {
@@ -187,7 +170,7 @@ export async function generateClaudeDice(
                 const usage = telemetry.data;
                 const models = Object.values(usage);
                 await traceEvent(trace, 'usage', { models: usage, modelTurns: event.num_turns });
-                book?.observe?.({
+                adapter.observe?.({
                   provider: 'claude',
                   contextWindow:
                     models.length && models.every((value) => value.contextWindow !== undefined)
@@ -217,7 +200,7 @@ export async function generateClaudeDice(
     );
     if (!completed)
       throw new Problem(502, 'provider_protocol', 'Claude closed before completing the dice turn');
-    const validated = nativeGameplaySchema(book, !!book).parse(final);
+    const validated = nativeGameplaySchema().parse(final);
     await traceEvent(trace, 'final', { response: validated });
     return validated;
   } catch (error) {

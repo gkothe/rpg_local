@@ -5,7 +5,6 @@ import {
   combatEncounterSchema,
   participantReferenceSchema,
   paragraphCount,
-  structuredEncounter,
 } from '../domain/combat.js';
 import { MAX_ENTITY_NAME_CHARS } from '../domain/limits.js';
 import type { JsonObject } from '../domain/types.js';
@@ -58,25 +57,24 @@ const invalid = (message: string): never => {
   throw new Problem(422, 'archive_invalid', message);
 };
 
-/** Only an explicit tracking version is structured; free-form legacy combat stays text-like. */
+/** state.combat is absent or a structured encounter; free-form notes live in combatNotes. */
 export function archivedEncounter(state: JsonObject) {
-  const combat = state.combat;
-  if (!combat || typeof combat !== 'object' || !('trackingVersion' in combat)) return null;
-  if (!combatEncounterSchema.safeParse(combat).success)
-    invalid('Structured combat state is invalid');
-  return structuredEncounter(state);
+  if (state.combat === undefined) return null;
+  const parsed = combatEncounterSchema.safeParse(state.combat);
+  if (!parsed.success) invalid('Combat state must be a structured encounter');
+  return parsed.data!;
 }
 
 export type CombatArchiveLinks = {
   character: (id: string) => void;
   encounter: (id: string) => void;
 };
-/** Validate v7 combat links and register every structural identity for remapping. */
+/** Validate combat links and register every structural identity for remapping. */
 export function validateCombatArchive(
   input: {
     campaignId: string;
     states: JsonObject[];
-    sessions: { id: string; promptContractVersion?: number }[];
+    sessions: { id: string }[];
     turns: {
       id: string;
       diceSessionId?: string;
@@ -93,9 +91,7 @@ export function validateCombatArchive(
   },
   links: CombatArchiveLinks
 ): void {
-  const combatSessions = new Set(
-    input.sessions.filter((s) => s.promptContractVersion === 6).map((s) => s.id)
-  );
+  const sessions = new Set(input.sessions.map((s) => s.id));
   const turnIds = new Set(input.turns.map((t) => t.id));
   for (const state of input.states) {
     const encounter = archivedEncounter(state);
@@ -108,7 +104,7 @@ export function validateCombatArchive(
   for (const prep of input.preparations) {
     if (
       prep.campaignId !== input.campaignId ||
-      !combatSessions.has(prep.sessionId) ||
+      !sessions.has(prep.sessionId) ||
       !turnIds.has(prep.turnId) ||
       prep.payload.receiptId !== prep.id ||
       prep.payload.encounterId !== prep.encounterId ||
@@ -150,15 +146,15 @@ export function validateCombatArchive(
         invalid('Prepared create operation does not match its receipt');
   for (const record of input.records)
     if (record.encounterId) {
-      if (!combatSessions.has(record.sessionId)) invalid('Combat rolls require a combat session');
+      if (!sessions.has(record.sessionId)) invalid('Combat rolls require their dice session');
       links.encounter(record.encounterId);
     }
   for (const turn of input.turns) {
     const effects = turn.combatEffects ?? [];
     const references = turn.participantReferences ?? [];
     if (!effects.length && !references.length) continue;
-    if (!turn.diceSessionId || !combatSessions.has(turn.diceSessionId))
-      invalid('Combat links require a version 6 session');
+    if (!turn.diceSessionId || !sessions.has(turn.diceSessionId))
+      invalid('Combat links require their dice session');
     for (const effect of effects) {
       if (effect.rollIds.some((id) => !turn.rolls?.some((roll) => roll.id === id)))
         invalid('Unresolved combat effect roll');

@@ -1,7 +1,6 @@
-import { GameplayTools } from '../src/providers/gameplayTools.js';
+import { emptyKnowledge, ownedTools } from './ownedGameplayFixture.js';
 import { validateRuleCitations, citationPages } from '../src/domain/ruleCitationValidation.js';
 import { ruleCitationSchema, RuleReview } from '../src/domain/rules.js';
-import { ARCHIVE_FORMAT_VERSION } from '../src/domain/versions.js';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
@@ -260,7 +259,6 @@ function bookFiles(slug: string, body: string): RuleUpload[] {
       bytes: Buffer.from(
         JSON.stringify({
           format: 'rules-book',
-          version: 1,
           source: { slug, title: slug, pageCount: 2, pdfHash: null },
           columns: [
             {
@@ -323,8 +321,13 @@ test(
         "INSERT INTO turns(id,campaign_id,request_id,payload_hash,status,document,owner,lease_until) VALUES($1,$2,$3,$4,$5,$6,$7,now()+interval '1 minute')",
         [turn.id, campaign.id, turn.requestId, 'original', turn.status, turn, ownerId]
       );
+      const metadata = {
+        systemPrompt: 'Original instructions',
+        knowledge: emptyKnowledge(campaign.id),
+        toolDefinitions: [],
+      };
       const sessionId =
-        mode === 'roll' ? await dice.createSession(turn, 'a'.repeat(64), []) : undefined;
+        mode === 'roll' ? await dice.createSession(turn, 'a'.repeat(64), [], metadata) : undefined;
       const publisher = await store.pool.connect();
       try {
         await publisher.query('BEGIN');
@@ -334,12 +337,13 @@ test(
         const publisherPid = (await publisher.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
         const pending =
           mode === 'session'
-            ? dice.createSession(turn, 'a'.repeat(64), [])
+            ? dice.createSession(turn, 'a'.repeat(64), [], metadata)
             : dice.roll(sessionId!, turn, {
                 slot: 0,
                 reason: 'Original check',
                 declaration: 'No modifiers',
                 groups: [{ label: 'Original', sides: 6, count: 1 }],
+                scope: 'oracle',
               });
         const completed = pending;
         let waiting = false;
@@ -719,7 +723,7 @@ test(
 );
 
 test(
-  'private backup preview restores atomically, preserves local identity/revisions and v3 references resolve by exact key/hash',
+  'private backup preview restores atomically, preserves local identity/revisions and references resolve by exact key/hash',
   { skip: !enabled },
   async () => {
     const { RuleBackup } = await import('../src/services/ruleBackup.js');
@@ -748,6 +752,11 @@ test(
       ...backup,
       system: { ...backup.system, systemKey: `restored-${randomUUID().slice(0, 8)}` },
     };
+    assert.equal(Object.hasOwn(backup, 'version'), false);
+    await assert.rejects(
+      backups.preview(Buffer.from(JSON.stringify({ ...copied, version: 1 }))),
+      /exported by an older app/
+    );
     const fresh = await backups.preview(Buffer.from(JSON.stringify(copied)));
     const identity = { ...fresh, requestId: randomUUID(), replace: false };
     const restored = await backups.confirm(identity);
@@ -792,7 +801,7 @@ test(
     await store.insert(campaign);
     const saves = new LibraryService(store);
     const archive = await saves.export(campaign.id);
-    assert.equal(archive.version, ARCHIVE_FORMAT_VERSION);
+    assert.equal(Object.hasOwn(archive, 'version'), false);
     assert.equal(archive.campaign.ruleSystemId, null);
     assert.equal(archive.campaign.ruleReference?.systemKey, restored.systemKey);
     assert.equal(JSON.stringify(archive).includes('Original synthetic authority.'), false);
@@ -1191,14 +1200,9 @@ test(
     );
 
     const registry = (lookup: RuleLookup, signal?: AbortSignal, interrupt?: () => void) =>
-      new GameplayTools({
+      ownedTools({
         book: true,
-        ruleFind: true,
         signal,
-        assertActive: async () => {},
-        roll: async () => {
-          throw Error('Unexpected dice');
-        },
         read: async (tool, input, id) => {
           const read = await rules.read(turn, tool, input, id, lookup, signal);
           if (tool === 'rules_get') interrupt?.();

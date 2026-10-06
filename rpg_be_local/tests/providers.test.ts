@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { providerArgs, parseProviderOutput } from '../src/providers/adapters.js';
 import { runProcess } from '../src/providers/processRunner.js';
 import { agentDefinition, parseModelCatalog, modelSlug } from '../src/providers/antigravity.js';
-import { responseJsonSchema } from '../src/domain/schemas.js';
+import { gameplayResponseJsonSchema as responseJsonSchema } from '../src/domain/gameplayResponse.js';
 import { ProviderService, type Provider } from '../src/providers/service.js';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -201,9 +201,9 @@ test('Claude invocation retains subscription auth, disables tools/customization 
   assert.deepEqual(
     parseProviderOutput(
       'claude',
-      JSON.stringify({ structured_output: { version: 1, narrative: 'Hi', operations: [] } })
+      JSON.stringify({ structured_output: { narrative: 'Hi', operations: [] } })
     ),
-    { version: 1, narrative: 'Hi', operations: [] }
+    { narrative: 'Hi', operations: [] }
   );
 });
 test('Claude accepts the application schema without an unsupported meta-schema annotation', () => {
@@ -337,7 +337,6 @@ test('rules capability accepts model-supported efforts and Default while preserv
     supported: true,
     reason: null,
     efforts: ['medium'],
-    limits: { ruleCalls: 12, diceCalls: 12, combinedCalls: 24, promptBytes: 8000 },
   };
   service.provider.models[0]!.inputTokens = 16000;
   assert.equal(await service.bookGameplayCapacity(settings), 16000);
@@ -345,10 +344,4 @@ test('rules capability accepts model-supported efforts and Default while preserv
   for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', null])
     assert.equal(await service.bookGameplayCapacity({ ...settings, effort }), 16000);
   assert.equal(await service.capacity(settings), 16000);
-  assert.deepEqual(await service.bookGameplayLimits(settings), {
-    ruleCalls: Number.MAX_SAFE_INTEGER,
-    diceCalls: Number.MAX_SAFE_INTEGER,
-    combinedCalls: Number.MAX_SAFE_INTEGER,
-    promptBytes: 32000,
-  });
 });

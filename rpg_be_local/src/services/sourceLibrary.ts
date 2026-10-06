@@ -5,10 +5,6 @@ import { parseCharacterSource } from './characterParser.js';
 import { sourceSections } from '../domain/sourceSections.js';
 import type { Source } from '../domain/types.js';
 import { SourceKind, SourceStatus, SourcePurpose } from '../domain/options.js';
-import {
-  ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-  AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-} from '../domain/versions.js';
 export class SourceLibrary {
   constructor(readonly store: Store) {}
   async characterDraft(
@@ -30,9 +26,7 @@ export class SourceLibrary {
   add(id: string, revision: number, source: Source, original?: Buffer) {
     return this.store.edit(id, revision, async (c, client) => {
       source.originalAvailable = !!original;
-      if (ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION >= AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
-        source.purpose ??= SourcePurpose.Reference;
-      else delete source.purpose;
+      source.purpose ??= SourcePurpose.Reference;
       c.sources.push(source);
       if (original)
         await client.query(
@@ -62,8 +56,7 @@ export class SourceLibrary {
       const source = c.sources.find((s) => s.id === sourceId);
       if (!source) throw new Problem(404, 'not_found', 'Source not found');
       source.text = input.text;
-      if (ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION >= AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
-        source.purpose = input.purpose ?? source.purpose ?? SourcePurpose.Reference;
+      source.purpose = input.purpose ?? source.purpose ?? SourcePurpose.Reference;
       if (input.name) source.name = input.name;
       source.status = input.confirmed ? SourceStatus.Confirmed : SourceStatus.Draft;
       source.version++;

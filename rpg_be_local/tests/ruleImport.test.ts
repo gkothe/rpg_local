@@ -7,7 +7,6 @@ function fixture(body: string, enrichment?: RuleBookManifest['enrichment']): Rul
   const bytes = Buffer.from(body);
   const manifest: RuleBookManifest = {
     format: 'rules-book',
-    version: 1,
     source: { slug: 'example-core', title: 'Original synthetic book', pageCount: 3, pdfHash: null },
     columns: [
       {
@@ -121,4 +120,13 @@ test('strict UTF-8 rejects malformed byte sequences even when their hashes match
   const files = fixture(header);
   files[0]!.bytes = Buffer.from([0xff]);
   assert.throws(() => parseRuleBook(files), /Invalid UTF-8/);
+});
+test('a manifest prepared by an older app is rejected with regeneration guidance', () => {
+  const [manifest, column] = fixture(header + '<!-- node: a | pages: - | printed: - -->\nText\n');
+  const old = { ...JSON.parse(manifest!.bytes.toString()), version: 1 };
+  assert.throws(
+    () =>
+      parseRuleBook([{ name: 'manifest.json', bytes: Buffer.from(JSON.stringify(old)) }, column!]),
+    /older app; regenerate it with npm run rules:manifest/
+  );
 });

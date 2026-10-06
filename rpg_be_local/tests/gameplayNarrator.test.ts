@@ -5,8 +5,8 @@ import {
   gameplayInstructionEnvelope,
 } from '../src/domain/gameplayNarrator.js';
 
-test('v5 distinguishes documented knowledge from emergent details without changing v4 guidance', () => {
-  const current = gameplayInstructionEnvelope('System', 'Campaign', true, 5);
+test('the envelope separates documented knowledge from emergent details', () => {
+  const current = gameplayInstructionEnvelope('System', 'Campaign', true);
   assert.match(current, /Use origin source only for claims directly supported/);
   assert.match(
     current,
@@ -14,21 +14,17 @@ test('v5 distinguishes documented knowledge from emergent details without changi
   );
   assert.match(current, /separate records when their origins differ/);
   assert.match(current, /Never change origin merely to make evidence pass validation/);
-  assert.doesNotMatch(
-    gameplayInstructionEnvelope('System', 'Campaign', true, 4),
-    /Knowledge provenance:/
-  );
 });
 
-test('NPC guidance is explicitly enabled while legacy envelopes stay identical', () => {
-  const legacy = gameplayInstructionEnvelope('System', 'Campaign', false, 5);
-  assert.equal(gameplayInstructionEnvelope('System', 'Campaign', false, 5, false), legacy);
-  assert.doesNotMatch(legacy, /campaign_npcs_get/);
-  assert.match(
-    gameplayInstructionEnvelope('System', 'Campaign', false, 5, true),
-    /campaign_npcs_get/
-  );
-  assert.match(gameplayInstructionEnvelope('System', 'Campaign', true, 5, true), /before creating/);
+test('every envelope carries NPC retrieval and the combat contract without version labels', () => {
+  for (const book of [false, true]) {
+    const result = gameplayInstructionEnvelope('System', 'Campaign', book);
+    assert.match(result, /campaign_npcs_get/);
+    assert.match(result, /before creating/);
+    assert.match(result, /combat_prepare/);
+    assert.match(result, /state\.combatNotes/);
+    assert.doesNotMatch(result, /trackingVersion|[Vv]ersion [0-9]/);
+  }
 });
 
 test('instruction envelope preserves complete selected and campaign columns once', () => {

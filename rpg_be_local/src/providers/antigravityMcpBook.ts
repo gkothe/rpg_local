@@ -4,21 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { Problem } from '../errors.js';
 import { canonicalRuleJson, serializedBytes } from '../domain/rules.js';
-import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
-import { ruleResponseJsonSchema } from '../domain/ruleResponse.js';
-import { diceResponseJsonSchema } from '../domain/diceResponse.js';
 import { nativeGameplaySchema } from './gameplayContract.js';
 import type { ProviderSettings } from '../domain/types.js';
 import type { Executable } from './discovery.js';
 import { generateAntigravity } from './antigravity.js';
 import { antigravityDiceEnvironment } from './antigravityDice.js';
 import { startGameplayMcp } from './gameplayMcp.js';
-import {
-  gameplayToolDefinitions,
-  gameplayToolRequestBytes,
-  type BookGameplayAdapter,
-} from './gameplayTools.js';
-import { DICE_NARRATOR } from './diceProtocol.js';
+import { gameplayToolRequestBytes, type GameplayAdapter } from './gameplayTools.js';
 import { logPrompt, traceEvent, safeTraceFailure, type PromptTraceContext } from './promptLog.js';
 import { responseRetryFeedback } from '../domain/responseRetry.js';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -44,9 +36,8 @@ export async function generateAntigravityMcpBook(
   prompt: string,
   cwd: string,
   sourceEnv: NodeJS.ProcessEnv,
-  book: BookGameplayAdapter,
+  book: GameplayAdapter,
   signal?: AbortSignal,
-  selectedBook = true,
   trace?: PromptTraceContext
 ): Promise<unknown> {
   const profile = await mkdtemp(path.join(os.tmpdir(), PROFILE_PREFIX));
@@ -54,7 +45,7 @@ export async function generateAntigravityMcpBook(
   const controller = new AbortController();
   const boundedSignal = AbortSignal.any([controller.signal, ...(signal ? [signal] : [])]);
   const env = { ...antigravityDiceEnvironment(sourceEnv), USERPROFILE: profile };
-  const definitions = book.definitions ?? gameplayToolDefinitions(selectedBook);
+  const definitions = book.definitions;
   const tools = definitions.map((definition) => definition.name);
   const pending: PendingCall[] = [];
   const waiters = new Set<() => void>();
@@ -119,9 +110,8 @@ export async function generateAntigravityMcpBook(
       }),
       { flag: 'wx' }
     );
-    const responseJsonSchema =
-      book.schema ?? (selectedBook ? ruleResponseJsonSchema : diceResponseJsonSchema);
-    const responseSchema = nativeGameplaySchema(book, selectedBook);
+    const responseJsonSchema = book.schema;
+    const responseSchema = nativeGameplaySchema();
     const schema = JSON.stringify(responseJsonSchema);
     const phasePrompt = prompt.includes(schema)
       ? prompt
@@ -138,10 +128,7 @@ export async function generateAntigravityMcpBook(
         trace,
         ownedProfile: profile,
         privateMcp: { name: MCP_SERVER, endpoint },
-        agentPrompt:
-          book.systemPrompt !== undefined
-            ? `${book.systemPrompt}\nNative transport: use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests. ${MCP_INVOCATION_GUIDANCE}\nOwned MCP argument schemas:${JSON.stringify(definitions)}`
-            : `${selectedBook ? BOOK_GAMEPLAY_NARRATOR : DICE_NARRATOR} Use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests. ${MCP_INVOCATION_GUIDANCE} This is one bounded logical game turn. The supplied frozen campaign context and application tool results are authoritative. Return only the complete final GM JSON.\nOwned MCP argument schemas:${JSON.stringify(definitions)}`,
+        agentPrompt: `${book.systemPrompt}\nNative transport: use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests. ${MCP_INVOCATION_GUIDANCE}\nOwned MCP argument schemas:${JSON.stringify(definitions)}`,
         timeoutMs: 0,
         deadlineMs: deadline,
         maxOutputBytes: Infinity,
@@ -257,8 +244,7 @@ export async function generateAntigravityMcpBook(
                   !input ||
                   typeof input !== 'object' ||
                   Array.isArray(input) ||
-                  serializedBytes(input) >
-                    gameplayToolRequestBytes(definitions, parameters.ToolName ?? '')
+                  serializedBytes(input) > gameplayToolRequestBytes(parameters.ToolName ?? '')
                 )
                   throw new Problem(
                     422,

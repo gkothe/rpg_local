@@ -10,7 +10,7 @@ function generator(generate: Generator['generate']): Generator {
   return {
     generate,
     capacity: async () => 10000,
-    generateGameplay: async () => {
+    generateOwnedGameplay: async () => {
       throw new Error('Editor must not invoke gameplay');
     },
   };

@@ -5,29 +5,26 @@ import {
   validateOperationExplanations,
   ExplanationBasis,
 } from '../src/domain/operationExplanations.js';
-import {
-  gameplayResponseSchema,
-  gameplayResponseV5Schema,
-} from '../src/domain/gameplayResponse.js';
+import { gameplayResponseSchema } from '../src/domain/gameplayResponse.js';
 import { applyResponse } from '../src/domain/state.js';
 import { newCampaign } from '../src/domain/campaign.js';
+import { CharacterType } from '../src/domain/options.js';
+import { KnowledgeVisibility } from '../src/domain/knowledge.js';
+import { emptyResponse } from './ownedGameplayFixture.js';
 const explain = (operationIndex = 0) => ({
   operationIndex,
   reason: 'Scene begins at dusk',
   basis: ExplanationBasis.InitialState,
   rollIds: [],
   evidence: [],
-  visibility: 'player' as import('../src/domain/knowledge.js').KnowledgeVisibility,
+  visibility: KnowledgeVisibility.Player,
 });
-test('v5 requires an explanation for every mutation, while v4 stays immutable', () => {
+test('every mutation requires exactly one explanation', () => {
   const c = newCampaign({ name: 'Example' });
   const response = {
-    version: 5 as const,
+    ...emptyResponse,
     narrative: 'Dusk.',
     operations: [{ op: 'state' as const, expected: {}, value: { scene: 'dusk' } }],
-    rollInterpretations: [],
-    ruleCitations: [],
-    knowledgeChanges: [],
     operationExplanations: [explain()],
   };
   assert.equal(
@@ -51,9 +48,8 @@ test('v5 requires an explanation for every mutation, while v4 stays immutable', 
     /exactly one/
   );
   assert.throws(() =>
-    gameplayResponseV5Schema.parse({ ...response, operationExplanations: undefined })
+    gameplayResponseSchema.parse({ ...response, operationExplanations: undefined })
   );
-  assert.throws(() => gameplayResponseSchema.parse({ ...response, version: 4 }));
 });
 test('fabricated roll and source evidence cannot justify a mechanical change', () => {
   const context = { campaignId: randomUUID(), turnId: randomUUID() };
@@ -86,7 +82,7 @@ test('description and name edits need no mechanical explanation; private explana
     {
       id,
       name: 'Marta',
-      type: 'npc',
+      type: CharacterType.Npc,
       attributes: {},
       inventory: {},
       description: {},
@@ -95,7 +91,7 @@ test('description and name edits need no mechanical explanation; private explana
     },
   ];
   const base = {
-    version: 5 as const,
+    ...emptyResponse,
     narrative: 'Marta looks tired.',
     operations: [
       {
@@ -106,16 +102,12 @@ test('description and name edits need no mechanical explanation; private explana
         value: { appearance: 'tired' },
       },
     ],
-    rollInterpretations: [],
-    ruleCitations: [],
-    knowledgeChanges: [],
-    operationExplanations: [],
   };
   assert.equal(applyResponse(c, base, randomUUID()).changes[0], 'Marta: description changed');
   const privateReason = {
     ...explain(),
     reason: 'SECRET poison',
-    visibility: 'gm_only' as import('../src/domain/knowledge.js').KnowledgeVisibility,
+    visibility: KnowledgeVisibility.GmOnly,
   };
   assert.deepEqual(
     applyResponse(c, { ...base, operationExplanations: [privateReason] }, randomUUID()).changes,

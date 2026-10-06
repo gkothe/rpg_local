@@ -2,11 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { newCampaign } from '../src/domain/campaign.js';
-import {
-  LibraryService,
-  remapArchive,
-  assertCombatArchiveFormat,
-} from '../src/services/library.js';
+import { LibraryService, remapArchive } from '../src/services/library.js';
 import type { Store } from '../src/store.js';
 import { CharacterType } from '../src/domain/options.js';
 import type { Archive } from '../src/domain/types.js';
@@ -38,7 +34,6 @@ function combatArchive() {
     return { label: 'Soldier', character, introduction, trackedFields: fields };
   };
   const combat = (participants: string[], active = true) => ({
-    trackingVersion: 1,
     id: encounterId,
     active,
     round: 1,
@@ -66,7 +61,6 @@ function combatArchive() {
   };
   return {
     format: 'local-rpg',
-    version: 7,
     campaign,
     turns: [
       {
@@ -124,8 +118,6 @@ function combatArchive() {
         newFaces: 1,
         imported: false,
         createdAt: campaign.createdAt,
-        promptContractVersion: 6,
-        digestVersion: 4,
         systemPrompt: 'Exact instructions',
         frozenKnowledge: {
           campaignId: campaign.id,
@@ -154,7 +146,6 @@ function combatArchive() {
           receiptId: receiptId!,
           encounterId: encounterId!,
           encounter: 'new',
-          legacyCombat: false,
           participants: [a!, b!].map((id) => ({
             characterId: id,
             label: 'Soldier',
@@ -186,10 +177,9 @@ function combatArchive() {
   };
 }
 
-test('archive v7 remaps every structural combat identity consistently and keeps free text', () => {
+test('archive remaps every structural combat identity consistently and keeps free text', () => {
   const input = combatArchive();
   const out = remapArchive(input);
-  assert.equal(out.version, 7);
   const [a, b] = out.campaign.characters.map((c) => c.id);
   assert.notEqual(a, input.campaign.characters[0]!.id);
   const combat = out.campaign.state.combat as {
@@ -252,7 +242,7 @@ test('archive v7 remaps every structural combat identity consistently and keeps 
   assert.doesNotThrow(() => remapArchive(out));
 });
 
-test('archive v7 keeps a removed participant as a historical identity', () => {
+test('archive keeps a removed participant as a historical identity', () => {
   const input = combatArchive();
   const removed = input.campaign.characters[1]!.id;
   input.campaign.characters = input.campaign.characters.slice(0, 1);
@@ -265,27 +255,24 @@ test('archive v7 keeps a removed participant as a historical identity', () => {
   assert.equal(out.snapshots[0]!.afterCharacters[1]!.id, mapped);
 });
 
-test('older archive versions reject combat sessions, scoped rolls and turn links', () => {
-  const input = combatArchive();
-  for (const version of [5, 6])
-    assert.throws(() =>
-      remapArchive({
-        ...input,
-        version,
-        combatPreparations: undefined,
-        combatPreparedCharacters: undefined,
-      })
+test('files exported by an older app are refused and state.combat must be structured', () => {
+  for (const version of [1, 6, 7])
+    assert.throws(
+      () => remapArchive({ ...combatArchive(), version }),
+      (error: unknown) =>
+        error instanceof Problem &&
+        error.code === 'archive_unsupported' &&
+        /older app/.test(error.message)
     );
-  assert.throws(() => assertCombatArchiveFormat(6, 6), /version 7/);
-  assert.doesNotThrow(() => assertCombatArchiveFormat(7, 6));
-  assert.doesNotThrow(() => assertCombatArchiveFormat(6, 5));
-  const legacySession = combatArchive();
-  legacySession.diceSessions[0]!.promptContractVersion = 5;
-  legacySession.diceSessions[0]!.digestVersion = 3;
-  assert.throws(() => remapArchive(legacySession), /scope does not match|Combat/);
+  const freeForm = combatArchive();
+  freeForm.snapshots[0]!.beforeState = { combat: { soldiers: 2 } };
+  assert.throws(() => remapArchive(freeForm), /structured encounter/);
+  const noted = combatArchive();
+  noted.snapshots[0]!.beforeState = { combatNotes: { soldiers: 2 } };
+  assert.doesNotThrow(() => remapArchive(noted));
 });
 
-test('archive v7 rejects forged preparation ownership and unresolved combat links', () => {
+test('archive rejects forged preparation ownership and unresolved combat links', () => {
   const corrupt: ((input: ReturnType<typeof combatArchive>) => void)[] = [
     (input) => {
       input.combatPreparations[0]!.payload.receiptId = randomUUID();

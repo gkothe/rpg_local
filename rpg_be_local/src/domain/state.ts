@@ -1,19 +1,6 @@
 import { atResponseField, ResponseFieldProblem } from './responseFields.js';
 import { validateOperationExplanations } from './operationExplanations.js';
-import {
-  KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-  knowledgeContractVersion,
-  usesAuditedContract,
-  usesCombatContract,
-} from './versions.js';
-import {
-  gameplayResponseSchema,
-  auditedResponseSchema,
-  type AuditedGameplayResponse,
-  type GameplayResponseV5,
-  type GameplayResponseV6,
-  type GameplayResponse,
-} from './gameplayResponse.js';
+import { gameplayResponseSchema, type GameplayResponse } from './gameplayResponse.js';
 import {
   emptyCombatAuthorization,
   resolvePreparedCreate,
@@ -28,13 +15,11 @@ import {
   KnowledgeStatus,
   type KnowledgeValidation,
   type KnowledgeChange,
-  type KnowledgeChangeV5,
 } from './knowledge.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { Problem, conflict } from '../errors.js';
-import type { Campaign, GMResponse, Snapshot, Character } from './types.js';
-import { responseSchema } from './schemas.js';
+import type { Campaign, Snapshot, Character } from './types.js';
 import { CHARACTER_FIELD, OPERATION_KIND, CharacterType } from './options.js';
 import { MAX_ENTITY_NAME_CHARS, MAX_JSON_OBJECT_CHARS } from './limits.js';
 const canonical = (c: Character) => ({
@@ -44,30 +29,19 @@ const canonical = (c: Character) => ({
   inventory: c.inventory,
   description: c.description,
 });
-/** Combat evidence for v6: session preparation receipts and the effective final narrative. */
+/** Combat evidence: session preparation receipts and the effective final narrative. */
 export type CombatValidation = { authorization: CombatAuthorization; narrative?: string };
 export function applyResponse(
   original: Campaign,
-  raw: GMResponse | GameplayResponse | AuditedGameplayResponse,
+  raw: GameplayResponse,
   turnId: string,
   evidence?: KnowledgeValidation & { combat?: CombatValidation }
 ): { campaign: Campaign; snapshot: Snapshot; changes: string[] } {
-  const v5 = usesAuditedContract(raw.version);
-  const v6 = usesCombatContract(raw.version);
-  const v4 = raw.version === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION || v5;
-  const response = v5
-    ? auditedResponseSchema(raw.version).parse(raw)
-    : v4
-      ? gameplayResponseSchema.parse(raw)
-      : responseSchema.parse(raw);
+  const response = gameplayResponseSchema.parse(raw);
   const authorization = evidence?.combat?.authorization ?? emptyCombatAuthorization();
-  if (v5)
-    validateOperationExplanations(
-      response as AuditedGameplayResponse,
-      evidence ?? { campaignId: original.id, turnId }
-    );
+  validateOperationExplanations(response, evidence ?? { campaignId: original.id, turnId });
   const aliases = new Map<number, string>();
-  const introductions: (KnowledgeChange | KnowledgeChangeV5)[] = [];
+  const introductions: KnowledgeChange[] = [];
   const c = structuredClone(original);
   const touched = new Set<string>();
   const changedFields = new Map<string, Set<'name' | 'attributes' | 'inventory' | 'description'>>();
@@ -81,13 +55,7 @@ export function applyResponse(
         );
       }
       if (op.op === OPERATION_KIND.Create) {
-        const prepared = v6
-          ? resolvePreparedCreate(
-              op as GameplayResponseV6['operations'][number] & { op: 'create' },
-              authorization,
-              c.characters
-            )
-          : undefined;
+        const prepared = resolvePreparedCreate(op, authorization, c.characters);
         const char: Character = {
           ...op.character,
           id: prepared?.characterId ?? randomUUID(),
@@ -96,18 +64,13 @@ export function applyResponse(
         };
         c.characters.push(char);
         aliases.set(operationIndex, char.id);
-        if (
-          v5 &&
-          'introduction' in op &&
-          (op.introduction as { visibility?: KnowledgeVisibility }).visibility ===
-            KnowledgeVisibility.GmOnly
-        )
+        if (op.introduction.visibility === KnowledgeVisibility.GmOnly)
           throw new Problem(
             422,
             'knowledge_invalid',
             'Characters are public; keep unrevealed NPCs in GM-only knowledge'
           );
-        if (v4 && char.type === CharacterType.Npc && 'introduction' in op)
+        if (char.type === CharacterType.Npc)
           introductions.push({
             op: 'create',
             kind: KnowledgeKind.Npc,
@@ -116,13 +79,7 @@ export function applyResponse(
             certainty: KnowledgeCertainty.Established,
             status: KnowledgeStatus.Active,
             characterIds: [char.id],
-            ...(
-              op as (GameplayResponse | GameplayResponseV5)['operations'][number] & {
-                introduction: import('zod').infer<
-                  typeof import('./knowledge.js').knowledgeProvenanceSchema
-                >;
-              }
-            ).introduction,
+            ...op.introduction,
           });
         touched.add(char.id);
         changes.push(`${char.name}: introduced`);
@@ -163,81 +120,70 @@ export function applyResponse(
       }
     });
   }
-  const knowledge = v4
-    ? applyKnowledgeChanges(
-        original.knowledge ?? [],
-        [...introductions, ...(response as GameplayResponse).knowledgeChanges],
-        c.characters,
-        aliases,
-        evidence ?? { campaignId: c.id, turnId },
-        knowledgeContractVersion(raw.version),
-        (index) =>
-          index < introductions.length
-            ? [
-                'operations',
-                [...aliases.keys()].filter(
-                  (i) =>
-                    response.operations[i]?.op === 'create' &&
-                    response.operations[i]?.character.type === CharacterType.Npc
-                )[index]!,
-                'introduction',
-              ]
-            : ['knowledgeChanges', index - introductions.length]
+  const knowledge = applyKnowledgeChanges(
+    original.knowledge ?? [],
+    [...introductions, ...response.knowledgeChanges],
+    c.characters,
+    aliases,
+    evidence ?? { campaignId: c.id, turnId },
+    (index) =>
+      index < introductions.length
+        ? [
+            'operations',
+            [...aliases.keys()].filter(
+              (i) =>
+                response.operations[i]?.op === 'create' &&
+                response.operations[i]?.character.type === CharacterType.Npc
+            )[index]!,
+            'introduction',
+          ]
+        : ['knowledgeChanges', index - introductions.length]
+  );
+  const npcIds = new Set(
+    introductions.flatMap((op) =>
+      op.op === 'create' ? op.characterIds.filter((id): id is string => typeof id === 'string') : []
+    )
+  );
+  const duplicateIndex = response.knowledgeChanges.findIndex(
+    (op) =>
+      op.op === 'create' &&
+      op.kind === KnowledgeKind.Npc &&
+      op.characterIds.some((link) =>
+        npcIds.has(typeof link === 'string' ? link : (aliases.get(link.operationIndex) ?? ''))
       )
-    : undefined;
-  if (knowledge) {
-    const npcIds = new Set(
-      introductions.flatMap((op) =>
-        op.op === 'create'
-          ? op.characterIds.filter((id): id is string => typeof id === 'string')
-          : []
+  );
+  if (duplicateIndex >= 0)
+    throw new ResponseFieldProblem(
+      ['knowledgeChanges', duplicateIndex],
+      new Problem(
+        422,
+        'knowledge_invalid',
+        'Created NPC introduction is registered automatically; do not duplicate it'
       )
     );
-    const duplicateIndex = (response as GameplayResponse).knowledgeChanges.findIndex(
-      (op) =>
-        op.op === 'create' &&
-        op.kind === KnowledgeKind.Npc &&
-        op.characterIds.some((link) =>
-          npcIds.has(typeof link === 'string' ? link : (aliases.get(link.operationIndex) ?? ''))
-        )
-    );
-    if (duplicateIndex >= 0)
-      throw new ResponseFieldProblem(
-        ['knowledgeChanges', duplicateIndex],
-        new Problem(
-          422,
-          'knowledge_invalid',
-          'Created NPC introduction is registered automatically; do not duplicate it'
-        )
-      );
-    c.knowledge = knowledge.records;
-    changes.push(...knowledge.changes);
-  }
-  if (v6)
-    validateCombatTurn({
-      before: original,
-      after: c,
-      response: response as GameplayResponseV6,
-      authorization,
-      rolls: evidence?.rolls ?? [],
-      narrative: evidence?.combat?.narrative ?? response.narrative,
-    });
+  c.knowledge = knowledge.records;
+  changes.push(...knowledge.changes);
+  validateCombatTurn({
+    before: original,
+    after: c,
+    response,
+    authorization,
+    rolls: evidence?.rolls ?? [],
+    narrative: evidence?.combat?.narrative ?? response.narrative,
+  });
   return {
     campaign: c,
-    changes: v5
-      ? changes.flatMap((change, index) => {
-          const explanation = (response as GameplayResponseV5).operationExplanations.find(
-            (e) => e.operationIndex === index
-          );
-          if (index >= response.operations.length || !explanation) return [change];
-          return explanation.visibility === KnowledgeVisibility.GmOnly
-            ? []
-            : [`${change}: ${explanation.reason}`];
-        })
-      : changes,
+    changes: changes.flatMap((change, index) => {
+      const explanation = response.operationExplanations.find((e) => e.operationIndex === index);
+      if (index >= response.operations.length || !explanation) return [change];
+      return explanation.visibility === KnowledgeVisibility.GmOnly
+        ? []
+        : [`${change}: ${explanation.reason}`];
+    }),
     snapshot: {
       turnId,
-      ...(knowledge ? { beforeKnowledge: knowledge.before, afterKnowledge: knowledge.after } : {}),
+      beforeKnowledge: knowledge.before,
+      afterKnowledge: knowledge.after,
       beforeCharacters: original.characters.filter((x) => touched.has(x.id)),
       afterCharacters: c.characters.filter((x) => touched.has(x.id)),
       beforeState: original.state,

@@ -9,11 +9,13 @@ import {
   KnowledgeOrigin as O,
   KnowledgeCertainty as C,
   KnowledgeStatus as S,
+  KnowledgeVisibility as V,
   applyKnowledgeChanges,
   validateKnowledgeEvidence,
   type KnowledgeChange,
 } from '../src/domain/knowledge.js';
 import type { GameplayResponse } from '../src/domain/gameplayResponse.js';
+import { gmResponse } from './ownedGameplayFixture.js';
 const fact = (
   extra: Partial<Extract<KnowledgeChange, { op: 'create' }>> = {}
 ): Extract<KnowledgeChange, { op: 'create' }> => ({
@@ -26,49 +28,49 @@ const fact = (
   status: S.Active,
   characterIds: [],
   evidence: [],
+  visibility: V.Player,
   ...extra,
 });
-const response = (changes: KnowledgeChange[]): GameplayResponse => ({
-  version: 4,
-  narrative: 'Marta arrives',
-  operations: [],
-  rollInterpretations: [],
-  ruleCitations: [],
-  knowledgeChanges: changes,
-});
-test('v4 stages NPC aliases and mixed provenance with state atomically, undo restores exact records', () => {
+const response = (
+  changes: KnowledgeChange[],
+  operations: GameplayResponse['operations'] = []
+): GameplayResponse => gmResponse('Marta arrives', operations, { knowledgeChanges: changes });
+test('responses stage NPC aliases and mixed provenance with state atomically, undo restores exact records', () => {
   const c = newCampaign({ name: 'Test' });
   const sourceId = randomUUID();
   const turnId = randomUUID();
   const quote = 'Marta is the guide';
-  const r = response([fact({ characterIds: [{ operationIndex: 1 }] })]);
-  r.operations = [
-    { op: 'state', expected: {}, value: { scene: 'inn' } },
-    {
-      op: 'create',
-      character: {
-        name: 'Marta',
-        type: CharacterType.Npc,
-        attributes: {},
-        inventory: {},
-        description: {},
+  const r = response(
+    [fact({ characterIds: [{ operationIndex: 1 }] })],
+    [
+      { op: 'state', expected: {}, value: { scene: 'inn' } },
+      {
+        op: 'create',
+        character: {
+          name: 'Marta',
+          type: CharacterType.Npc,
+          attributes: {},
+          inventory: {},
+          description: {},
+        },
+        introduction: {
+          origin: O.Source,
+          evidence: [
+            {
+              type: 'campaign_source',
+              sourceId,
+              version: 1,
+              sourceName: 'Adventure',
+              quote,
+              start: 6,
+              end: 6 + quote.length,
+            },
+          ],
+          visibility: V.Player,
+        },
       },
-      introduction: {
-        origin: O.Source,
-        evidence: [
-          {
-            type: 'campaign_source',
-            sourceId,
-            version: 1,
-            sourceName: 'Adventure',
-            quote,
-            start: 6,
-            end: 6 + quote.length,
-          },
-        ],
-      },
-    },
-  ];
+    ]
+  );
   const applied = applyResponse(c, r, turnId, {
     campaignId: c.id,
     turnId,
@@ -164,13 +166,9 @@ test('rumor stays explicit; immutable creation origin and audit append; stale re
   assert.equal(third.campaign.knowledge![0]!.revision, 3);
   second.campaign.knowledge![0]!.text = 'External change';
   assert.throws(() => undoSnapshot(second.campaign, second.snapshot), /Knowledge changed/);
-  const legacy = applyResponse(
-    first.campaign,
-    { version: 1, narrative: 'old', operations: [] },
-    'legacy'
-  );
+  const quiet = applyResponse(first.campaign, response([]), randomUUID());
   assert.deepEqual(
-    undoSnapshot(legacy.campaign, legacy.snapshot).knowledge,
+    undoSnapshot(quiet.campaign, quiet.snapshot).knowledge,
     first.campaign.knowledge
   );
 });
@@ -180,7 +178,7 @@ test('holder clearing and unchanged historical deleted links preserve identity w
   c.characters.push({
     id,
     name: 'Marta',
-    type: 'npc',
+    type: CharacterType.Npc,
     attributes: {},
     inventory: {},
     description: {},

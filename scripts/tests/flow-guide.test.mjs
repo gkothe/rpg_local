@@ -1,4 +1,3 @@
-import { gameplayResponseV5Schema } from '../../rpg_be_local/src/domain/gameplayResponse.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { gameplayResponseSchema } from '../../rpg_be_local/src/domain/gameplayResponse.ts';
@@ -11,15 +10,11 @@ import {
   proposal,
   ids,
   examplePayload,
-  examplePayloadV5,
-  examplePayloadV6,
-  proposalV5,
-  proposalV6,
   combatIds,
   combatPrepareArgs,
   combatPrepareResult,
   combatRollArgs,
-  combatProposalV6,
+  combatProposal,
   knowledgeRecord,
   knowledgeSearchResult,
   knowledgeGetResult,
@@ -28,16 +23,11 @@ import {
   citation,
 } from '../../rpg_fe_local/src/features/flow/examples.ts';
 import { createKnowledgeRecall } from '../../rpg_be_local/src/domain/knowledgeRecall.ts';
-import { diceInputV6Schema } from '../../rpg_be_local/src/domain/dice.ts';
+import { diceInputSchema } from '../../rpg_be_local/src/domain/dice.ts';
 import { ruleToolSchemas } from '../../rpg_be_local/src/services/ruleLookup.ts';
 import { ruleReadSchema, ruleCitationSchema } from '../../rpg_be_local/src/domain/rules.ts';
 import { validateRuleCitations } from '../../rpg_be_local/src/domain/ruleCitationValidation.ts';
-import {
-  systemPromptExamples,
-  systemPromptV5Examples,
-  systemPromptV6Examples,
-} from '../../rpg_fe_local/src/features/flow/systemPromptExample.ts';
-import { gameplayResponseV6Schema } from '../../rpg_be_local/src/domain/gameplayResponse.ts';
+import { systemPromptExamples } from '../../rpg_fe_local/src/features/flow/systemPromptExample.ts';
 import { combatPrepareSchema } from '../../rpg_be_local/src/domain/combat.ts';
 import { buildContext } from '../../rpg_be_local/src/domain/context.ts';
 import {
@@ -102,12 +92,18 @@ test('combined rule lookup example identifies originals already supplied without
   assert.deepEqual(output, example.result);
 });
 
-test('educational v4 proposal applies its expected-value update without exposing notes', () => {
+test('educational proposal applies its expected-value update without exposing notes', () => {
   const campaign = newCampaign({ name: 'Teaching example' });
+  campaign.id = ids.campaign;
   campaign.characters = [{ ...player, notes: 'Private diary', revision: 0 }];
   const parsed = gameplayResponseSchema.parse(proposal);
   validateRollInterpretations(parsed, [ids.roll]);
-  const result = applyResponse(campaign, parsed, ids.turn);
+  const evidence = {
+    campaignId: ids.campaign,
+    turnId: ids.turn,
+    rolls: [{ id: ids.roll, campaignId: ids.campaign }],
+  };
+  const result = applyResponse(campaign, parsed, ids.turn, evidence);
   assert.equal(result.campaign.characters[0].attributes.hp, 9);
   assert.equal(result.campaign.characters[0].notes, 'Private diary');
   assert.equal(campaign.characters[0].attributes.hp, 10);
@@ -120,78 +116,63 @@ test('educational v4 proposal applies its expected-value update without exposing
   const conflicting = structuredClone(result.campaign);
   conflicting.characters[0].attributes.hp = 8;
   assert.throws(() => undoSnapshot(conflicting, result.snapshot), /manually changed/);
-  assert.throws(() => applyResponse(result.campaign, parsed, ids.turn), /expected prior/);
+  assert.throws(() => applyResponse(result.campaign, parsed, ids.turn, evidence), /expected prior/);
+  assert.throws(
+    () => applyResponse(campaign, { ...parsed, operationExplanations: [] }, ids.turn, evidence),
+    /explanation/
+  );
   assert.throws(() => validateRollInterpretations(parsed, []), /acknowledge exactly/);
   assert.equal(Object.hasOwn(player, 'notes'), false);
 });
 
 test('all illustrated payload selections and envelopes match the real context builder', () => {
-  for (const version of [4, 5, 6])
-    for (const pinned of [false, true])
-      for (const mentioned of [false, true])
-        for (const book of [false, true]) {
-          const expected =
-            version === 6
-              ? examplePayloadV6(pinned, mentioned, book)
-              : version === 5
-                ? examplePayloadV5(pinned, mentioned, book)
-                : examplePayload(pinned, mentioned, book);
-          const campaign = newCampaign({
-            name: 'Teaching example',
-            description: 'A river town after the flood.',
-            instructions: 'Tell the story in English with a hopeful tone.',
-          });
-          campaign.characters = [player, npc].map((character) => ({
-            ...character,
-            notes: 'Secret diary',
-            revision: 0,
-          }));
-          campaign.state = expected.mandatory.state;
-          campaign.sources = [
-            {
-              id: ids.source,
-              version: 1,
-              status: 'confirmed',
-              name: 'River town notes',
-              text: 'The ferryman offers a safe crossing.',
-            },
-          ];
-          campaign.pinnedSourceIds = pinned ? [ids.source] : [];
-          campaign.memory = { valid: true, text: expected.memory, coveredTurnIds: [] };
-          const turns = expected.history.map((h, index) => ({
-            id: `99999999-9999-4999-8999-${String(index + 1).padStart(12, '0')}`,
-            action: h.player,
-            narrative: h.gm,
-            status: 'completed',
-            undone: false,
-          }));
-          const manifest = buildContext(
-            campaign,
-            turns,
-            expected.mandatory.action,
-            [],
-            100000,
-            true,
-            {
-              context: expected.mandatory.ruleContext,
-              instructions: book
-                ? 'Consult the selected book for covered mechanics.'
-                : 'Use model knowledge and label provisional adjudications.',
-              overview: expected.mandatory.rulesOverview ?? '',
-            },
-            version,
-            version >= 5
-          );
-          assert.deepEqual(JSON.parse(manifest.prompt), expected);
-          const prompts =
-            version === 6
-              ? systemPromptV6Examples
-              : version === 5
-                ? systemPromptV5Examples
-                : systemPromptExamples;
-          assert.equal(manifest.systemPrompt, book ? prompts.book : prompts.default);
-          assert.equal(manifest.prompt.includes('Secret diary'), false);
-        }
+  for (const pinned of [false, true])
+    for (const mentioned of [false, true])
+      for (const book of [false, true]) {
+        const expected = examplePayload(pinned, mentioned, book);
+        const campaign = newCampaign({
+          name: 'Teaching example',
+          description: 'A river town after the flood.',
+          instructions: 'Tell the story in English with a hopeful tone.',
+        });
+        campaign.characters = [player, npc].map((character) => ({
+          ...character,
+          notes: 'Secret diary',
+          revision: 0,
+        }));
+        campaign.state = expected.mandatory.state;
+        campaign.sources = [
+          {
+            id: ids.source,
+            version: 1,
+            status: 'confirmed',
+            name: 'River town notes',
+            text: 'The ferryman offers a safe crossing.',
+          },
+        ];
+        campaign.pinnedSourceIds = pinned ? [ids.source] : [];
+        campaign.memory = { valid: true, text: expected.memory, coveredTurnIds: [] };
+        const turns = expected.history.map((h, index) => ({
+          id: `99999999-9999-4999-8999-${String(index + 1).padStart(12, '0')}`,
+          action: h.player,
+          narrative: h.gm,
+          status: 'completed',
+          undone: false,
+        }));
+        const manifest = buildContext(campaign, turns, expected.mandatory.action, [], {
+          context: expected.mandatory.ruleContext,
+          instructions: book
+            ? 'Consult the selected book for covered mechanics.'
+            : 'Use model knowledge and label provisional adjudications.',
+          overview: expected.mandatory.rulesOverview ?? '',
+        });
+        assert.deepEqual(JSON.parse(manifest.prompt), expected);
+        assert.equal(
+          manifest.systemPrompt,
+          book ? systemPromptExamples.book : systemPromptExamples.default
+        );
+        assert.equal(manifest.prompt.includes('Secret diary'), false);
+      }
 });
 
 test('educational graph, document sections and source references remain navigable', () => {
@@ -216,7 +197,7 @@ test('educational graph, document sections and source references remain navigabl
 });
 
 test('tool arguments, frozen recall results and exact book citation match backend contracts', () => {
-  diceInputV6Schema.parse(tools.find((tool) => tool.id === 'roll_dice').args);
+  diceInputSchema.parse(tools.find((tool) => tool.id === 'roll_dice').args);
   for (const tool of tools.filter((tool) => tool.bookOnly))
     ruleToolSchemas[tool.id === 'rules_find' ? 'rules_search' : tool.id].parse(tool.args);
   const recall = createKnowledgeRecall({
@@ -249,31 +230,10 @@ test('tool arguments, frozen recall results and exact book citation match backen
   );
 });
 
-test('v5 educational proposal validates indexed mechanical explanations', () => {
-  const campaign = newCampaign({ name: 'Teaching example' });
-  campaign.id = ids.campaign;
-  campaign.characters = [{ ...player, notes: '', revision: 0 }];
-  const parsed = gameplayResponseV5Schema.parse(proposalV5);
-  const evidence = {
-    campaignId: ids.campaign,
-    turnId: ids.turn,
-    rolls: [{ id: ids.roll, campaignId: ids.campaign }],
-  };
-  assert.equal(
-    applyResponse(campaign, parsed, ids.turn, evidence).campaign.characters[0].attributes.hp,
-    9
-  );
-  assert.throws(
-    () => applyResponse(campaign, { ...parsed, operationExplanations: [] }, ids.turn, evidence),
-    /explanation/
-  );
-});
-
-test('v6 combat teaching example matches the real preparation, dice and turn validation', () => {
+test('combat teaching example matches the real preparation, dice and turn validation', () => {
   combatPrepareSchema.parse(tools.find((tool) => tool.id === 'combat_prepare').args);
   combatPrepareSchema.parse(combatPrepareArgs);
-  diceInputV6Schema.parse(combatRollArgs);
-  gameplayResponseV6Schema.parse(proposalV6);
+  diceInputSchema.parse(combatRollArgs);
   const campaign = newCampaign({ name: 'Teaching example' });
   campaign.id = ids.campaign;
   campaign.characters = [{ ...player, notes: '', revision: 0 }];
@@ -301,7 +261,7 @@ test('v6 combat teaching example matches the real preparation, dice and turn val
       },
     },
   };
-  const parsed = gameplayResponseV6Schema.parse(combatProposalV6);
+  const parsed = gameplayResponseSchema.parse(combatProposal);
   const result = applyResponse(campaign, parsed, ids.turn, evidence).campaign;
   const sheet = (id) => result.characters.find((character) => character.id === id);
   assert.equal(sheet(combatIds.soldierA).attributes.hp, 3);

@@ -8,8 +8,7 @@ import { runProcess } from './processRunner.js';
 import { parseProviderOutput, providerArgs } from './adapters.js';
 import { Problem } from '../errors.js';
 import type { ProviderSettings } from '../domain/types.js';
-import type { GameplayToolDispatch, BookGameplayLimits } from './gameplayTools.js';
-import { VERIFIED_BOOK_LIMITS } from './gameplayTools.js';
+import type { GameplayToolDispatch } from './gameplayTools.js';
 import {
   logPrompt,
   createPromptTrace,
@@ -17,11 +16,9 @@ import {
   safeTraceFailure,
   type PromptTraceContext,
 } from './promptLog.js';
-import { BOOK_CONTEXT_BYTES_PER_TOKEN } from '../domain/context.js';
 import { z } from 'zod';
 import { generateCodexDice } from './codexDice.js';
 import { CLAUDE_DICE_VERSION, generateClaudeDice } from './claudeDice.js';
-import { type RollCallback } from './diceProtocol.js';
 import { generateAntigravityDice } from './antigravityDice.js';
 import {
   ANTIGRAVITY_ISOLATED_VERSION,
@@ -41,7 +38,6 @@ export type RulesCapability = {
   supported: boolean;
   reason: string | null;
   efforts?: string[];
-  limits?: BookGameplayLimits;
 };
 export type ModelOption = {
   id: string;
@@ -76,15 +72,6 @@ export interface Generator {
     signal?: AbortSignal,
     trace?: PromptTraceContext
   ): Promise<unknown>;
-  bookGameplayLimits?(settings: ProviderSettings): Promise<BookGameplayLimits>;
-  generateBookGameplay?(
-    settings: ProviderSettings,
-    prompt: string,
-    schema: unknown,
-    tools: GameplayToolDispatch,
-    signal?: AbortSignal,
-    trace?: PromptTraceContext
-  ): Promise<unknown>;
   bookGameplayCapacity?(settings: ProviderSettings, ceiling?: number): Promise<number>;
   generate(
     settings: ProviderSettings,
@@ -94,13 +81,6 @@ export interface Generator {
     trace?: PromptTraceContext
   ): Promise<unknown>;
   capacity(settings: ProviderSettings, ceiling?: number): Promise<number>;
-  generateGameplay?(
-    settings: ProviderSettings,
-    prompt: string,
-    roll: RollCallback,
-    signal?: AbortSignal,
-    trace?: PromptTraceContext
-  ): Promise<unknown>;
   gameplayCapacity?(settings: ProviderSettings, ceiling?: number): Promise<number>;
 }
 const configSchema = z.array(
@@ -312,14 +292,6 @@ export class ProviderService implements Generator {
               ? null
               : 'The installed CLI cannot expose the game tools for this model',
             efforts: rulesSupported ? model.efforts : [],
-            ...(rulesSupported
-              ? {
-                  limits: {
-                    ...VERIFIED_BOOK_LIMITS,
-                    promptBytes: model.inputTokens * BOOK_CONTEXT_BYTES_PER_TOKEN,
-                  },
-                }
-              : {}),
           },
           dice: {
             supported,
@@ -512,7 +484,7 @@ export class ProviderService implements Generator {
     await this.capacity(settings, ceiling);
     const provider = (await this.list()).find((option) => option.id === settings.provider)!;
     const model = provider.models.find((option) => option.id === settings.model)!;
-    if (!provider.rules?.supported || !model.rules?.supported || !model.rules.limits)
+    if (!provider.rules?.supported || !model.rules?.supported)
       throw new Problem(
         503,
         'rules_provider_unavailable',
@@ -521,75 +493,6 @@ export class ProviderService implements Generator {
     await this.gameplayCapacity(settings, ceiling);
     // Capacity is a context-selection target; native continuations use CLI capacity.
     return ceiling;
-  }
-  async bookGameplayLimits(settings: ProviderSettings): Promise<BookGameplayLimits> {
-    await this.bookGameplayCapacity(settings);
-    const model = (await this.list())
-      .find((provider) => provider.id === settings.provider)!
-      .models.find((model) => model.id === settings.model)!;
-    return {
-      ...VERIFIED_BOOK_LIMITS,
-      promptBytes: model.inputTokens * BOOK_CONTEXT_BYTES_PER_TOKEN,
-    };
-  }
-  async generateBookGameplay(
-    settings: ProviderSettings,
-    prompt: string,
-    _schema: unknown,
-    tools: GameplayToolDispatch,
-    signal?: AbortSignal,
-    trace?: PromptTraceContext
-  ): Promise<unknown> {
-    trace = await invocationTrace(trace, 'book_gameplay');
-    await this.bookGameplayCapacity(settings);
-    const executable = this.locations.get(settings.provider)!;
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-rules-cli-'));
-    const roll: RollCallback = async () => {
-      throw new Problem(503, 'rules_dispatch', 'Use the owned gameplay registry');
-    };
-    try {
-      const book = { dispatch: tools, definitions: tools.definitions };
-      if (settings.provider === PROVIDER_ID.Codex)
-        return await generateCodexDice(
-          executable,
-          settings,
-          prompt,
-          dir,
-          process.env,
-          roll,
-          signal,
-          book,
-          trace
-        );
-      if (settings.provider === PROVIDER_ID.Claude)
-        return await generateClaudeDice(
-          executable,
-          settings,
-          prompt,
-          dir,
-          process.env,
-          roll,
-          signal,
-          book,
-          trace
-        );
-      const model = (await this.list())
-        .find((provider) => provider.id === settings.provider)!
-        .models.find((model) => model.id === settings.model)!;
-      return await generateAntigravityDice(
-        executable,
-        { ...settings, model: modelSlug(settings, model.efforts) },
-        prompt,
-        dir,
-        process.env,
-        roll,
-        signal,
-        book,
-        trace
-      );
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
   }
   async generateOwnedGameplay(
     settings: ProviderSettings,
@@ -612,9 +515,6 @@ export class ProviderService implements Generator {
       );
     const executable = this.locations.get(settings.provider)!;
     const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-owned-cli-'));
-    const roll: RollCallback = async () => {
-      throw new Problem(503, 'gameplay_dispatch', 'Use the owned gameplay registry');
-    };
     const adapter = { dispatch: tools, definitions: tools.definitions, schema, systemPrompt };
     try {
       if (settings.provider === PROVIDER_ID.Codex)
@@ -624,9 +524,8 @@ export class ProviderService implements Generator {
           prompt,
           dir,
           process.env,
-          roll,
-          signal,
           adapter,
+          signal,
           trace
         );
       if (settings.provider === PROVIDER_ID.Claude)
@@ -636,9 +535,8 @@ export class ProviderService implements Generator {
           prompt,
           dir,
           process.env,
-          roll,
-          signal,
           adapter,
+          signal,
           trace
         );
       const model = (await this.list())
@@ -650,68 +548,10 @@ export class ProviderService implements Generator {
         prompt,
         dir,
         process.env,
-        roll,
-        signal,
         adapter,
+        signal,
         trace
       );
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  }
-  async generateGameplay(
-    settings: ProviderSettings,
-    prompt: string,
-    roll: RollCallback,
-    signal?: AbortSignal,
-    trace?: PromptTraceContext
-  ): Promise<unknown> {
-    trace = await invocationTrace(trace, 'gameplay');
-    await this.gameplayCapacity(settings);
-    const executable = this.locations.get(settings.provider)!;
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-dice-cli-'));
-    try {
-      if (settings.provider === PROVIDER_ID.Codex)
-        return await generateCodexDice(
-          executable,
-          settings,
-          prompt,
-          dir,
-          process.env,
-          roll,
-          signal,
-          undefined,
-          trace
-        );
-      if (settings.provider === PROVIDER_ID.Claude)
-        return await generateClaudeDice(
-          executable,
-          settings,
-          prompt,
-          dir,
-          process.env,
-          roll,
-          signal,
-          undefined,
-          trace
-        );
-      if (settings.provider === PROVIDER_ID.Antigravity) {
-        const model = (await this.list())
-          .find((provider) => provider.id === PROVIDER_ID.Antigravity)!
-          .models.find((model) => model.id === settings.model)!;
-        return await generateAntigravityDice(
-          executable,
-          { ...settings, model: modelSlug(settings, model.efforts) },
-          prompt,
-          dir,
-          process.env,
-          roll,
-          signal,
-          undefined,
-          trace
-        );
-      }
-      throw new Problem(503, 'dice_provider', 'Trusted dice is unavailable for this CLI');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

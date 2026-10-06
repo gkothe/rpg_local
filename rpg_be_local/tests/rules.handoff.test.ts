@@ -55,7 +55,6 @@ test(
     }
     const manifest = {
       format: 'rules-book',
-      version: 1,
       markerFormatVersion: 1,
       source: {
         slug: source,

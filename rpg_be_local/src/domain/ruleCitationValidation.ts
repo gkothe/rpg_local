@@ -1,9 +1,8 @@
 import { z } from 'zod';
 import { Problem } from '../errors.js';
-import { rulePageSpanSchema, type RuleRead, type RuleContext } from './rules.js';
-import type { RuleResponse } from './ruleResponse.js';
-export function validateRuleCitations<T extends Pick<RuleResponse, 'ruleCitations'>>(
-  response: T,
+import { rulePageSpanSchema, type RuleCitation, type RuleRead, type RuleContext } from './rules.js';
+export function validateRuleCitations(
+  response: { ruleCitations: readonly RuleCitation[] },
   reads: readonly RuleRead[],
   campaignId: string,
   turnId: string,

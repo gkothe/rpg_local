@@ -6,7 +6,6 @@ import { Problem } from '../errors.js';
 import type { Turn, JsonObject } from '../domain/types.js';
 import { canonicalRuleJson } from '../domain/rules.js';
 import { KnowledgeVisibility } from '../domain/knowledge.js';
-import { usesCombatContract } from '../domain/versions.js';
 import {
   combatPrepareSchema,
   combatTracking,
@@ -32,7 +31,6 @@ type SessionRow = {
   id: string;
   campaign_id: string;
   imported: boolean;
-  prompt_contract_version: number | null;
   frozen_prompt: string;
   character_ids: string[];
   frozen_knowledge: { npcCharacters?: Sheet[] } | null;
@@ -41,7 +39,6 @@ export type CombatPreparationPayload = {
   receiptId: string;
   encounterId: string;
   encounter: 'active' | 'new';
-  legacyCombat: boolean;
   participants: (CombatParticipant & { origin: 'existing' | 'prepared'; sheet: Sheet })[];
   createOperations: {
     op: 'create';
@@ -66,7 +63,6 @@ const PREPARATION_GUIDANCE =
 /** Frozen session context: the campaign as captured before this logical action started. */
 export function frozenCombatContext(session: SessionRow): {
   encounter: CombatEncounter | null;
-  legacy: boolean;
   sheets: Map<string, Sheet>;
 } {
   const mandatory = (JSON.parse(session.frozen_prompt) as { mandatory?: Record<string, unknown> })
@@ -80,7 +76,6 @@ export function frozenCombatContext(session: SessionRow): {
     if (session.character_ids.includes(sheet.id)) sheets.set(sheet.id, sheet);
   return {
     encounter: tracking.kind === 'structured' ? tracking.encounter : null,
-    legacy: tracking.kind === 'legacy',
     sheets,
   };
 }
@@ -93,16 +88,11 @@ export class CombatPreparationService {
       [turn.diceSessionId, turn.campaignId]
     );
     const session = result.rows[0] as SessionRow | undefined;
-    if (
-      !turn.diceSessionId ||
-      !session ||
-      session.imported ||
-      !usesCombatContract(session.prompt_contract_version ?? undefined)
-    )
+    if (!turn.diceSessionId || !session || session.imported)
       throw new Problem(
         409,
         CombatProblem.Identity,
-        'Combat preparation requires an executable version 6 session'
+        'Combat preparation requires an executable dice session'
       );
     if (session.frozen_prompt !== turn.context?.prompt)
       throw new Problem(409, 'dice_context', 'Combat preparation must use the frozen context');
@@ -243,7 +233,6 @@ export class CombatPreparationService {
         encounterId,
         encounter:
           frozen.encounter?.active && frozen.encounter.id === encounterId ? 'active' : 'new',
-        legacyCombat: frozen.legacy,
         participants,
         createOperations,
         guidance: PREPARATION_GUIDANCE,

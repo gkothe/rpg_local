@@ -120,7 +120,7 @@ export function parseProviderOutput(id: string, output: string): unknown {
     if (envelope.structured_output) return envelope.structured_output;
     if (typeof envelope.result === 'string') return JSON.parse(envelope.result);
     if (typeof envelope.response === 'string') return JSON.parse(envelope.response);
-    if (envelope.version === 1 || typeof envelope.text === 'string') return envelope;
+    if (typeof envelope.text === 'string') return envelope;
     throw new Error('missing');
   } catch (e) {
     if (e instanceof Problem) throw e;

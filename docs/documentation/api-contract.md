@@ -1,4 +1,4 @@
-# Local RPG HTTP contract v1
+# Local RPG HTTP contract
 
 Base `/api`. Every successful JSON response is `{ data: T }`. Collections: `{ data: T[], pagination: { nextCursor: string|null } }`; `limit` (1..100 default20), `cursor` numeric offset. Errors RFC problem JSON: `{type,title,status,detail,code}`. All mutations require `X-RPG-Client: local-rpg`; JSON except multipart upload. GET never invokes AI. No application login. Default loopback4100. Dates ISO UTC; IDs UUID. Frontend should fetch providers/settings on mount and preserve draft text on errors.
 
@@ -23,8 +23,8 @@ Campaigns also include `pinnedSourceSections: {sourceId:string,version:number,in
 ## Routes
 
 - GET `/health`: `{status:'ok'|'degraded',database:boolean}` (503 when database unavailable).
-- GET `/settings`: `{version:1,turnStatuses:string[],sourceKinds:string[],characterTypes:string[],audio:{available:boolean,reason:string|null,maxSeconds:number},lan:{enabled:boolean},limits:{uploadBytes:number}}`.
-  Also `gameplay:{responseVersion,archiveVersion}` (the enabled contracts) and `combat:{enabled,trackingVersion,fieldKindOptions,rollScopeOptions,rollKindOptions,limits}`; `combat.enabled` is true only when the enabled response version is 6.
+- GET `/settings`: `{turnStatuses:string[],sourceKinds:string[],characterTypes:string[],audio:{available:boolean,reason:string|null,maxSeconds:number},lan:{enabled:boolean},limits:{uploadBytes:number}}`.
+  Also `combat:{fieldKindOptions,rollScopeOptions,rollKindOptions,limits}`. The response carries no contract version.
   Additional canonical options: `turnStatusOptions[{id,label,active,terminal,completed}]`, `sourceStatusOptions[{id,label,confirmed}]`, `sourceKindOptions[{id,label}]`, `characterTypeOptions[{id,label,default}]`, `ocrLanguageOptions[{id,label,default}]`, `transcriptionLanguageOptions[{id,label,default}]`, and `defaults{characterType,ocrLanguage,transcriptionLanguage,budgets}`. Frontend derives labels/state behavior from these options.
 - GET `/providers`: `Provider[]` where `{id,name,available:boolean,supported:boolean,reason:string|null,version:string|null,models:{id,label,efforts:string[],inputTokens:number}[],catalogProvenance:string}`. Installed but unsupported isolation is disabled, not a working adapter. Models are administrator configured/verified options, never guessed dynamic subscription availability.
 - GET/POST `/campaigns`; POST `{name,description?,instructions?,settings?}` => Campaign. GET rows are Campaign summaries (same shape; FE can use name/updatedAt).
@@ -50,8 +50,8 @@ Campaigns also include `pinnedSourceSections: {sourceId:string,version:number,in
 - POST `/campaigns/:id/memory` `{revision,text,coveredTurnIds:string[],confirm:true}` => Campaign. Coverage must be an exact consecutive prefix of active completed turns; bounded text, explicitly reviewed checkpoint.
 - GET/POST `/templates`; POST `{name,campaignId,revision}` => Template `{id,name,setup:object,createdAt}`. DELETE `/templates/:id` `{}` => `{deleted:true}`. POST `/templates/:id/campaigns` `{name?}` => Campaign.
 - GET/POST `/character-templates`; POST `{name,campaignId,characterId,revision}` => `{id,name,character:Character,createdAt}`. Private character notes are removed. DELETE `/character-templates/:id` `{}` => `{deleted:true}`. POST `/campaigns/:id/characters/from-template` `{templateId,revision}` => Campaign with a fresh character ID and empty private notes.
-- GET `/campaigns/:id/export` => Archive `{format:'local-rpg',version:6,campaign:Campaign,turns:Turn[],snapshots:object[],memories:Memory[],diceSessions:object[],diceRecords:object[]}`. Idle campaign only; no paths/credentials/audio/raw files. Imports accept versions 1–6; older app versions cannot import the new format.
-- POST `/campaigns/import` `{archive:Archive}` => CampaignDetail with new UUIDs.
+- GET `/campaigns/:id/export` => Archive `{format:'local-rpg',campaign:Campaign,turns:Turn[],snapshots:object[],memories:Memory[],diceSessions:object[],diceRecords:object[],combatPreparations:object[],combatPreparedCharacters:object[]}`. Idle campaign only; no paths/credentials/audio/raw files. The archive has no format version.
+- POST `/campaigns/import` `{archive:Archive}` => CampaignDetail with new UUIDs. A file carrying `version` was exported by an older app and fails with `422 archive_unsupported` ("This file was exported by an older app and can no longer be imported.").
 - POST `/audio/transcriptions` multipart `file`, `language` ('en'/'pt'/'auto') => `{text:string}`. Local FasterWhisper only; no campaign context; diagnostics under settings. No hidden cloud fallback.
 - POST `/lan/code` `{}` => `{code,expiresAt}`; desktop loopback only. POST `/lan/pair` `{code}` => `{paired:true}` and HttpOnly device cookie; opt-in LAN only, single use. POST `/lan/revoke` `{}` => `{revoked:true}`; desktop only. Sessions clear on restart. Unpaired LAN campaign reads and writes return `pairing_required`.
 - GET `/lan/status` => `{enabled,desktop,paired,expiresAt:string|null,connectUrls:string[],microphoneRequiresHttps:true}`. HTTPS pairing sets a Secure cookie. Device approval expires after twelve hours; code expires after two minutes. Status is available before pairing.
@@ -64,7 +64,7 @@ summary shown in the campaign library and header. It is excluded from gameplay p
 scene selection and memory summarization. Imported sources supply campaign background;
 GM instructions control how the game runs. `pinnedFacts`
 is retired from campaign DTOs and PATCH requests; migration 0013 removes it without merging its
-text. Older archives/templates accept and discard it; frozen historical prompts remain unchanged.
+text. Archives no longer accept it; frozen historical prompts remain unchanged.
 The GM does not update Description automatically.
 GM auxiliary state and its JSON editor/save action also live in Game master. The Journal
 retains campaign memory and private notes; manual memory replacement and saved context inspection
@@ -93,7 +93,7 @@ Save character. A full page reload discards unsaved drafts and opens the saved c
 
 ### Owned NPC lookup tools
 
-New version-5 gameplay sessions expose `campaign_npcs_search({query:string,cursor?:string})`
+Gameplay sessions expose `campaign_npcs_search({query:string,cursor?:string})`
 and `campaign_npcs_get({id:uuid})` through the existing private owned tool transport, not HTTP
 campaign routes. Search is case-insensitive across saved names and nested description strings,
 AND-matches query tokens, and returns `{campaignId,npcs:[{id,name,revision,matchedFields}],nextCursor}`.
@@ -104,16 +104,15 @@ Get returns `{campaignId,npc:{id,name,type:'npc',attributes,inventory,descriptio
 Links contain `{id,title,kind,origin,certainty,status,visibility?}`; use `campaign_knowledge_get`
 for the full record. Private notes are excluded. Missing or player IDs produce `npc_not_found`404;
 invalid/mismatched cursors produce `npc_cursor`422; invalid arguments use `gameplay_arguments_invalid`422.
-The optional `frozenKnowledge.npcCharacters` metadata is stored only for NPC-enabled sessions;
-absence preserves the old tool registry on retries. Archive format 6 preserves/remaps this data.
+Sessions store the roster in `frozenKnowledge.npcCharacters`; archives preserve and remap it.
 
 Revision fields remain in request contracts for compatibility and audit; older values do not reject mutations. refetch after turn completes/cancels/undo. Toolbar changes use PATCH campaign/settings; turn captures settings. Don't lose local unsaved character/composer text while refetching. Read-aloud is frontend local SpeechSynthesis only. LAN opt-in configuration stays a desktop setup feature; unpaired LAN protected reads and writes require pairing cookie.
 
-## Trusted dice and explicit recovery (archive v2)
+## Trusted dice and explicit recovery
 
-Gameplay uses a separate version-2 GM response: `{version:2,narrative,operations,rollInterpretations}`. The existing operation constraints still apply. Each interpretation is `{rollId,explanation,corrections?:[{explanation}]}`; every recorded roll must be referenced exactly once. Unknown, duplicated or missing references reject the complete answer before any game-state commit. No AI-authored face array is accepted. Source extraction and memory compaction keep the original no-tools generator.
+Every GM response carries `rollInterpretations` (see "One gameplay contract" below). The existing operation constraints still apply. Each interpretation is `{rollId,explanation,corrections?:[{explanation}],afterParagraph?}`; every recorded roll must be referenced exactly once. Unknown, duplicated or missing references are corrected through field repair or reject the answer before any game-state commit. No AI-authored face array is accepted. Source extraction and memory compaction use the no-tools generator.
 
-The only game tool is `roll_dice`. Its strict arguments are `{slot,groups:[{label,count,sides}],reason,declaration,actorId?,targetId?,rerollOf?:{rollId,reason}}`. It generates individual cryptographic faces and performs no bonus arithmetic, keep-high/low selection, success counting or game-rule interpretation. Known modifiers and targets belong in the opaque declaration before reveal; later explained corrections appear separately. Actors/targets must belong to the frozen context; a reroll references an earlier roll in the same logical session.
+The dice tool is `roll_dice`. Its strict arguments are `{slot,groups:[{label,count,sides}],reason,declaration,scope,actorId?,targetId?,encounterId?,combatKind?,rerollOf?:{rollId,reason}}`. It generates individual cryptographic faces and performs no bonus arithmetic, keep-high/low selection, success counting or game-rule interpretation. Known modifiers and targets belong in the opaque declaration before reveal; later explained corrections appear separately. Actors/targets must belong to the frozen context; a reroll references an earlier roll in the same logical session.
 
 Backend-owned `GET /settings` adds `dice:{enabled,limits}`. Limits are 12 sequential logical slots (starting at 0), 24 requests per attempt, 8 uniquely labelled groups per call, 50 dice per group, 100 faces per call, 200 new faces per logical session, 2–1,000,000 sides, 4,096 UTF-8 input bytes, 8,192 input/result transcript bytes and a 180-second attempt deadline. Labels/reasons/declarations are capped at 80/240/600 characters. Provider subprocess output remains capped at 2,000,000 bytes. Invalid requests consume the request allowance; attempts stop rather than silently rerolling or dropping transcript context.
 
@@ -125,13 +124,13 @@ Terminal Turn responses add optional `diceSessionId`, `retryOfTurnId`, `rolls`, 
 
 HTTP uncertainty is resolved with the same request ID and exact input; it never starts another generation. A confirmed terminal retry uses a new request ID. Changing a reused request's payload conflicts. Ordered replay must reproduce the entire original specification/declaration and consume every original slot before appending new randomness. Tool records commit before faces are returned. Cancellation, failed final validation, lease recovery and undo preserve their immutable audit. Only deleting the campaign removes that audit by cascade.
 
-Exports now use `local-rpg` archive version 2 with canonical `diceSessions` and `diceRecords`, terminal attempt prefixes and interpretation references. Import also accepts version 1, normalizing absent dice arrays to empty arrays. Version-2 import validates face ranges/limits, exact canonical prefixes, session totals, slot ordering, reroll/actor/attempt links and completed-turn interpretations. Explicit UUID references are remapped; historical prompt/narrative text is preserved. Imported sessions are marked non-executable. Archives exclude active capabilities, credentials and derived retry eligibility. Templates do not carry roll history.
+Exports carry canonical `diceSessions` and `diceRecords`, terminal attempt prefixes and interpretation references. Import validates face ranges/limits, exact canonical prefixes, session totals, slot ordering, reroll/actor/attempt links and completed-turn interpretations. Explicit UUID references are remapped; historical prompt/narrative text is preserved. Imported sessions are marked non-executable. Archives exclude active capabilities, credentials and derived retry eligibility. Templates do not carry roll history.
 
 Trusted faces do not mechanically prove that the GM requested every roll required by a game system, interpreted arithmetic correctly or kept narration consistent. The application validates the structured audit and mutations; free-form rule interpretation remains the AI's responsibility.
 
 ## Shared current rules libraries
 
-Backend owners: domain/rules.ts (eleven columns, schemas and RULE_LIMITS), domain/versions.ts (package/backup v1, rule-response/archive v3), ruleStore/ruleLibrary/ruleLookup/ruleBackup and provider gameplay registry. All routes retain Host/Origin/device/write protections and {data} envelopes. Numeric collection continuation is returned in pagination.nextCursor; opaque rule lookup cursors/locators are bound to system/arguments and may expire on server restart.
+Backend owners: domain/rules.ts (eleven columns, schemas and RULE_LIMITS), ruleStore/ruleLibrary/ruleLookup/ruleBackup and provider gameplay registry. All routes retain Host/Origin/device/write protections and {data} envelopes. Numeric collection continuation is returned in pagination.nextCursor; opaque rule lookup cursors/locators are bound to system/arguments and may expire on server restart.
 
 | Method/path under /api                                | Request / bounded response                                                                                                                                                                                                                                                                                                     |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -149,23 +148,23 @@ Backend owners: domain/rules.ts (eleven columns, schemas and RULE_LIMITS), domai
 | GET /campaigns/:id/rule-system/resolution             | Saved reference, exact-key/kind candidate and hashChanged; no fuzzy name match.                                                                                                                                                                                                                                                |
 | POST /campaigns/:id/rule-system/resolution            | Binding payload above; explicitly resolves an unresolved reference/default choice.                                                                                                                                                                                                                                             |
 | GET /campaigns/:id/turns/:turnId/rule-reads           | Terminal-owned audit only, numeric cursor; <=16 KiB serialized envelope with explicit continuation; foreign turn/campaign denied.                                                                                                                                                                                              |
-| GET /rule-systems/:id/backups                         | Private local-rpg-rules v1 current-row backup in data; <=32 MiB, no PDF/files/scripts/credentials, separate from campaign exports.                                                                                                                                                                                             |
+| GET /rule-systems/:id/backups                         | Private local-rpg-rules current-row backup in data; <=32 MiB, no PDF/files/scripts/credentials, separate from campaign exports.                                                                                                                                                                                                |
 | POST /rule-systems/backups/imports                    | Separate multipart file route <=32 MiB; strict UTF-8/schema/content hash; owned restore preview. Static routes precede UUID detail routes.                                                                                                                                                                                     |
 | POST /rule-systems/backups/imports/:previewId/confirm | {systemId,systemKey,revision:number or null,requestId,replace:boolean}; preview identity owns local target, explicit replacement for existing key/default; identity collision fails atomically, imported revision counter ignored. Existing row always advances local revision, even same hash; replay does not advance again. |
 
-rules-book v1 manifest requires format/version/source (slug/title/pageCount/pdfHash nullable), mandatory column/file/hash records, converter id/version, markerFormatVersion=1, coverage description/omissions, optional keyed enrichment. Hashes verify raw uploaded column bytes; original PDF hash is only a declaration when PDF is unavailable. Parser uses strict UTF-8, LF normalization and canonical UTF-16 direct-text offsets after control/navigation-marker removal. It retains original body Markdown/tables/order, recognizes boundaries outside fenced code, requires explicit parents and safe unique slugs, accepts heading-before-marker or marker-before-heading, `pages:-`/`printed:-` and inline PDF markers without a printed label. Recognized header metadata keys: title, edition, publication, converter, version, marker-format, nodes, pages, plus the exact observed splitter generator annotation; unknown controls fail. Actual private eleven-column package validation passed read-only, with unchanged hashes. Owner confirmation of manifest metadata and future enrichment offset semantics remains T001; neither import hashes nor that check certify OCR completeness. `npm run rules:manifest` validates unchanged columns before writing a new manifest outside their directory and refuses overwrites.
+A rules-book manifest requires format/source (slug/title/pageCount/pdfHash nullable), mandatory column/file/hash records, converter id/version, markerFormatVersion=1, coverage description/omissions, optional keyed enrichment. Hashes verify raw uploaded column bytes; original PDF hash is only a declaration when PDF is unavailable. Parser uses strict UTF-8, LF normalization and canonical UTF-16 direct-text offsets after control/navigation-marker removal. It retains original body Markdown/tables/order, recognizes boundaries outside fenced code, requires explicit parents and safe unique slugs, accepts heading-before-marker or marker-before-heading, `pages:-`/`printed:-` and inline PDF markers without a printed label. Recognized header metadata keys: title, edition, publication, converter, version, marker-format, nodes, pages, plus the exact observed splitter generator annotation; unknown controls fail. Actual private eleven-column package validation passed read-only, with unchanged hashes. Owner confirmation of manifest metadata and future enrichment offset semantics remains T001; neither import hashes nor that check certify OCR completeness. `npm run rules:manifest` validates unchanged columns before writing a new manifest outside their directory and refuses overwrites. A manifest or private backup that carries `version` was prepared by an older app and is rejected; regenerate the manifest with `npm run rules:manifest` and export the backup again.
 
 Node-wide PDF page ranges are approximate. Inline page markers produce nonoverlapping canonical direct-text pageSpans; exact quote pages require full known span coverage. Printed labels are separate; missing provenance is unknown. Text evidence validates exact quote/offset membership without semantic certification; visual evidence remains explicit/manual. Structural parents and descendant text cannot support direct citations.
 
-Owned book tools: rules_map/search/get/list plus roll_dice. Tool requests <=1024 bytes, opaque ASCII cursor/locator <=192 chars, query 1–240 chars/<=12 terms, <=10 hits/20 children, serialized result <=4096 bytes, rule request/result transcript <=8192 bytes, rule calls <=12. Current verified Windows provider reserves lower dice calls to12/combined24 (preserving 12 slots/200 faces, separate8192-byte dice transcript,180s/2000000-byte output). Provider model rules capability supplies supported/reason/efforts/limits; verified book combinations are Claude2.1.232 sonnet medium, Codex0.159.2 gpt-5.6-sol medium and Antigravity1.2.14 gemini-3.8-flash low/medium. Default v2 gameplay and no-tools work keep independent gates/reserves. Claude historical native passes remain evidence; fresh repeat is an explicit user-deferred weekly-quota TODO. No global JSON-upload limit increased.
+Owned book tools: rules_map/search/get/list plus roll_dice. Tool requests <=1024 bytes, opaque ASCII cursor/locator <=192 chars, query 1–240 chars/<=12 terms, <=10 hits/20 children, serialized result <=4096 bytes, rule request/result transcript <=8192 bytes, rule calls <=12. Dice keep 12 slots/200 faces and a separate 8192-byte dice transcript. Provider model rules capability supplies supported/reason/efforts; verified book combinations are Claude2.1.232 sonnet medium, Codex0.159.2 gpt-5.6-sol medium and Antigravity1.2.14 gemini-3.8-flash low/medium. Claude historical native passes remain evidence; fresh repeat is an explicit user-deferred weekly-quota TODO. No global JSON-upload limit increased.
 
-The shared gameplay registry owns tool name/description/Zod validation/derived JSON schema/purpose/capability budget/handler. Its typed dispatch carries exact definitions to the provider service; transports translate and dispatch generically. Request identity binds tool plus arguments, replay rechecks active ownership and cancellation, and invalid requests retain owned audit/accounting. Future tools require explicit registration in an implemented purpose; the synthetic extension test adds no production tool. Native final response validation retains current v2/v3 application contracts.
+The shared gameplay registry owns tool name/description/Zod validation/derived JSON schema/purpose/capability budget/handler. Its typed dispatch carries exact definitions to the provider service; transports translate and dispatch generically. Request identity binds tool plus arguments, replay rechecks active ownership and cancellation, and invalid requests retain owned audit/accounting. Future tools require explicit registration in an implemented purpose; the synthetic extension test adds no production tool. Transports return readable JSON; TurnService validates and field-repairs the final response.
 
 Process-local immutable snapshots are keyed by system ID/revision/hash/kind and shared per Store (four entries,64 MiB serialized content). Each access locks the current database row and uses its revision/hash to select the cache entry; owner/lease/cancellation and fresh read receipt persistence remain outside caches. Search caches retain at most8 queries/4096 candidate hits per snapshot; cursors/locators and receipts are newly generated. Stale revisions cannot be returned from cache. `GameplayNativeUsage.cacheReadTokens` forwards actual provider telemetry when reported; absent is unknown, not zero. No subscription cost reduction is promised.
 
-A turn captures lightweight system ID/key/kind/revision/contentHash/name and stores append-only bounded read receipts before reveal. Active owner/lease/cancellation guards apply before every replay/read, dice creation/draw, context rebuild and final commit. Revision changes do not abort attempts. Rule lookups read current available system rows; each receipt records the version actually delivered, and citations bind to that receipt rather than the turn-start revision. Failed/cancelled/undone reads remain audit, excluded from active narrative context. V3 response retains operations/rollInterpretations and adds ruleCitations: receiptId/path/source/systemId/revision/contentHash/quote/start/end/precision/pdfPages/printedPages. Only exact retrieved direct text supports citations (quote<=600 UTF-16 chars); mapping/search/fields/structural nodes do not. Missing rules and contradictory books remain explicit/provisional model narration rather than executable mechanics.
+A turn captures lightweight system ID/key/kind/revision/contentHash/name and stores append-only bounded read receipts before reveal. Active owner/lease/cancellation guards apply before every replay/read, dice creation/draw, context rebuild and final commit. Revision changes do not abort attempts. Rule lookups read current available system rows; each receipt records the version actually delivered, and citations bind to that receipt rather than the turn-start revision. Failed/cancelled/undone reads remain audit, excluded from active narrative context. Responses carry ruleCitations: receiptId/path/source/systemId/revision/contentHash/quote/start/end/precision/pdfPages/printedPages. Only exact retrieved direct text supports citations (quote<=600 UTF-16 chars); mapping/search/fields/structural nodes do not. Missing rules and contradictory books remain explicit/provisional model narration rather than executable mechanics.
 
-Current campaign export version is3; named legacy1 and dice2 remain accepted independently. V1/v2 normalize to default. V3 remaps campaign/turn/read/dice IDs and validates saved receipt hashes/provenance/citation offsets; historical captured system UUIDs remain audit metadata, so a missing library can still import. Exact stable key/kind/hash selects a different local UUID; absent/different current content remains explicitly unresolved until choice. Full books are never reconstructed from audit. Imported dice sessions remain non-executable. Templates contain a reference and setup, no history/books. Private backups retain only one current system, regenerate local identity as necessary and restore under an atomic current-row lock.
+Campaign import remaps campaign/turn/read/dice IDs and validates saved receipt hashes/provenance/citation offsets; historical captured system UUIDs remain audit metadata, so a missing library can still import. Exact stable key/kind/hash selects a different local UUID; absent/different current content remains explicitly unresolved until choice. Full books are never reconstructed from audit. Imported dice sessions remain non-executable. Templates contain a reference and setup, no history/books. Private backups retain only one current system, regenerate local identity as necessary and restore under an atomic current-row lock.
 
 Principal errors: rules_import_invalid/rules_backup_invalid (422), rules_preview_missing (404), rules_system_empty (422), rules_reference_unresolved/rules_context_changed (409), rules_provider_unavailable (503), rules_request_invalid/rules_budget_exhausted/rules_calls_exhausted (422), rules_attempt_active (409), rules_upload_size/rules_backup_size (413), and existing identity conflict errors (409). See the actual capability report for tested paths and external limitations.
 
@@ -181,17 +180,14 @@ Character parsing accepts imported UTF-8 text in any extension (including JSON/M
 
 Gameplay has no configurable size ceiling: relevant retrieved passages and matching campaign facts are included without a token gate. New gameplay contexts always include the latest three completed, non-undone player/GM text pairs, using the final delivered narrative, plus any older uncovered backlog. History entries contain only player/gm text; IDs remain in the manifest, and dice/tool audit is not repeated in these entries. Existing summary overlap is preserved; frozen retries keep their original context. Compaction covers only older uncovered turns, triggered above 6,000 UTF-8 bytes of eligible history or a missing prompt, never by protected-only history. It retains a consecutive-prefix batch target (default 32,768 UTF-8 bytes, measured by the conservative estimator). Legacy gameplay/memory budget fields are accepted and discarded from edits/imports. Mandatory context is preserved even above a target. Native CLI context/output/compaction and inference limits apply; the app adds no AI attempt deadline. Ordinary generation, field repair and narrative editing also accept successful CLI responses above soft capacity, or without token-usage telemetry; usage is diagnostic rather than an admission gate, including partial or malformed usage metadata. Memory checkpoints are accepted above their soft target for manual saves and archive imports. Explicit model catalogs accept any positive input-token target. Successful isolated completion and valid response JSON remain required. Active turn Cancel remains available. Version warnings remain informational, and installed model-supported efforts plus Default are accepted.
 
-Current v5 readable responses use field-only repair: application validation identifies allowed paths; a tools-free call to the same CLI/model/effort returns path/value corrections, which are checked and fully revalidated. Narrative and other valid fields stay unchanged. Citation offsets/pages are computed in code from exact, uniquely identifiable supplied quotes; computed fields are optional only on the CLI wire contract and remain required in storage/archives. Invalid or ambiguous quotes still require correction. Citation binding gathers every independently invalid citation path in one correction request, within the existing two-call repair limit; valid citations and unrelated fields remain protected. Restricted repair failure stops without automatic scene regeneration. Unreadable JSON and pre-final generation failures retain up to two generation retries with saved-dice replay; historical versions retain their complete-response retry behavior. Both correction loops stop on quota, cancellation, changed ownership or request context or forbidden capabilities. Diagnostic prompts and responses remain local Git-ignored logs. The UI keeps an animated busy indicator and an editable next-action draft.
+Readable responses use field-only repair: application validation identifies allowed paths; a tools-free call to the same CLI/model/effort returns path/value corrections, which are checked and fully revalidated. Narrative and other valid fields stay unchanged. Citation offsets/pages are computed in code from exact, uniquely identifiable supplied quotes; computed fields are optional only on the CLI wire contract and remain required in storage/archives. Invalid or ambiguous quotes still require correction. Citation binding gathers every independently invalid citation path in one correction request, within the existing two-call repair limit; valid citations and unrelated fields remain protected. Restricted repair failure stops without automatic scene regeneration. Unreadable JSON and pre-final generation failures retain up to two generation retries with saved-dice replay. Both correction loops stop on quota, cancellation, changed ownership or request context or forbidden capabilities. Diagnostic prompts and responses remain local Git-ignored logs. The UI keeps an animated busy indicator and an editable next-action draft.
 
 Invalid Antigravity `call_mcp_tool` gateway server/tool envelopes use recoverable `gameplay_tool_unavailable`: dispatch is denied, the provider attempt closes, and correction feedback identifies the owned registry. Saved dice/context remain unchanged. Actual native capability violations retain non-retryable isolation errors. Argument-free DONE metadata is accepted only for an already validated/dispatched owned tool step.
 
-### Campaign knowledge and instruction contract (v4)
+### Campaign knowledge and instruction contract
 
-Gameplay and campaign exports now use v4 after the coordinated migration and
-compatibility gate. Earlier archive-v2/v3 descriptions above remain historical
-compatibility notes. New book and no-library responses share the strict shape
-`{version:4,narrative,operations,rollInterpretations,ruleCitations,knowledgeChanges}`;
-no-library citations are empty. Stored legacy retries retain their original version.
+Book and no-library actions share one response shape (see "One gameplay contract" below);
+no-library citations are empty.
 The selected rule-system instructions and optional campaign instructions are preserved
 in full; one technical instruction block describes integration and owned tools.
 
@@ -229,46 +225,37 @@ to the immutable captured campaign registry, never current mutable state. Search
 defaults to active records; resolved/retracted records require a status filter or exact
 ID lookup. Knowledge reads do not draw dice or create authority receipts for books.
 
-New root dice sessions persist `promptContractVersion:4`, `digestVersion:2`, exact
-`systemPrompt`, `frozenKnowledge:{campaignId,records,characters:[{id,name}],sourceIds,sourceVersions?:[{id,version}]}`,
-and `toolDefinitions:[{name,description,inputSchema}]` once; `frozenPrompt` holds the
-exact user input. New frozen captures include current source versions; older v4 captures
-without that optional metadata retain their source-ID-only availability semantics.
-Retries use these immutable fields. Legacy absent metadata retains
-the original contract/digest; no historical metadata is fabricated. A legacy retry
-with nonempty new knowledge fails its context-change check. Derived memory never
-overrides knowledge certainty/status/evidence. Legacy undo snapshots omit knowledge
-fields; new snapshots hold only touched `beforeKnowledge`/`afterKnowledge` records.
-Omission means no tracked changes, never clearing the registry.
+Root dice sessions persist the exact `systemPrompt`,
+`frozenKnowledge:{campaignId,records,npcCharacters,characters:[{id,name}],sourceIds,sourceVersions:[{id,version}]}`,
+`frozenSources` and `toolDefinitions:[{name,description,inputSchema}]` once; `frozenPrompt`
+holds the exact user input. Retries use these immutable fields; a retry whose frozen tool
+definitions differ from the current registry fails with "start a new action". Sessions created
+before the instruction envelope have no system prompt and cannot be retried. Derived memory never
+overrides knowledge certainty/status/evidence. Snapshots hold only touched
+`beforeKnowledge`/`afterKnowledge` records; snapshots without them made no knowledge change,
+never clearing the registry.
 
-Archive v4 validates/remaps knowledge, attribution turns, character/source links,
+Archives validate/remap knowledge, attribution turns, character/source links,
 book receipt links, undo snapshots and frozen session metadata consistently. Deleted
 character/source links remain historical with retained names/quotes; structural UUIDs
 receive new identities while narrative, private text and historical prompt strings
-remain exact audit text. Imported sessions are non-executable. Archives v1–v3 remain
-accepted through strict legacy schemas; old campaigns receive empty knowledge on
-activation without guessed origins. V4 fields are rejected in older archive versions.
-Templates retain setup and portable book references, excluding knowledge timeline,
+remain exact audit text. Imported sessions are non-executable. Templates retain setup and portable book references, excluding knowledge timeline,
 turns, receipts, snapshots and frozen sessions.
 
 `GET /api/campaigns/:id/turns/:turnId/context` loads the existing saved context
-inspection on demand. It returns `{data: ContextManifest|null}`. New v4 contexts
-hydrate exact system/user inputs, digest version, frozen knowledge and definitions
-from the immutable owning root session; ordinary campaign/turn lists retain only
-the reference. Legacy contexts remain unchanged. Cross-campaign IDs return 404.
+inspection on demand. It returns `{data: ContextManifest|null}`. Contexts hydrate exact
+system/user inputs, frozen knowledge and definitions from the immutable owning root session;
+ordinary campaign/turn lists retain only the reference. Turns whose session predates the
+instruction envelope return their saved manifest. Cross-campaign IDs return 404.
 
-If a v4 session cannot be created because database columns are missing, the turn
+If a session cannot be created because database columns are missing, the turn
 fails before a CLI call with an actionable `setup-database.cmd` migration message
 instead of the generic invalid-response message. No game changes are committed.
 
-## Current audited gameplay contract (v5)
+## Audited gameplay
 
-Version 5 used response version 5, archive version 5/6 and context digest version 3; it remains
-the frozen contract for its retries and editing resumes. New actions use version 6 (below), which
-keeps every v5 rule.
-Older response/archive contracts remain strict and retain their original retry semantics.
-Campaign sources have a `purpose`: `campaign`, `character` or `reference`. Legacy sources
-without a purpose become references when preparing a v5 context. Confirmed source text
+Campaign sources have a `purpose`: `campaign`, `character` or `reference`. Sources
+saved without a purpose are treated as references. Confirmed source text
 is frozen for each action. Opening turns include deterministic source excerpts; the GM
 can retrieve more through `campaign_sources_search` and `campaign_sources_get`.
 Get results retain receipt IDs and exact source spans for evidence validation.
@@ -309,7 +296,7 @@ during Settings refresh. CLI discovery failures retain their diagnostic reason.
 
 ### Rule-read accounting after migration 0011
 
-For current v5 tool registries, `rules_search` entries may include `alreadySupplied`,
+`rules_search` entries may include `alreadySupplied`,
 `originalComplete` and `suppliedOriginals` receipt locators for original text delivered
 in that execution at the same rule revision/hash/path. `rules_find` returns those
 locators and skips automatic rereads of complete originals. Partial or explicit
@@ -320,35 +307,30 @@ not change response schemas, allowed correction paths or provider effort.
 
 Rule lookups have no accumulated request-count or transcript-byte ceiling. The database
 keeps nonnegative audit counters and immutable receipts. Responses remain paginated;
-a cursor requests the next page. Archive v5 preserves receipt totals above the former
-8 KiB ceiling, while historical archive contracts remain unchanged.
+a cursor requests the next page. Archives preserve receipt totals without a size ceiling.
 
 Private tool-failure traces retain `database.sqlState` and safe table/column/constraint
 identifiers. A PostgreSQL CHECK rejection is classified as `database_constraint`, rather
 than an unrelated local-service connection failure. SQL text, rejected row values and
 raw database messages are omitted.
 
-Current source navigation adds `sections: {sectionIndex,title,headings:string[],supplied:boolean}[]` to each v5 campaign source catalog item. Search entries add `title` and `alreadySupplied`; get receipts add the same fields alongside the unchanged original source span and receipt ID. These additive diagnostics preserve frozen historic payloads and immutable receipt replay. Supplied tracking is execution-local, covers only complete original sections and advances after successful persistence; repeated reads remain unrestricted.
+Current source navigation adds `sections: {sectionIndex,title,headings:string[],supplied:boolean}[]` to each campaign source catalog item. Search entries add `title` and `alreadySupplied`; get receipts add the same fields alongside the unchanged original source span and receipt ID. These additive diagnostics preserve frozen historic payloads and immutable receipt replay. Supplied tracking is execution-local, covers only complete original sections and advances after successful persistence; repeated reads remain unrestricted.
 
 Narrative-only editing retains the GM provider/model but selects advertised `low`, then the lowest canonical advertised effort, then CLI default (`null`). GM settings are never modified. The selected editor effort is reused for its correction attempts. Field-only mechanical response repair continues to use the GM effort. Editor failure still withholds delivery until the stage succeeds.
 
 ### Combined book lookup
 
-New version 5 book turns advertise `rules_find` through the owned native registry for Claude, Codex and Antigravity. It accepts the same arguments as `rules_search`: query, optional columns/source, and an optional search cursor. Search ranks whole Unicode terms across titles, aliases and original text, with conservative plural normalization and partial matches. Exact titles lead; summary-only matches remain derived navigation. Results identify matched terms, exact title matches and `readableOriginal` eligibility. This lexical search does not adjudicate rules or guarantee semantic matches.
+Book turns advertise `rules_find` through the owned native registry for Claude, Codex and Antigravity. It accepts the same arguments as `rules_search`: query, optional columns/source, and an optional search cursor. Search ranks whole Unicode terms across titles, aliases and original text, with conservative plural normalization and partial matches. Exact titles lead; summary-only matches remain derived navigation. Results identify matched terms, exact title matches and `readableOriginal` eligibility. This lexical search does not adjudicate rules or guarantee semantic matches.
 
 `rules_find` returns `search`, `reads`, `suppliedOriginals` and `unreadPaths`. The supplied-original index lists successful nonempty original-text receipts with path, start/end, complete and nextRead. Copy nextRead verbatim for partial-read continuation; a complete read has nextRead null. Reuse these already delivered originals for evidence; intentional rereads remain unrestricted. Path values must be copied from tool results, never synthesized or converted to slash notation. It searches once, then reads the first three nonstructural, nonempty originals on that search page, sequentially from offset zero. Each original has an ordinary persisted `rules_get` receipt and continuation cursor. Reuse those originals for citations; retrieve additional windows/paths with the existing tools. Three reads are an initial payload choice, not a total lookup limit. Search and original pages retain their existing per-receipt pagination.
 
-The wrapper stores only constituent search/get receipts, with deterministic child request IDs. Each child rechecks ownership, cancellation and captured library identity. Interrupted/replayed calls reuse committed children across lookup restarts without ephemeral locators. Old search/get cursors themselves remain execution-scoped and can expire; restart lookup when necessary. Frozen historical attempts retain their saved tool definitions and instructions. No database migration or archive format change is required.
+The wrapper stores only constituent search/get receipts, with deterministic child request IDs. Each child rechecks ownership, cancellation and captured library identity. Interrupted/replayed calls reuse committed children across lookup restarts without ephemeral locators. Old search/get cursors themselves remain execution-scoped and can expire; restart lookup when necessary. Retries reuse their frozen tool definitions and instructions.
 
 ### Inline roll placement
 
-Version-5 roll interpretations may include `afterParagraph`, a positive 1-based index into blank-line-separated narrative paragraphs. The gameplay prompt requests it for every roll. Indices beyond the narrative are rejected. The narrative editor preserves paragraph count and order when placement is present. Versions 1-4 retain their original response schemas; stored turns and archives without placement remain supported. The Play transcript shows trusted rolls, declarations, interpretations and corrections directly after their linked paragraph, independently of debug information. Unplaced historical rolls and terminal attempts without narration append results at the end of the same GM message, without a separate box. Read-aloud uses only the original narrative text and offsets.
+Roll interpretations may include `afterParagraph`, a positive 1-based index into blank-line-separated narrative paragraphs. The gameplay prompt requests it for every roll. Indices beyond the narrative are rejected. The narrative editor preserves paragraph count and order when placement is present. Stored turns and archives without placement remain supported. The Play transcript shows trusted rolls, declarations, interpretations and corrections directly after their linked paragraph, independently of debug information. Unplaced historical rolls and terminal attempts without narration append results at the end of the same GM message, without a separate box. Read-aloud uses only the original narrative text and offsets.
 
-## Individual combat identity (current gameplay contract, v6)
-
-New actions use response version 6 and context digest 4; exports use archive version 7. Turns
-started under v5 keep their frozen v5 contract for retries and editing resumes. `/settings`
-reports the enabled versions and `combat.enabled: true`.
+## Individual combat identity
 
 - Every combatant is its own character sheet and UUID. Before combat dice, the GM calls the owned
   tool `combat_prepare` once per batch: `{localKey, encounterId?, participants:[{characterId,label,trackedFields} | {localKey,label,character:NpcDraft,introduction,trackedFields}]}`.
@@ -358,14 +340,15 @@ reports the enabled versions and `combat.enabled: true`.
   its retries) prepares at most one encounter; later batches continue it. Preparation writes only
   append-only receipts (`combat_preparations`, `combat_prepared_characters`, migration 0014);
   nothing is published until the turn commits. Batches may reach 1 MiB of UTF-8 arguments (plus a
-  64 KiB JSON-RPC envelope); other tools keep their historical 1024-byte argument ceiling.
+  64 KiB JSON-RPC envelope); other tools keep their 1024-byte argument ceiling.
 - `trackedFields` are `{path,kind:'vitality'|'damage'|'condition'|'resource',label}`; paths are
   1–16 own-property segments inside `attributes` (no prototype keys, no prefix overlaps) and must
   already exist. At least one `vitality` or `damage` field is required. Values stay on the sheet.
-- `state.combat` becomes `{trackingVersion:1,id,active,round,participants:[{characterId,label,trackedFields}]}`.
-  State without `trackingVersion` is legacy and is never converted implicitly. An active encounter
-  ends only with `active:false`; a new encounter ID must come from `combat_prepare`.
-- v6 `roll_dice` requires `scope`: `combat` (`encounterId`, `combatKind`, prepared `actorId`;
+- `state.combat` is absent or exactly `{id,active,round,participants:[{characterId,label,trackedFields}]}`;
+  any other value fails with `combat_state`. Free-form combat notes belong in `state.combatNotes`,
+  which the app never interprets as identities. An active encounter ends only with `active:false`;
+  a new encounter ID must come from `combat_prepare`.
+- `roll_dice` requires `scope`: `combat` (`encounterId`, `combatKind`, prepared `actorId`;
   attacks also `targetId`), `character`, or `oracle` (no actor/target). Participants of the
   active/prepared encounter roll with combat scope. Prepared IDs are authorized by receipt; the
   frozen session character list is unchanged.
@@ -378,8 +361,26 @@ reports the enabled versions and `combat.enabled: true`.
   prepared identities and receipts are not.
 - Committed turns expose `combatEffects` and `participantReferences`; receipts and drafts are never
   in player projections. Manual PATCH cannot create, replace or remove the structured encounter
-  (an ended one may be removed); character edits keep tracked paths but may change values;
+  (an ended one may be removed) and cannot write free-form data into `state.combat`; free-form
+  notes go to `state.combatNotes`. Character edits keep tracked paths but may change values;
   deleting an active participant returns 409.
-- Archive v7 adds `combatPreparations` and `combatPreparedCharacters` and remaps encounter,
+- Archives carry `combatPreparations` and `combatPreparedCharacters` and remap encounter,
   receipt and participant IDs in state, snapshots, rolls, effects and references; free JSON and
-  text keep historical UUIDs. Versions 1–6 reject these fields. Templates never carry state.
+  text keep historical UUIDs. Templates never carry state.
+
+## One gameplay contract
+
+The GM returns one strict JSON shape without a version field:
+`{narrative,operations,rollInterpretations,ruleCitations,knowledgeChanges,operationExplanations,combatEffects,participantReferences}`.
+A `create` operation carries an `introduction` with `visibility` and, for a prepared NPC,
+`characterId` and `preparationReceiptId`. A response that carries `version` is rejected. Recorded
+dice from before combat tracking keep no `scope`; every new request requires one.
+
+Migration 0015 applies this contract to stored data. It refuses to run while any turn is pending,
+running or awaiting narrative editing ("Finish or cancel pending turns before upgrading"), and
+when a state holds both free-form `combat` and `combatNotes`. It moves any `state.combat` without
+the former tracking marker (including JSON `null`) to `state.combatNotes` in campaigns and in
+both snapshot states, removes the marker from structured encounters, removes retired contract
+keys from saved turn contexts, and drops the `dice_sessions` contract columns while keeping
+sessions immutable. Failed or cancelled turns recorded before the upgrade can no longer be
+retried; start a new action.

@@ -3,10 +3,9 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { GameplayTools } from '../src/providers/gameplayTools.js';
 import { startGameplayMcp } from '../src/providers/gameplayMcp.js';
 import { nativeGameplaySchema } from '../src/providers/gameplayContract.js';
-import { gameplayResponseJsonSchema } from '../src/domain/gameplayResponse.js';
+import { ownedTools } from './ownedGameplayFixture.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import { freezeKnowledge } from '../src/domain/knowledgeRecall.js';
 import { CharacterType } from '../src/domain/options.js';
@@ -24,14 +23,7 @@ test('NPC search and get traverse the private MCP transport with frozen sheets',
     notes: 'PRIVATE',
     revision: 1,
   });
-  const registry = new GameplayTools({
-    book: false,
-    knowledge: freezeKnowledge(c, 5, true),
-    assertActive: async () => {},
-    roll: async () => {
-      throw Error('Unexpected dice');
-    },
-  });
+  const registry = ownedTools({ knowledge: freezeKnowledge(c, true) });
   const endpoint = await startGameplayMcp(registry.definitions, registry.call);
   const client = new Client({ name: 'npc-transport', version: '1' });
   try {
@@ -65,35 +57,17 @@ test('NPC search and get traverse the private MCP transport with frozen sheets',
   }
 });
 
-test('explicit native schema selection is independent of book mode and fails closed', () => {
-  const dispatch = async () => ({});
-  const selected = nativeGameplaySchema({ dispatch, schema: gameplayResponseJsonSchema }, false);
-  const response = {
-    version: 4,
-    narrative: 'Valid',
-    operations: [],
-    rollInterpretations: [],
-    ruleCitations: [],
-    knowledgeChanges: [],
-  };
-  assert.deepEqual(selected.parse(response), response);
-  assert.throws(() => selected.parse({ ...response, knowledgeChanges: undefined }));
-  assert.throws(() => selected.parse({ ...response, unexpected: true }));
-  assert.throws(
-    () =>
-      nativeGameplaySchema({ dispatch, schema: { properties: { version: { const: 99 } } } }, false),
-    /Unsupported/
-  );
+test('native transports keep readable JSON objects for field validation and repair', () => {
+  const readable = nativeGameplaySchema();
+  const partial = { narrative: 'Valid', knowledgeChanges: 'not yet repaired' };
+  assert.deepEqual(readable.parse(partial), partial);
+  assert.throws(() => readable.parse('narration only'));
+  assert.throws(() => readable.parse([partial]));
 });
 
 test('one registered synthetic tool crosses private MCP without provider name or parameter branches', async () => {
   let calls = 0;
-  const registry = new GameplayTools({
-    book: false,
-    assertActive: async () => {},
-    roll: async () => {
-      throw new Error('Unexpected dice');
-    },
+  const registry = ownedTools({
     registrations: [
       {
         name: 'synthetic_echo',

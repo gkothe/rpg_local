@@ -96,7 +96,7 @@ async function heroCampaign(): Promise<Campaign> {
   await store.insert(campaign);
   return campaign;
 }
-/** Scripted v6 GM: prepares two soldiers, rolls an attack and wounds only the first. */
+/** Scripted GM: prepares two soldiers, rolls an attack and wounds only the first. */
 async function ambush(tools: GameplayToolDispatch, heroId: string, fail?: 'after_dice') {
   const batch = {
     localKey: 'ambush',
@@ -131,7 +131,6 @@ async function ambush(tools: GameplayToolDispatch, heroId: string, fail?: 'after
   return {
     payload,
     response: {
-      version: 6,
       narrative: 'Two soldiers block the gate.\n\nYour blade cuts the first soldier.',
       operations: [
         a!,
@@ -148,7 +147,6 @@ async function ambush(tools: GameplayToolDispatch, heroId: string, fail?: 'after
           expected: {},
           value: {
             combat: {
-              trackingVersion: 1,
               id: payload.encounterId,
               active: true,
               round: 1,
@@ -194,7 +192,7 @@ function editor(counts: { editor: number }, failFirst = false): Generator['gener
 }
 
 test(
-  'v6 turn prepares two soldiers, wounds only A, saves after editing, feeds the next context and undoes fully',
+  'a combat turn prepares two soldiers, wounds only A, saves after editing, feeds the next context and undoes fully',
   { skip: !enabled },
   async () => {
     const campaign = await heroCampaign();
@@ -218,7 +216,6 @@ test(
         const ids = (JSON.parse(prompt).mandatory.characters as { id: string }[]).map((c) => c.id);
         for (const op of payload!.createOperations) assert.ok(ids.includes(op.characterId));
         return {
-          version: 6,
           narrative: 'The soldiers circle you.',
           operations: [],
           rollInterpretations: [],
@@ -235,7 +232,7 @@ test(
         };
       },
     };
-    const service = new TurnService(store, generator, 6);
+    const service = new TurnService(store, generator);
     const first = await service.submit(campaign.id, {
       revision: 0,
       requestId: randomUUID(),
@@ -317,7 +314,7 @@ test(
         return result.response;
       },
     };
-    const service = new TurnService(store, generator, 6);
+    const service = new TurnService(store, generator);
     const first = await service.submit(campaign.id, {
       revision: 0,
       requestId: randomUUID(),
@@ -367,7 +364,7 @@ test(
           return (await ambush(tools, heroId)).response;
         },
       };
-      const service = new TurnService(store, generator, 6);
+      const service = new TurnService(store, generator);
       const submitted = await service.submit(campaign.id, {
         revision: 0,
         requestId: randomUUID(),
@@ -499,7 +496,7 @@ test(
         throw new Problem(429, 'provider_quota', 'Stop after checks');
       },
     };
-    const service = new TurnService(store, generator, 6);
+    const service = new TurnService(store, generator);
     const submitted = await service.submit(campaign.id, {
       revision: 0,
       requestId: randomUUID(),
@@ -526,7 +523,6 @@ test(
     const campaign = await heroCampaign();
     const heroId = campaign.characters[0]!.id;
     const encounter = {
-      trackingVersion: 1,
       id: randomUUID(),
       active: true,
       round: 1,
@@ -563,6 +559,11 @@ test(
       () => service.deleteCharacter(campaign.id, heroId, 0),
       /end the encounter/
     );
+    // Free-form combat notes have their own key beside the structured encounter.
+    const noted = await service.patch(campaign.id, 0, {
+      state: { scene: 'yard', combat: encounter, combatNotes: { mood: 'tense' } },
+    });
+    assert.deepEqual(noted.state.combatNotes, { mood: 'tense' });
     // Ending the encounter is a gameplay transition, not a manual state edit.
     await assert.rejects(
       () => service.patch(campaign.id, 0, { state: { combat: { ...encounter, active: false } } }),

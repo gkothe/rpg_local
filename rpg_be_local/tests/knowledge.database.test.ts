@@ -1,4 +1,3 @@
-import { ARCHIVE_FORMAT_VERSION } from '../src/domain/versions.js';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -16,9 +15,11 @@ import {
   KnowledgeOrigin as O,
   KnowledgeCertainty as C,
   KnowledgeStatus as S,
+  KnowledgeVisibility as V,
 } from '../src/domain/knowledge.js';
 import type { Generator } from '../src/providers/service.js';
 import type { Turn } from '../src/domain/types.js';
+import { emptyResponse, ownedTools, syntheticGenerate } from './ownedGameplayFixture.js';
 const enabled = process.env.NODE_ENV === 'test' && !!process.env.RPG_TEST_DATABASE_URL;
 let store: Store;
 const schema = `knowledge_fixture_${randomUUID().replaceAll('-', '')}`;
@@ -51,23 +52,23 @@ const fact = {
   status: S.Active,
   characterIds: [],
   evidence: [],
+  visibility: V.Player,
 };
-const answer = {
-  version: 4,
-  narrative: 'At the inn',
-  operations: [],
-  rollInterpretations: [],
-  ruleCitations: [],
-  knowledgeChanges: [fact],
-};
+const answer = { ...emptyResponse, narrative: 'At the inn', knowledgeChanges: [fact] };
 const base: Generator = {
   capacity: async () => 16000,
   gameplayCapacity: async () => 16000,
-  generate: async () => {
-    throw Error('Unexpected extraction');
-  },
+  generate: syntheticGenerate(),
   generateOwnedGameplay: async () => answer,
 };
+const check = (extra: object = {}) => ({
+  slot: 0,
+  groups: [{ label: 'check', count: 1, sides: 6 }],
+  reason: 'Inn',
+  declaration: 'Target four',
+  scope: 'oracle',
+  ...extra,
+});
 
 test(
   'missing metadata migration gives an actionable message before any CLI call',
@@ -76,17 +77,13 @@ test(
     const c = newCampaign({ name: 'Missing migration fixture' });
     await store.insert(c);
     let called = false;
-    const service = new TurnService(
-      store,
-      {
-        ...base,
-        generateOwnedGameplay: async () => {
-          called = true;
-          return answer;
-        },
+    const service = new TurnService(store, {
+      ...base,
+      generateOwnedGameplay: async () => {
+        called = true;
+        return answer;
       },
-      4
-    );
+    });
     await store.pool.query('ALTER TABLE dice_sessions DROP COLUMN tool_definitions');
     try {
       const submitted = await service.submit(c.id, {
@@ -118,16 +115,13 @@ async function finish(campaignId: string, id: string): Promise<Turn> {
   throw Error('Fixture did not complete');
 }
 test(
-  'v4 migration repeats safely; turn/idempotency/empty registry/envelope export import and undo retain complete metadata',
+  'turn/idempotency/empty registry/envelope export import and undo retain complete metadata',
   { skip: !enabled },
   async () => {
     const c = newCampaign({ name: 'Knowledge DB', instructions: '  Keep exactly\n' });
     await store.insert(c);
-    await store.pool.query(
-      await readFile(path.join(appRoot, 'migrationssql/0008_campaign_knowledge.sql'), 'utf8')
-    );
     assert.deepEqual((await store.campaign(c.id)).knowledge, []);
-    const service = new TurnService(store, base, 4);
+    const service = new TurnService(store, base);
     const input = { revision: 0, requestId: randomUUID(), action: 'Enter' };
     const t = await service.submit(c.id, input);
     assert.equal((await service.submit(c.id, input)).id, t.id);
@@ -136,11 +130,12 @@ test(
     const saved = (
       await store.pool.query('SELECT * FROM dice_sessions WHERE root_turn_id=$1', [t.id])
     ).rows[0];
-    assert.equal(saved.prompt_contract_version, 4);
-    assert.equal(saved.digest_version, 2);
     assert.equal(saved.frozen_knowledge.records.length, 0);
     assert.ok(saved.system_prompt.includes(c.instructions));
-    assert.equal(saved.tool_definitions.length, 3);
+    assert.deepEqual(
+      saved.tool_definitions.map((tool: { name: string }) => tool.name),
+      ownedTools().definitions.map((tool) => tool.name)
+    );
     await assert.rejects(
       () =>
         store.pool.query('UPDATE dice_sessions SET system_prompt=$2 WHERE id=$1', [
@@ -151,21 +146,18 @@ test(
     );
     const library = new LibraryService(store);
     const archive = await library.export(c.id);
-    assert.equal(archive.version, ARCHIVE_FORMAT_VERSION);
     const imported = await library.import(archive);
     assert.equal(imported.knowledge?.[0]?.certainty, C.Rumor);
     assert.notEqual(imported.knowledge?.[0]?.id, (await store.campaign(c.id)).knowledge![0]!.id);
     assert.equal(
-      (await new TurnService(store, base, 4).undo(imported.id, imported.revision)).knowledge
-        ?.length,
+      (await new TurnService(store, base).undo(imported.id, imported.revision)).knowledge?.length,
       0
     );
     assert.equal((await service.undo(c.id, 1)).knowledge?.length, 0);
-    const empty = new TurnService(
-      store,
-      { ...base, generateOwnedGameplay: async () => ({ ...answer, knowledgeChanges: [] }) },
-      4
-    );
+    const empty = new TurnService(store, {
+      ...base,
+      generateOwnedGameplay: async () => ({ ...answer, knowledgeChanges: [] }),
+    });
     const emptyTurn = await empty.submit(c.id, {
       revision: 2,
       requestId: randomUUID(),
@@ -191,16 +183,7 @@ test(
       ...base,
       generateOwnedGameplay: async (_settings, _prompt, _schema, system, tools, signal) => {
         assert.ok(system);
-        const roll = await tools(
-          'roll_dice',
-          {
-            slot: 0,
-            groups: [{ label: 'check', count: 1, sides: 6 }],
-            reason: 'Inn',
-            declaration: 'Target four',
-          },
-          'dice'
-        );
+        const roll = await tools('roll_dice', check(), 'dice');
         if ('groups' in roll) {
           if (faces) assert.deepEqual(roll.groups, faces);
           else faces = roll.groups;
@@ -229,7 +212,7 @@ test(
         return { ...answer, rollInterpretations: [{ rollId, explanation: 'check' }] };
       },
     };
-    const service = new TurnService(store, generator, 4);
+    const service = new TurnService(store, generator);
     const t = await service.submit(c.id, { revision: 0, requestId: randomUUID(), action: 'Inn' });
     assert.equal((await finish(c.id, t.id)).status, 'failed');
     assert.deepEqual((await store.campaign(c.id)).knowledge ?? [], []);
@@ -293,12 +276,22 @@ test(
               inventory: {},
               description: {},
             },
-            introduction: { origin: O.Gm, evidence: [] },
+            introduction: { origin: O.Gm, evidence: [], visibility: V.Player },
+          },
+        ],
+        operationExplanations: [
+          {
+            operationIndex: 0,
+            reason: 'The guide arrives',
+            basis: 'provisional',
+            rollIds: [],
+            evidence: [],
+            visibility: V.Player,
           },
         ],
       }),
     };
-    const service = new TurnService(store, generator, 4);
+    const service = new TurnService(store, generator);
     const t = await service.submit(c.id, {
       revision: 0,
       requestId: randomUUID(),
@@ -346,7 +339,12 @@ test(
       ...base,
       capacity: async () => 100000,
       gameplayCapacity: async () => 100000,
-      generate: async (_settings, prompt) => {
+      generate: async (settings, prompt, schema, ...rest) => {
+        if (
+          (schema as { properties?: object }).properties &&
+          'narrative' in (schema as { properties: object }).properties
+        )
+          return syntheticGenerate()(settings, prompt, schema, ...rest);
         const payload = JSON.parse(prompt);
         for (const record of payload.knowledge) {
           assert.equal(record.certainty, C.Rumor);
@@ -391,7 +389,7 @@ test(
         };
       },
     };
-    const service = new TurnService(store, generator, 4);
+    const service = new TurnService(store, generator);
     let priorRecord: unknown;
     for (let i = 0; i < 7; i++) {
       const current = await store.campaign(c.id);
@@ -438,8 +436,6 @@ import { createApp } from '../src/app.js';
 import { ProviderService } from '../src/providers/service.js';
 import { CharacterType } from '../src/domain/options.js';
 import { freezeKnowledge, type FrozenKnowledge } from '../src/domain/knowledgeRecall.js';
-import { gameplayInstructionEnvelope } from '../src/domain/gameplayNarrator.js';
-import { GameplayTools } from '../src/providers/gameplayTools.js';
 import { buildContext } from '../src/domain/context.js';
 import { gameplayDigest } from '../src/domain/diceContext.js';
 
@@ -481,49 +477,29 @@ test(
           /NPC is not/
         );
         await assert.rejects(
-          tools(
-            'roll_dice',
-            {
-              slot: 0,
-              groups: [{ label: 'Check', count: 1, sides: 6 }],
-              reason: 'Check merchant',
-              declaration: 'No modifiers',
-              actorId: randomUUID(),
-            },
-            'invalid-actor'
-          ),
+          tools('roll_dice', check({ scope: 'character', actorId: randomUUID() }), 'invalid-actor'),
           /frozen context/
         );
         const roll = await tools(
           'roll_dice',
-          {
-            slot: 0,
-            groups: [{ label: 'Check', count: 1, sides: 6 }],
-            reason: 'Check merchant',
-            declaration: 'No modifiers',
-            actorId: npcId,
-          },
+          check({ scope: 'character', actorId: npcId }),
           'roll'
         );
         if (calls === 1)
           throw new Problem(503, 'local_service', 'Synthetic interruption after NPC dice');
         return {
-          version: 5,
+          ...emptyResponse,
           narrative: 'A familiar merchant greets you.',
-          operations: [],
           rollInterpretations: [
             {
               rollId: (roll as { rollId: string }).rollId,
               explanation: 'The merchant greets you.',
             },
           ],
-          ruleCitations: [],
-          knowledgeChanges: [],
-          operationExplanations: [],
         };
       },
     };
-    const service = new TurnService(store, generator, 5);
+    const service = new TurnService(store, generator);
     const first = await service.submit(c.id, {
       revision: 0,
       requestId: randomUUID(),
@@ -541,7 +517,6 @@ test(
     assert.equal(calls, 2);
     const library = new LibraryService(store);
     const exported = await library.export(c.id);
-    assert.equal(exported.version, ARCHIVE_FORMAT_VERSION);
     const original: FrozenKnowledge = exported.diceSessions![0]!.frozenKnowledge!;
     assert.equal(original.npcCharacters![0]!.id, npcId);
     assert.ok(
@@ -558,56 +533,24 @@ test(
 );
 
 test(
-  'pre-NPC v5 retries retain exact frozen definitions and do not backfill the new roster',
+  'a retry whose frozen tool definitions differ from the current registry is refused before the CLI',
   { skip: !enabled },
   async () => {
-    const c = newCampaign({ name: 'Legacy v5 NPC retry' });
+    const c = newCampaign({ name: 'Changed registry retry' });
     await store.insert(c);
     let calls = 0;
-    const generator: Generator = {
+    const service = new TurnService(store, {
       ...base,
-      generate: async () => ({ narrative: 'You continue.' }),
-      generateOwnedGameplay: async (_s, _p, _schema, system, tools) => {
+      generateOwnedGameplay: async () => {
         calls++;
-        assert.doesNotMatch(system, /campaign_npcs_get/);
-        assert.ok(
-          !tools.definitions!.some((definition) => definition.name.startsWith('campaign_npcs_'))
-        );
-        const roll = await tools(
-          'roll_dice',
-          {
-            slot: 0,
-            groups: [{ label: 'Check', count: 1, sides: 6 }],
-            reason: 'Check',
-            declaration: 'No modifiers',
-          },
-          'roll'
-        );
-        return {
-          version: 5,
-          narrative: 'You continue.',
-          operations: [],
-          rollInterpretations: [
-            { rollId: (roll as { rollId: string }).rollId, explanation: 'Continue.' },
-          ],
-          ruleCitations: [],
-          knowledgeChanges: [],
-          operationExplanations: [],
-        };
+        return answer;
       },
-    };
-    const service = new TurnService(store, generator, 5);
-    const context = buildContext(c, [], 'Continue', [], 16000, true, undefined, 5);
-    const knowledge = freezeKnowledge(c, 5);
-    const definitions = new GameplayTools({
-      book: false,
-      knowledge,
-      readCampaignSource: async () => ({}),
-      assertActive: async () => {},
-      roll: async () => {
-        throw Error('Fixture only');
-      },
-    }).definitions;
+    });
+    const context = buildContext(c, [], 'Continue', []);
+    // A session frozen by an older registry without the NPC tools.
+    const definitions = ownedTools({ knowledge: freezeKnowledge(c, true) }).definitions.filter(
+      (definition) => !definition.name.startsWith('campaign_npcs_')
+    );
     const sessionId = randomUUID();
     const first: Turn = {
       id: randomUUID(),
@@ -630,27 +573,26 @@ test(
       [first.id, c.id, first.requestId, 'fixture', first.status, first]
     );
     await store.pool.query(
-      'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,prompt_contract_version,digest_version,system_prompt,frozen_knowledge,tool_definitions,frozen_sources) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
+      'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,system_prompt,frozen_knowledge,tool_definitions,frozen_sources) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
       [
         sessionId,
         c.id,
         first.id,
-        gameplayDigest(c, [], undefined, 3),
+        gameplayDigest(c, []),
         context.prompt,
         0,
         '[]',
-        5,
-        3,
-        gameplayInstructionEnvelope('', '', false, 5),
-        knowledge,
+        context.systemPrompt,
+        context.frozenKnowledge,
         JSON.stringify(definitions),
         context.frozenSources,
       ]
     );
     const retry = await service.retry(c.id, first.id, { revision: 0, requestId: randomUUID() });
-    const completed = await finish(c.id, retry.id);
-    assert.equal(completed.status, 'completed', completed.error ?? '');
-    assert.equal(calls, 1);
+    const failed = await finish(c.id, retry.id);
+    assert.equal(failed.status, 'failed');
+    assert.match(failed.error!, /tool definitions changed; start a new action/);
+    assert.equal(calls, 0);
   }
 );
 test(
@@ -659,7 +601,7 @@ test(
   async () => {
     const c = newCampaign({ name: 'Inspect context', instructions: '  Exact context\n' });
     await store.insert(c);
-    const service = new TurnService(store, base, 4);
+    const service = new TurnService(store, base);
     const t = await service.submit(c.id, {
       revision: 0,
       requestId: randomUUID(),
@@ -686,20 +628,5 @@ test(
       .get(`/api/campaigns/${randomUUID()}/turns/${t.id}/context`)
       .set('Host', 'localhost:4100')
       .expect(404);
-    const legacy = new TurnService(
-      store,
-      {
-        ...base,
-        generateOwnedGameplay: undefined,
-        generate: async () => ({ version: 1, narrative: 'Legacy', operations: [] }),
-      },
-      1
-    );
-    const old = await legacy.submit(c.id, { revision: 1, requestId: randomUUID(), action: 'Old' });
-    assert.equal((await finish(c.id, old.id)).status, 'completed');
-    assert.deepEqual(
-      await store.turnContext(c.id, old.id),
-      (await store.turn(c.id, old.id)).context
-    );
   }
 );

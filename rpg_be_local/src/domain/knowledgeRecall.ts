@@ -3,16 +3,13 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { Problem } from '../errors.js';
 import {
-  knowledgeRecordSchema,
   campaignKnowledgeSchema,
-  legacyKnowledge,
   KnowledgeKind,
   KnowledgeStatus,
   type CampaignKnowledge,
 } from './knowledge.js';
 import type { Campaign } from './types.js';
 import { npcSnapshotSchema, freezeNpcCharacters } from './npcRecall.js';
-import { usesAuditedContract } from './versions.js';
 export const KNOWLEDGE_SEARCH_TOOL_NAME = 'campaign_knowledge_search';
 export const KNOWLEDGE_GET_TOOL_NAME = 'campaign_knowledge_get';
 export const knowledgeSearchSchema = z
@@ -27,7 +24,8 @@ export const knowledgeGetSchema = z.object({ id: z.uuid() }).strict();
 export const frozenKnowledgeSchema = z
   .object({
     campaignId: z.uuid(),
-    records: z.array(knowledgeRecordSchema),
+    records: z.array(campaignKnowledgeSchema),
+    npcCharacters: z.array(npcSnapshotSchema).optional(),
     characters: z.array(z.object({ id: z.uuid(), name: z.string() }).strict()),
     sourceIds: z.array(z.uuid()),
     sourceVersions: z
@@ -35,19 +33,12 @@ export const frozenKnowledgeSchema = z
       .optional(),
   })
   .strict();
-export const frozenKnowledgeV5Schema = frozenKnowledgeSchema
-  .extend({
-    records: z.array(campaignKnowledgeSchema),
-    npcCharacters: z.array(npcSnapshotSchema).optional(),
-  })
-  .strict();
-export type FrozenKnowledge = z.infer<typeof frozenKnowledgeV5Schema>;
-export function freezeKnowledge(c: Campaign, version = 4, includeNpcs = false): FrozenKnowledge {
-  const audited = usesAuditedContract(version);
+export type FrozenKnowledge = z.infer<typeof frozenKnowledgeSchema>;
+export function freezeKnowledge(c: Campaign, includeNpcs = false): FrozenKnowledge {
   return structuredClone({
     campaignId: c.id,
-    records: audited ? (c.knowledge ?? []) : legacyKnowledge(c.knowledge ?? []),
-    ...(audited && includeNpcs ? { npcCharacters: freezeNpcCharacters(c) } : {}),
+    records: c.knowledge ?? [],
+    ...(includeNpcs ? { npcCharacters: freezeNpcCharacters(c) } : {}),
     characters: c.characters.map(({ id, name }) => ({ id, name })),
     sourceIds: c.sources.map((s) => s.id),
     sourceVersions: c.sources.map(({ id, version }) => ({ id, version })),
@@ -113,7 +104,7 @@ export function selectRelevantKnowledge(
   return [...mandatory, ...optional];
 }
 export function createKnowledgeRecall(raw: FrozenKnowledge) {
-  const frozen = structuredClone(frozenKnowledgeV5Schema.parse(raw));
+  const frozen = structuredClone(frozenKnowledgeSchema.parse(raw));
   const identity = createHash('sha256').update(JSON.stringify(frozen)).digest('hex');
   const annotate = (r: CampaignKnowledge) => ({
     ...r,

@@ -9,7 +9,9 @@ import { newCampaign } from '../src/domain/campaign.js';
 import { TurnService } from '../src/services/turns.js';
 import { LibraryService } from '../src/services/library.js';
 import type { Generator } from '../src/providers/service.js';
-import type { GMResponse, Turn, Campaign } from '../src/domain/types.js';
+import type { Turn, Campaign } from '../src/domain/types.js';
+import { gameplayResponseWireJsonSchema } from '../src/domain/gameplayResponse.js';
+import { gmResponse, syntheticGenerate } from './ownedGameplayFixture.js';
 import { Problem } from '../src/errors.js';
 import { SourceLibrary } from '../src/services/sourceLibrary.js';
 import { textSource } from '../src/services/sources.js';
@@ -71,10 +73,11 @@ test(
       let generated = 0;
       const service = new TurnService(store, {
         capacity: async () => 16000,
-        generate: async (_settings, prompt) => {
+        generate: syntheticGenerate(),
+        generateOwnedGameplay: async (_settings, _prompt, _schema, systemPrompt) => {
           generated++;
-          assert.equal(JSON.parse(prompt).mandatory.campaignInstructions, 'x'.repeat(16000));
-          return { version: 1, narrative: 'Accepted', operations: [] };
+          assert.ok(systemPrompt.includes('x'.repeat(16000)));
+          return gmResponse('Accepted', []);
         },
       });
       const submitted = await service.submit(campaign.id, {
@@ -184,14 +187,12 @@ after(async () => {
   }
 });
 const settings = { provider: 'fixture', model: 'synthetic', effort: null };
+const openDoor = () =>
+  gmResponse('The door opens.', [{ op: 'state', expected: {}, value: { door: 'open' } }]);
 const immediate: Generator = {
   capacity: async () => 16000,
-  generate: async () =>
-    ({
-      version: 1,
-      narrative: 'The door opens.',
-      operations: [{ op: 'state', expected: {}, value: { door: 'open' } }],
-    }) satisfies GMResponse,
+  generate: syntheticGenerate(),
+  generateOwnedGameplay: async () => openDoor(),
 };
 async function wait(campaignId: string, id: string): Promise<Turn> {
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -214,7 +215,8 @@ function deferredGenerator() {
   });
   const generator: Generator = {
     capacity: async () => 16000,
-    generate: async (_settings, _prompt, _schema, signal) => {
+    generate: syntheticGenerate(),
+    generateOwnedGameplay: async (_settings, _prompt, _schema, _system, _tools, signal) => {
       started();
       return new Promise((r, reject) => {
         resolve = r;
@@ -308,11 +310,7 @@ test(
     await store.edit(c.id, 0, (c) => {
       c.name = 'Manual edit preserved';
     });
-    fixture.resolve({
-      version: 1,
-      narrative: 'late',
-      operations: [{ op: 'state', expected: {}, value: { door: 'open' } }],
-    });
+    fixture.resolve(gmResponse('late', [{ op: 'state', expected: {}, value: { door: 'open' } }]));
     assert.equal((await wait(c.id, t.id)).status, 'completed');
     assert.equal((await store.campaign(c.id)).name, 'Manual edit preserved');
     assert.deepEqual((await store.campaign(c.id)).state, { door: 'open' });
@@ -326,7 +324,7 @@ test(
     });
     await second.ready;
     await other.cancel(c.id, t2.id);
-    second.resolve({ version: 1, narrative: 'too late', operations: [] });
+    second.resolve(gmResponse('too late', []));
     assert.equal((await wait(c.id, t2.id)).status, 'cancelled');
     assert.deepEqual((await store.campaign(c.id)).state, { door: 'open' });
   }
@@ -344,7 +342,7 @@ test(
       service.submit(c.id, { revision: 0, requestId: randomUUID(), action: 'b' }),
       /active turn/
     );
-    fixture.resolve({ version: 1, narrative: 'Marta lost health.', operations: [] });
+    fixture.resolve(gmResponse('Marta lost health.', []));
     await wait(c.id, t.id);
     const saved = await store.campaign(c.id);
     await service.manualMemory(c.id, {
@@ -391,7 +389,7 @@ test(
       pending.id,
     ]);
     assert.ok(await store.recover());
-    next.resolve({ version: 1, narrative: 'late after restart', operations: [] });
+    next.resolve(gmResponse('late after restart', []));
     assert.equal((await wait(c.id, pending.id)).status, 'interrupted');
   }
 );
@@ -404,19 +402,18 @@ test(
       // The description is player-facing; campaign instructions are the persistent GM context.
       c.instructions = 'Marta owes a favor.';
     });
-    const prompts: { provider: string; prompt: string; memory: boolean }[] = [];
+    const prompts: { provider: string; prompt: string; memory: boolean; system?: string }[] = [];
+    const editor = syntheticGenerate('Marta owes a favor. The party explored old rooms.');
     const generator: Generator = {
       capacity: async () => 16000,
-      generate: async (settings, prompt, schema) => {
-        const isMemory = !!(schema as { properties?: { text?: unknown } }).properties?.text;
-        prompts.push({ provider: settings.provider, prompt, memory: isMemory });
-        return isMemory
-          ? { text: 'Marta owes a favor. The party explored old rooms.' }
-          : {
-              version: 1,
-              narrative: 'Dust covers the floor and a door opens. '.repeat(30),
-              operations: [],
-            };
+      generate: async (settings, prompt, schema, ...rest) => {
+        if ((schema as { properties?: { text?: unknown } }).properties?.text)
+          prompts.push({ provider: settings.provider, prompt, memory: true });
+        return editor(settings, prompt, schema, ...rest);
+      },
+      generateOwnedGameplay: async (settings, prompt, _schema, system) => {
+        prompts.push({ provider: settings.provider, prompt, memory: false, system });
+        return gmResponse('Dust covers the floor and a door opens. '.repeat(30), []);
       },
     };
     const service = new TurnService(store, generator);
@@ -432,15 +429,18 @@ test(
     }
     const summaries = prompts.filter((p) => p.memory);
     assert.ok(summaries.length >= 2 && summaries.length < 10);
+    // The fixed response schema is part of every gameplay prompt and independent of history.
+    const schemaBytes = Buffer.byteLength(JSON.stringify(gameplayResponseWireJsonSchema));
     for (const p of prompts) {
       // Gameplay has no prompt target; compaction keeps history from growing with every turn.
       const uncompactedHistory =
         prompts.length * 'Dust covers the floor and a door opens. '.length * 30;
+      const bytes = Buffer.byteLength(p.prompt) - (p.memory ? 0 : schemaBytes);
       assert.ok(
-        Buffer.byteLength(p.prompt) <= (p.memory ? 8000 : uncompactedHistory / 1.25),
-        `${p.memory ? 'memory' : 'gameplay'} prompt ${Buffer.byteLength(p.prompt)} bytes`
+        bytes <= (p.memory ? 8000 : uncompactedHistory / 1.25),
+        `${p.memory ? 'memory' : 'gameplay'} prompt ${bytes} bytes`
       );
-      if (!p.memory) assert.ok(p.prompt.includes('Marta owes a favor.'));
+      if (!p.memory) assert.ok(p.system!.includes('Marta owes a favor.'));
     }
     assert.equal((await store.activeTurns(campaign.id)).length, 20);
     assert.ok((await store.campaign(campaign.id)).memory);

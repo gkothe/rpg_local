@@ -6,11 +6,12 @@ import path from 'node:path';
 import { runCodexDicePhases } from '../src/providers/codexDice.js';
 import { Problem } from '../src/errors.js';
 import { randomUUID } from 'node:crypto';
-import { GameplayTools } from '../src/providers/gameplayTools.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import { freezeKnowledge } from '../src/domain/knowledgeRecall.js';
 import { CharacterType } from '../src/domain/options.js';
-import { gameplayResponseJsonSchema } from '../src/domain/gameplayResponse.js';
+import { diceInputSchema } from '../src/domain/dice.js';
+import { gameplayResponseWireJsonSchema } from '../src/domain/gameplayResponse.js';
+import { ownedTools } from './ownedGameplayFixture.js';
 
 for (const code of ['npc_not_found', 'npc_cursor']) {
   test(`Codex corrects ${code} with a fresh call ID and receives actual frozen NPC results`, async () => {
@@ -28,14 +29,7 @@ for (const code of ['npc_not_found', 'npc_cursor']) {
         notes: 'PRIVATE',
         revision: 1,
       });
-      const registry = new GameplayTools({
-        book: false,
-        knowledge: freezeKnowledge(c, 5, true),
-        assertActive: async () => {},
-        roll: async () => {
-          throw Error('Unexpected roll');
-        },
-      });
+      const registry = ownedTools({ knowledge: freezeKnowledge(c, true) });
       const tool = code === 'npc_not_found' ? 'campaign_npcs_get' : 'campaign_npcs_search';
       const badArgs =
         code === 'npc_not_found' ? { id: randomUUID() } : { query: '', cursor: 'bad' };
@@ -51,7 +45,7 @@ readline.createInterface({input:process.stdin}).on('line',raw=>{
  else if(m.id===2){if(!m.params.dynamicTools.some(t=>t.name==='${tool}'))throw Error('Missing NPC tool');send({id:2,result:{thread:{id:'t'}}});}
  else if(m.id===3){send({id:3,result:{turn:{id:'u'}}});send({id:9,method:'item/tool/call',params:{tool:'${tool}',arguments:${JSON.stringify(badArgs)},callId:'bad',threadId:'t',turnId:'u'}});}
  else if(m.id===9){if(m.result.success!==false)throw Error('Expected recoverable failure');send({id:10,method:'item/tool/call',params:{tool:'${tool}',arguments:${JSON.stringify(goodArgs)},callId:'corrected',threadId:'t',turnId:'u'}});}
- else if(m.id===10){if(!m.result.success||!JSON.stringify(m.result).includes('Marcus')||JSON.stringify(m.result).includes('PRIVATE'))throw Error('Expected private-safe NPC result');send({method:'turn/completed',params:{threadId:'t',turn:{id:'u',status:'completed',items:[{type:'agentMessage',text:JSON.stringify({payload_json:JSON.stringify({version:4,narrative:'NPC recalled',operations:[],rollInterpretations:[],ruleCitations:[],knowledgeChanges:[]})})}]}}});}
+ else if(m.id===10){if(!m.result.success||!JSON.stringify(m.result).includes('Marcus')||JSON.stringify(m.result).includes('PRIVATE'))throw Error('Expected private-safe NPC result');send({method:'turn/completed',params:{threadId:'t',turn:{id:'u',status:'completed',items:[{type:'agentMessage',text:JSON.stringify({payload_json:JSON.stringify({narrative:'NPC recalled',operations:[],rollInterpretations:[],ruleCitations:[],knowledgeChanges:[]})})}]}}});}
 });`
       );
       const result = await runCodexDicePhases(
@@ -61,14 +55,10 @@ readline.createInterface({input:process.stdin}).on('line',raw=>{
         root,
         process.env,
         {},
-        async () => {
-          throw Error('Unexpected roll');
-        },
-        undefined,
         {
           dispatch: registry.call,
           definitions: registry.definitions,
-          schema: gameplayResponseJsonSchema,
+          schema: gameplayResponseWireJsonSchema,
           systemPrompt: '',
         }
       );
@@ -86,8 +76,8 @@ readline.createInterface({input:process.stdin}).on('line',raw=>{
  if(m.id===1)send({id:1,result:{}});
  else if(m.id===2)send({id:2,result:{thread:{id:'t'}}});
  else if(m.id===3){send({id:3,result:{turn:{id:'u'}}});send({id:9,method:'item/tool/call',params:{tool:'roll_dice',arguments:{},callId:'bad',threadId:'t',turnId:'u'}});}
- else if(m.id===9){if(m.result.success!==false)throw Error('Invalid call must fail');send({id:10,method:'item/tool/call',params:{tool:'roll_dice',arguments:{slot:0,groups:[{label:'check',count:1,sides:6}],reason:'Check',declaration:'No modifiers'},callId:'corrected',threadId:'t',turnId:'u'}});}
- else if(m.id===10){if(!m.result.success)throw Error('Corrected call must succeed');send({method:'turn/completed',params:{threadId:'t',turn:{id:'u',status:'completed',items:[{type:'agentMessage',text:JSON.stringify({payload_json:JSON.stringify({version:2,narrative:'Valid corrected roll',operations:[],rollInterpretations:[]})})}]}}});}
+ else if(m.id===9){if(m.result.success!==false)throw Error('Invalid call must fail');send({id:10,method:'item/tool/call',params:{tool:'roll_dice',arguments:{slot:0,groups:[{label:'check',count:1,sides:6}],reason:'Check',declaration:'No modifiers',scope:'oracle'},callId:'corrected',threadId:'t',turnId:'u'}});}
+ else if(m.id===10){if(!m.result.success)throw Error('Corrected call must succeed');send({method:'turn/completed',params:{threadId:'t',turn:{id:'u',status:'completed',items:[{type:'agentMessage',text:JSON.stringify({payload_json:JSON.stringify({narrative:'Valid corrected roll',operations:[],rollInterpretations:[]})})}]}}});}
 });`;
 for (const code of [
   'dice_input',
@@ -111,15 +101,23 @@ for (const code of [
           root,
           process.env,
           {},
-          async () => {
-            calls++;
-            if (code !== 'dice_input') throw new Problem(422, code, 'Synthetic rejected request');
-            return {
-              rollId: '00000000-0000-4000-8000-000000000001',
-              slot: 0,
-              groups: [{ label: 'check', sides: 6, faces: [3] }],
-              reused: false,
-            };
+          {
+            definitions: ownedTools().definitions,
+            schema: gameplayResponseWireJsonSchema,
+            systemPrompt: '',
+            dispatch: async (_name, input) => {
+              // Mirrors DiceService: malformed requests are rejected before any face is drawn.
+              if (!diceInputSchema.safeParse(input).success)
+                throw new Problem(422, 'dice_input', 'Invalid dice input');
+              calls++;
+              if (code !== 'dice_input') throw new Problem(422, code, 'Synthetic rejected request');
+              return {
+                rollId: '00000000-0000-4000-8000-000000000001',
+                slot: 0,
+                groups: [{ label: 'check', sides: 6, faces: [3] }],
+                reused: false,
+              };
+            },
           }
         );
       if (code === 'dice_input') {

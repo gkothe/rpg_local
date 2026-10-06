@@ -16,14 +16,7 @@ import type {
   TurnStatus as TurnStatusEnum,
   OPERATION_KIND,
 } from './options.js';
-import type {
-  ARCHIVE_FORMAT_ID,
-  ARCHIVE_FORMAT_VERSION,
-  AUDITED_ARCHIVE_FORMAT_VERSION,
-  NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION,
-  COMBAT_ARCHIVE_FORMAT_VERSION,
-  GM_RESPONSE_SCHEMA_VERSION,
-} from './versions.js';
+import type { ARCHIVE_FORMAT_ID } from '../services/library.js';
 import type {
   CombatPreparationArchive,
   CombatPreparedCharacterArchive,
@@ -126,7 +119,6 @@ export type Turn = {
 export type ContextManifest = {
   diceSessionId?: string;
   systemPrompt?: string;
-  promptContractVersion?: 4 | 5 | 6;
   frozenSources?: FrozenCampaignSources;
   sourceSelection?: SourceSelectionDiagnostics;
   frozenKnowledge?: FrozenKnowledge;
@@ -159,11 +151,6 @@ export type Operation =
       value: unknown;
     }
   | { op: typeof OPERATION_KIND.State; expected: JsonObject; value: JsonObject };
-export type GMResponse = {
-  version: typeof GM_RESPONSE_SCHEMA_VERSION;
-  narrative: string;
-  operations: Operation[];
-};
 export type Snapshot = {
   beforeKnowledge?: CampaignKnowledge[];
   afterKnowledge?: CampaignKnowledge[];
@@ -179,18 +166,13 @@ export type Snapshot = {
   }[];
 };
 export type Archive = {
-  combatPreparations?: CombatPreparationArchive[];
-  combatPreparedCharacters?: CombatPreparedCharacterArchive[];
-  diceSessions?: DiceSession[];
-  diceRecords?: DiceRecord[];
   format: typeof ARCHIVE_FORMAT_ID;
-  version:
-    | typeof ARCHIVE_FORMAT_VERSION
-    | typeof AUDITED_ARCHIVE_FORMAT_VERSION
-    | typeof NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION
-    | typeof COMBAT_ARCHIVE_FORMAT_VERSION;
   campaign: Campaign;
   turns: Turn[];
   snapshots: Snapshot[];
   memories: Memory[];
+  diceSessions: DiceSession[];
+  diceRecords: DiceRecord[];
+  combatPreparations: CombatPreparationArchive[];
+  combatPreparedCharacters: CombatPreparedCharacterArchive[];
 };

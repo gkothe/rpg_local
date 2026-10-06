@@ -97,7 +97,6 @@ test('terminal dice stay visible, retry preserves drafts and undo retains the au
     } else if (path.endsWith('/export')) {
       exported = {
         format: 'local-rpg',
-        version: 2,
         campaign,
         turns: campaign.turns,
         diceRecords: [roll],

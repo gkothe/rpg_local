@@ -16,7 +16,6 @@ import {
   MAX_LONG_TEXT_CHARS,
   MAX_TURN_TEXT_CHARS,
 } from './limits.js';
-import { GM_RESPONSE_SCHEMA_VERSION } from './versions.js';
 const object = z
   .record(z.string(), z.unknown())
   .refine((v) => JSON.stringify(v).length <= MAX_JSON_OBJECT_CHARS, 'Object exceeds 100KB');
@@ -56,17 +55,8 @@ export const operationSchema = z.discriminatedUnion('op', [
     .strict(),
   z.object({ op: z.literal(OPERATION_KIND.State), expected: object, value: object }).strict(),
 ]);
-export const responseSchema = z
-  .object({
-    version: z.literal(GM_RESPONSE_SCHEMA_VERSION),
-    narrative: z.string().trim().min(1),
-    operations: z.array(operationSchema),
-  })
-  .strict();
 export const memorySchema = z.object({ text: z.string().trim().min(1) }).strict();
 export const draftSchema = characterInput.omit({ notes: true });
-// Pass the same strict contract to the model and validate again locally.
-export const responseJsonSchema = z.toJSONSchema(responseSchema);
 export const memoryJsonSchema = z.toJSONSchema(memorySchema);
 export const draftJsonSchema = z.toJSONSchema(draftSchema);
 export const campaignCreateSchema = z

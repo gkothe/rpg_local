@@ -2,7 +2,7 @@
 
 Rule libraries are shared by campaigns. Create or open a system in **Rules**, supply its GM instructions and import book packages. A campaign can instead use the instructions-only **Model knowledge** default without importing books.
 
-The rulebook package importer expects a `rules-book` version 1 manifest and annotated Markdown column files. A regular campaign document upload is a different workflow; an arbitrary Markdown file is not automatically a structured rulebook package.
+The rulebook package importer expects a `rules-book` manifest and annotated Markdown column files. A manifest that carries `version` was prepared by an older app and is rejected; regenerate it with `npm run rules:manifest`. A regular campaign document upload is a different workflow; an arbitrary Markdown file is not automatically a structured rulebook package.
 
 ## Prepare a manifest
 

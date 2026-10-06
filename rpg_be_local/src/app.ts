@@ -42,17 +42,10 @@ import {
   MAX_SOURCE_TEXT_CHARS,
 } from './domain/limits.js';
 import {
-  SETTINGS_CONTRACT_VERSION,
-  ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-  ARCHIVE_FORMAT_VERSION,
-  usesCombatContract,
-} from './domain/versions.js';
-import {
   COMBAT_FIELD_KIND_OPTIONS,
   COMBAT_LIMITS,
   COMBAT_ROLL_KIND_OPTIONS,
   COMBAT_ROLL_SCOPE_OPTIONS,
-  COMBAT_TRACKING_VERSION,
 } from './domain/combat.js';
 import { DICE_LIMITS } from './domain/dice.js';
 import { RULE_COLUMNS, RULE_LIMITS, ruleSlugSchema } from './domain/rules.js';
@@ -176,7 +169,6 @@ export function createApp(options: AppOptions) {
     wrap(async (_req, res) => {
       res.json({
         data: {
-          version: SETTINGS_CONTRACT_VERSION,
           turnStatuses: TURN_STATUS_OPTIONS.map((x) => x.id),
           sourceKinds: SOURCE_KIND_OPTIONS.map((x) => x.id),
           characterTypes: CHARACTER_TYPE_OPTIONS.map((x) => x.id),
@@ -202,14 +194,7 @@ export function createApp(options: AppOptions) {
           limits: { uploadBytes },
           dice: { enabled: true, limits: DICE_LIMITS },
           rules: { columns: RULE_COLUMNS, limits: RULE_LIMITS },
-          gameplay: {
-            responseVersion: ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-            archiveVersion: ARCHIVE_FORMAT_VERSION,
-          },
-          // Individual combat identity is advertised only once the enabled contract supports it.
           combat: {
-            enabled: usesCombatContract(ENABLED_GAMEPLAY_RESPONSE_SCHEMA_VERSION),
-            trackingVersion: COMBAT_TRACKING_VERSION,
             fieldKindOptions: COMBAT_FIELD_KIND_OPTIONS,
             rollScopeOptions: COMBAT_ROLL_SCOPE_OPTIONS,
             rollKindOptions: COMBAT_ROLL_KIND_OPTIONS,
