@@ -11,6 +11,11 @@ import { SourceStatus } from '../domain/options.js';
 import { RuleStore, ruleContext } from './ruleStore.js';
 import { DEFAULT_RULE_SYSTEM_ID } from '../domain/rules.js';
 import { campaignRuleBindingSchema } from '../domain/schemas.js';
+import {
+  assertCharacterRemovable,
+  assertManualAttributesEdit,
+  assertManualStateEdit,
+} from '../domain/combat.js';
 export class CampaignService {
   constructor(
     readonly store: Store,
@@ -101,6 +106,7 @@ export class CampaignService {
           'source_reference',
           'Pinned sections must reference current confirmed source sections'
         );
+      if (patch.state) assertManualStateEdit(c.state, patch.state);
       Object.assign(c, patch);
     });
   }
@@ -134,6 +140,7 @@ export class CampaignService {
     return this.store.edit(id, revision, (c) => {
       const char = c.characters.find((x) => x.id === characterId);
       if (!char) throw new Problem(404, 'not_found', 'Character not found');
+      if (patch.attributes) assertManualAttributesEdit(c.state, characterId, patch.attributes);
       Object.assign(char, patch, { revision: c.revision + 1 });
     });
   }
@@ -141,6 +148,7 @@ export class CampaignService {
     return this.store.edit(id, revision, (c) => {
       if (!c.characters.some((x) => x.id === characterId))
         throw new Problem(404, 'not_found', 'Character not found');
+      assertCharacterRemovable(c.state, characterId);
       c.characters = c.characters.filter((x) => x.id !== characterId);
     });
   }

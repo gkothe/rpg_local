@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { examplePayloadV5, proposalV5 } from './examples';
-import { systemPromptV5Examples } from './systemPromptExample';
+import { combatProposalV6, examplePayloadV6, proposalV6 } from './examples';
+import { systemPromptV6Examples } from './systemPromptExample';
 export default function PayloadExplorer() {
   const [pinned, setPinned] = useState(false),
     [mentioned, setMentioned] = useState(false),
     [book, setBook] = useState(false),
     [stale, setStale] = useState(false);
-  const payload = examplePayloadV5(pinned, mentioned, book);
+  const payload = examplePayloadV6(pinned, mentioned, book);
   return (
     <section className="flow-card" aria-label="Payload explorer">
       <h2>What reaches the model?</h2>
@@ -64,13 +64,13 @@ export default function PayloadExplorer() {
       <details>
         <summary>System instructions and the context record</summary>
         <p>
-          The v5 system prompt combines the selected rule system's instructions, your campaign
+          The v6 system prompt combines the selected rule system's instructions, your campaign
           instructions, and the app's response and tool requirements. Source text and history are
           reference material, not instructions. This complete example is checked against the
           backend's prompt builder.
         </p>
         <pre aria-label="System prompt">
-          {book ? systemPromptV5Examples.book : systemPromptV5Examples.default}
+          {book ? systemPromptV6Examples.book : systemPromptV6Examples.default}
         </pre>
         <p>
           The app keeps a ContextManifest to record how it built the context. It contains the
@@ -98,7 +98,7 @@ export default function PayloadExplorer() {
       </details>
       <h2 style={{ marginTop: '1.5rem' }}>What comes back?</h2>
       <p>
-        The model returns a v5 JSON proposal with the story, character and state changes,
+        The model returns a v6 JSON proposal with the story, character and state changes,
         explanations of dice rolls and mechanical changes, rule citations, and visibility-tagged
         knowledge changes. For each new character, it must also state where the introduction came
         from. The backend checks the proposal before applying it. It then edits only the final
@@ -126,8 +126,20 @@ export default function PayloadExplorer() {
           : 'Accepted example: Mira has the expected 10 HP. The app records the attributes before and after the change in a snapshot. Her private notes stay unchanged.'}
       </p>
       <details>
-        <summary>Complete v5 final proposal</summary>
-        <pre aria-label="Final proposal JSON">{JSON.stringify(proposalV5, null, 2)}</pre>
+        <summary>Complete v6 final proposal</summary>
+        <pre aria-label="Final proposal JSON">{JSON.stringify(proposalV6, null, 2)}</pre>
+      </details>
+      <details>
+        <summary>Combat example: two soldiers, two sheets</summary>
+        <p>
+          Before combat dice, the GM registers each combatant with combat_prepare. New NPCs receive
+          reserved IDs, so two soldiers from the same description stay separate. The proposal
+          creates them with the exact returned operations, changes only the wounded soldier's HP,
+          and links that change to the saved roll and its paragraph. The other soldier is unchanged.
+          Health stays on each character sheet; state.combat only lists who takes part and which
+          attribute paths are tracked.
+        </p>
+        <pre aria-label="Combat proposal JSON">{JSON.stringify(combatProposalV6, null, 2)}</pre>
       </details>
       <details>
         <summary>Required narrative editing and private audit</summary>

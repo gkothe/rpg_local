@@ -7,7 +7,7 @@ import {
 } from './responseFields.js';
 import { citationPages } from './ruleCitationValidation.js';
 import type { KnowledgeValidation } from './knowledge.js';
-import type { GameplayResponseV5 } from './gameplayResponse.js';
+import type { AuditedGameplayResponse } from './gameplayResponse.js';
 
 function occurrences(text: string, quote: string, base: number): number[] {
   const result: number[] = [];
@@ -17,10 +17,10 @@ function occurrences(text: string, quote: string, base: number): number[] {
   return result;
 }
 /** Bind exact quotes only to source material actually supplied in this frozen turn. */
-export function bindResponseCitations(
-  response: GameplayResponseV5,
+export function bindResponseCitations<T extends AuditedGameplayResponse>(
+  response: T,
   context: KnowledgeValidation
-): GameplayResponseV5 {
+): T {
   const problems: ResponseFieldProblem[] = [];
   const bind = (citation: Record<string, unknown>, book: boolean, path: ResponsePath) => {
     const invalid = (message: string): never => {
@@ -83,7 +83,7 @@ export function bindResponseCitations(
       if (!(error instanceof ResponseFieldProblem)) throw error;
       problems.push(error);
     }
-  }) as GameplayResponseV5;
+  }) as T;
   if (problems.length === 1) throw problems[0];
   if (problems.length > 1) throw new ResponseFieldProblems(problems);
   return bound;

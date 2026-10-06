@@ -12,8 +12,10 @@ import {
   knowledgeProvenanceV5Schema,
 } from './knowledge.js';
 import { operationExplanationSchema } from './operationExplanations.js';
+import { combatEffectSchema, participantReferenceSchema } from './combat.js';
 import {
   AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+  COMBAT_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
   KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
 } from './versions.js';
 const create = operationSchema.options[0]
@@ -53,7 +55,50 @@ export const gameplayResponseV5InputSchema = z.preprocess(
 );
 export const gameplayResponseV5WireJsonSchema = citationWireSchema(gameplayResponseV5JsonSchema);
 export type GameplayResponseV5 = z.infer<typeof gameplayResponseV5Schema>;
+// A prepared NPC is created under its reserved ID; ordinary creates stay server-identified.
+export const createOperationV6Schema = operationSchema.options[0]
+  .extend({
+    introduction: knowledgeProvenanceV5Schema,
+    characterId: z.uuid().optional(),
+    preparationReceiptId: z.uuid().optional(),
+  })
+  .strict();
+export const gameplayResponseV6Schema = gameplayResponseV5Schema
+  .extend({
+    version: z.literal(COMBAT_GAMEPLAY_RESPONSE_SCHEMA_VERSION),
+    operations: z.array(
+      z.discriminatedUnion('op', [
+        createOperationV6Schema,
+        operationSchema.options[1],
+        operationSchema.options[2],
+      ])
+    ),
+    combatEffects: z.array(combatEffectSchema),
+    participantReferences: z.array(participantReferenceSchema),
+  })
+  .strict();
+export const gameplayResponseV6JsonSchema = z.toJSONSchema(gameplayResponseV6Schema);
+export const gameplayResponseV6InputSchema = z.preprocess(
+  prepareCitationInput,
+  gameplayResponseV6Schema
+);
+export const gameplayResponseV6WireJsonSchema = citationWireSchema(gameplayResponseV6JsonSchema);
+export type GameplayResponseV6 = z.infer<typeof gameplayResponseV6Schema>;
+/** Audited (v5/v6) responses share provenance, sources and narrative editing. */
+export type AuditedGameplayResponse = GameplayResponseV5 | GameplayResponseV6;
+export function auditedResponseSchema(version: number) {
+  return version === COMBAT_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+    ? gameplayResponseV6Schema
+    : gameplayResponseV5Schema;
+}
+export function auditedResponseInputSchema(version: number) {
+  return version === COMBAT_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+    ? gameplayResponseV6InputSchema
+    : gameplayResponseV5InputSchema;
+}
 export function parseGameplayResponse(raw: unknown, version: number) {
+  if (version === COMBAT_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
+    return gameplayResponseV6Schema.parse(raw);
   return version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
     ? gameplayResponseV5Schema.parse(raw)
     : version === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION

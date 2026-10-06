@@ -1,3 +1,4 @@
+import { ARCHIVE_FORMAT_VERSION } from '../src/domain/versions.js';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -150,7 +151,7 @@ test(
     );
     const library = new LibraryService(store);
     const archive = await library.export(c.id);
-    assert.equal(archive.version, 6);
+    assert.equal(archive.version, ARCHIVE_FORMAT_VERSION);
     const imported = await library.import(archive);
     assert.equal(imported.knowledge?.[0]?.certainty, C.Rumor);
     assert.notEqual(imported.knowledge?.[0]?.id, (await store.campaign(c.id)).knowledge![0]!.id);
@@ -540,7 +541,7 @@ test(
     assert.equal(calls, 2);
     const library = new LibraryService(store);
     const exported = await library.export(c.id);
-    assert.equal(exported.version, 6);
+    assert.equal(exported.version, ARCHIVE_FORMAT_VERSION);
     const original: FrozenKnowledge = exported.diceSessions![0]!.frozenKnowledge!;
     assert.equal(original.npcCharacters![0]!.id, npcId);
     assert.ok(

@@ -145,3 +145,38 @@ test('ordinary turn DTO omits nested raw candidates and frozen prompts', () => {
   assert.ok(!JSON.stringify(publicTurn(raw)).includes('SECRET'));
   assert.equal(publicTurn(raw).context, null);
 });
+
+test('turn DTO exposes committed combat links but never preparation receipts or drafts', () => {
+  const characterId = randomUUID();
+  const raw = {
+    id: randomUUID(),
+    campaignId: randomUUID(),
+    requestId: randomUUID(),
+    status: 'completed',
+    action: 'attack',
+    narrative: 'The guard falls back.',
+    changes: [],
+    error: null,
+    undone: false,
+    settings: { provider: 'codex', model: 'test', effort: null },
+    context: { prompt: 'SECRET' },
+    createdAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
+    combatEffects: [
+      {
+        characterId,
+        operationIndex: 0,
+        paths: [['health']],
+        reason: 'Hit',
+        rollIds: [],
+        afterParagraph: 1,
+      },
+    ],
+    participantReferences: [{ afterParagraph: 1, characterIds: [characterId] }],
+    combatPreparations: [{ payload: 'SECRET' }],
+  } as unknown as Turn;
+  const projected = publicTurn(raw);
+  assert.deepEqual(projected.participantReferences, raw.participantReferences);
+  assert.deepEqual(projected.combatEffects, raw.combatEffects);
+  assert.ok(!JSON.stringify(projected).includes('SECRET'));
+});

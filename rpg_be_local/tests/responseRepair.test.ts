@@ -470,3 +470,41 @@ test('quota, cancellation and ownership failures stop repair; no generated scene
   );
   assert.equal(KnowledgeOrigin.Source, original.knowledgeChanges[0]!.origin);
 });
+
+test('v6 combat links are correctable but prepared identities and receipts are not', () => {
+  const characterId = '11111111-1111-4111-8111-111111111111';
+  const receipt = '22222222-2222-4222-8222-222222222222';
+  const original = {
+    operations: [
+      { op: 'create', characterId, preparationReceiptId: receipt, character: { name: 'Guard' } },
+    ],
+    combatEffects: [],
+    participantReferences: [{ afterParagraph: 3, characterIds: [characterId] }],
+  };
+  const fixed = applyResponseCorrections(original, [['participantReferences', 0]], {
+    corrections: [
+      {
+        path: ['participantReferences', 0],
+        value: { afterParagraph: 1, characterIds: [characterId] },
+      },
+    ],
+  });
+  assert.equal(fixed.participantReferences[0]!.afterParagraph, 1);
+  // Draft content may be corrected back to the receipt, but never the reserved identity.
+  const content = applyResponseCorrections(original, [['operations', 0, 'character']], {
+    corrections: [{ path: ['operations', 0, 'character'], value: { name: 'Guard 2' } }],
+  });
+  assert.equal(content.operations[0]!.characterId, characterId);
+  for (const [path, value] of [
+    [['operations', 0, 'characterId'], '33333333-3333-4333-8333-333333333333'],
+    [['operations', 0, 'preparationReceiptId'], '33333333-3333-4333-8333-333333333333'],
+    [['operations', 0], { op: 'create', character: { name: 'Guard' } }],
+  ] as const)
+    assert.throws(
+      () =>
+        applyResponseCorrections(original, [[...path]], {
+          corrections: [{ path: [...path], value }],
+        }),
+      /prepared character identity/
+    );
+});

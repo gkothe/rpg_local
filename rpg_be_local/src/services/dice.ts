@@ -7,9 +7,12 @@ import { Store, ownerId } from '../store.js';
 import { Problem } from '../errors.js';
 import { TurnStatus } from '../domain/options.js';
 import type { Turn } from '../domain/types.js';
+import { CombatProblem, CombatRollScope } from '../domain/combat.js';
+import { CombatPreparationService, frozenCombatContext } from './combatPreparation.js';
 import {
   DICE_LIMITS,
   diceInputSchema,
+  diceInputV6Schema,
   generateFaces,
   type DiceRecord,
   type DiceResult,
@@ -19,6 +22,7 @@ import { diceDigest } from '../domain/diceContext.js';
 import {
   KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
   KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
+  usesCombatContract,
 } from '../domain/versions.js';
 import { RuleStore } from './ruleStore.js';
 export { diceDigest, gameplayDigest } from '../domain/diceContext.js';
@@ -88,7 +92,7 @@ export class DiceService {
       return id;
     });
   }
-  private async assertOwned(turn: Turn, client: PoolClient): Promise<void> {
+  async assertOwned(turn: Turn, client: PoolClient): Promise<void> {
     await this.store.campaign(turn.campaignId, client, true);
     const result = await client.query(
       'SELECT owner,status,lease_until,document FROM turns WHERE id=$1 AND campaign_id=$2 FOR UPDATE',
@@ -150,15 +154,48 @@ export class DiceService {
       ]);
       if (requests > DICE_LIMITS.requestsPerAttempt)
         return new Problem(422, 'dice_limit', 'Dice request limit exceeded');
-      const parsed = diceInputSchema.safeParse(raw);
+      const combat = usesCombatContract(session.prompt_contract_version ?? undefined);
+      const parsed = (combat ? diceInputV6Schema : diceInputSchema).safeParse(raw);
       if (!parsed.success)
         return new Problem(422, 'dice_input', 'Invalid dice input or dice limits exceeded');
       const input = parsed.data;
-      if (
-        [input.actorId, input.targetId].some(
-          (id) => id && !(session.character_ids as string[]).includes(id)
+      // Prepared NPCs are authorized by receipt; the frozen character list never changes.
+      const allowed = [...(session.character_ids as string[])];
+      if (combat) {
+        const prepared = await new CombatPreparationService(this.store).authorization(
+          sessionId,
+          client
+        );
+        const frozen = frozenCombatContext(session);
+        allowed.push(...prepared.drafts.map((draft) => draft.characterId));
+        const active = frozen.encounter?.active ? frozen.encounter : null;
+        const encounterId = prepared.encounterId ?? active?.id ?? null;
+        const participants = new Set([
+          ...(active?.participants ?? []).map((p) => p.characterId),
+          ...prepared.participants.map((p) => p.characterId),
+        ]);
+        const scoped = input as typeof input & { scope: CombatRollScope; encounterId?: string };
+        if (
+          scoped.scope === CombatRollScope.Combat &&
+          (scoped.encounterId !== encounterId ||
+            [input.actorId, input.targetId].some((id) => id && !participants.has(id)))
         )
-      )
+          return new Problem(
+            422,
+            CombatProblem.Identity,
+            'Combat rolls must use the active or prepared encounter and its participants'
+          );
+        if (
+          scoped.scope === CombatRollScope.Character &&
+          [input.actorId, input.targetId].some((id) => id && participants.has(id))
+        )
+          return new Problem(
+            422,
+            CombatProblem.Identity,
+            'Encounter participants roll with combat scope while the encounter exists'
+          );
+      }
+      if ([input.actorId, input.targetId].some((id) => id && !allowed.includes(id)))
         return new Problem(
           422,
           'dice_character',

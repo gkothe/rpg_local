@@ -1,6 +1,6 @@
 # Local RPG Backend (`rpg_be_local`) — Comprehensive Technical Architecture & Information Governance Guide
 
-This document describes backend processing, persistence and information handling. Source code remains authoritative; examples are illustrative unless marked exact. Static inspection does not establish live provider, device or database compatibility. New actions and exports use version 5; immutable version 1–4 contracts remain supported for historical imports and frozen retries. Sections 2.9, 3.5 and 4.6 describe the current source, privacy, auditing and mandatory narrative-editing additions. Section 6 describes the educational Flow guide.
+This document describes backend processing, persistence and information handling. Source code remains authoritative; examples are illustrative unless marked exact. Static inspection does not establish live provider, device or database compatibility. New actions use response version 6 and exports use archive version 7 (section 2.10); immutable version 1–5 contracts remain supported for historical imports and frozen retries. Sections 2.9, 3.5 and 4.6 describe the current source, privacy, auditing and mandatory narrative-editing additions. Section 6 describes the educational Flow guide.
 
 ---
 
@@ -39,6 +39,14 @@ This document describes backend processing, persistence and information handling
 ---
 
 ## 1. Executive Overview & Architectural Philosophy
+
+The backend loads the repository-root `.env` through Node's built-in environment loader before
+reading configuration, including direct npm startup and compiled execution. Explicit process
+environment variables take precedence. `RPG_DATABASE_URL` selects the local game database;
+`NODE_ENV=test` requires a distinct `RPG_TEST_DATABASE_URL` whose database name ends in `_test`.
+The Windows database setup script saves the connection in `.env`, which is Git-ignored;
+`.env.example` contains placeholders. The former DPAPI `database.json` is no longer loaded.
+Windows LAN and speech settings remain separate and are loaded by the launcher.
 
 Implementation evidence: [package.json](../../rpg_be_local/package.json), [app.ts](../../rpg_be_local/src/app.ts), [service.ts](../../rpg_be_local/src/providers/service.ts).
 
@@ -609,6 +617,40 @@ Implementation evidence: [library.ts](../../rpg_be_local/src/services/library.ts
   - `character_templates`: Character blueprints. Explicitly strips private player notes (`notes: ''`).
 
 ---
+
+### 2.10 Individual combat identity (response v6)
+
+Version 6 is the enabled gameplay contract (archive version 7). Turns started under v5 keep their
+frozen v5 contract for retries and editing resumes. It reuses the v5 pipeline (sources, privacy, field repair, mandatory editing) and adds:
+
+- **Preparation before dice.** `CombatPreparationService` (`services/combatPreparation.ts`) handles
+  `combat_prepare` under the same campaign/turn/session locks as dice. It validates existing
+  participants against the frozen session context (prompt sheets plus frozen NPC sheets), reserves
+  UUIDs for new NPC drafts and persists append-only receipts keyed by dice session. Retries share
+  the session, so they recover the same encounter ID and reservations; the retry prompt lists them.
+  No AI call is added, no transaction spans inference, and `dice_sessions.character_ids` never changes.
+- **Dice.** For v6 sessions `DiceService.roll` uses `diceInputV6Schema` and authorizes the union of
+  frozen IDs and prepared drafts; combat-scope rolls must use the frozen-active or prepared encounter
+  and its participants.
+- **Validation at candidate preparation and again at commit.** `applyResponse` creates prepared NPCs
+  under reserved IDs only when the create matches its receipt, then `validateCombatTurn`
+  (`domain/combat.ts`) checks encounter transitions, participant bindings, tracked-path presence,
+  effect coverage of every tracked change, and paragraph references against the effective (edited)
+  narrative. It proves declared structure only; rule correctness remains the GM's.
+- **State and undo.** Vitality/damage/conditions live in `Character.attributes`; `state.combat`
+  holds IDs, paths and labels only. Existing snapshots (`beforeState/afterState`,
+  `beforeCharacters/afterCharacters`) cover undo; created NPCs are removed, receipts and dice remain.
+- **Context.** Active encounter participants are mandatory prompt characters by ID. Digest 4 is the
+  digest-3 content plus the combat contract identity; digests 1–3 are unchanged.
+- **Transports.** The registry grants `combat_prepare` a 1 MiB UTF-8 argument ceiling (plus 64 KiB
+  JSON-RPC envelope) only when it is an owned v6 definition; MCP HTTP and the Antigravity gateway
+  apply the per-tool policy, every other tool keeps its historical limit, and oversized MCP bodies
+  get 413 with `Connection: close`.
+- **Archives.** Version 7 carries preparation receipts and remaps structural combat identities;
+  versions 1–6 reject v6 sessions, scoped rolls and combat links.
+
+The Flow guide (section 6) shows the v6 prompt, response schema and a combat example; its
+contract test checks them against the real context builder and validators.
 
 ## 3. Where Things are Stored (Persistence & Data Topography)
 
@@ -1312,10 +1354,10 @@ English journal interface teaches this architecture through four views:
 - **Journey**: clickable actors and directed connections, an eight-step action walkthrough,
   provider/mode differences and failure/repair/retry branches.
 - **Payload**: synthetic pin/NPC/book toggles, complete system/user prompt examples with the
-  v5 response schema, a final proposal with indexed mechanical explanations and an expected-value acceptance/rejection comparison.
+  v6 response schema, a final proposal with indexed mechanical explanations, an expected-value acceptance/rejection comparison and a two-soldier combat proposal (reserved IDs, one tracked HP change, effects and paragraph references).
 - **Tools**: named owned tools, example arguments/results and selectable request,
   validation, service, return and final-proposal stages. It distinguishes frozen NPC sheets and knowledge recall
-  from PostgreSQL rule lookup and persisted dice.
+  from PostgreSQL rule lookup, persisted dice and `combat_prepare` preparation receipts.
 - **Storage**: producing/consuming services, retained audit, success/failure/cancellation/undo
   outcomes, touched-field conflicts and source/audio/archive/template/logging branches.
 

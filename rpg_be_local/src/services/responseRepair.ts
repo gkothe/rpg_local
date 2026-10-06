@@ -19,7 +19,25 @@ const editableFields = new Set([
   'ruleCitations',
   'operationExplanations',
   'rollInterpretations',
+  'combatEffects',
+  'participantReferences',
 ]);
+/** Reserved identities and receipts come from combat_prepare; corrections may not alter them. */
+function preparedIdentities(response: unknown): string {
+  const operations = (response as { operations?: unknown })?.operations;
+  return JSON.stringify(
+    Array.isArray(operations)
+      ? operations.flatMap((op, index) =>
+          op &&
+          typeof op === 'object' &&
+          ('characterId' in op || 'preparationReceiptId' in op) &&
+          (op as { op?: unknown }).op === 'create'
+            ? [[index, op.characterId, op.preparationReceiptId]]
+            : []
+        )
+      : []
+  );
+}
 const forbidden = new Set(['__proto__', 'prototype', 'constructor']);
 function repairPaths(error: unknown): ResponsePath[] {
   const paths =
@@ -103,6 +121,12 @@ export function applyResponseCorrections<T>(original: T, paths: ResponsePath[], 
       correction.value
     );
   }
+  if (preparedIdentities(copy) !== preparedIdentities(original))
+    throw new Problem(
+      502,
+      'response_repair_failed',
+      'Correction attempted to change a prepared character identity or receipt'
+    );
   return copy;
 }
 /** No tools or new scene generation; validation and commit remain owned by the caller. */

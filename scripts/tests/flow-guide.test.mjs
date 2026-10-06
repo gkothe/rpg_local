@@ -12,7 +12,14 @@ import {
   ids,
   examplePayload,
   examplePayloadV5,
+  examplePayloadV6,
   proposalV5,
+  proposalV6,
+  combatIds,
+  combatPrepareArgs,
+  combatPrepareResult,
+  combatRollArgs,
+  combatProposalV6,
   knowledgeRecord,
   knowledgeSearchResult,
   knowledgeGetResult,
@@ -21,14 +28,17 @@ import {
   citation,
 } from '../../rpg_fe_local/src/features/flow/examples.ts';
 import { createKnowledgeRecall } from '../../rpg_be_local/src/domain/knowledgeRecall.ts';
-import { diceInputSchema } from '../../rpg_be_local/src/domain/dice.ts';
+import { diceInputV6Schema } from '../../rpg_be_local/src/domain/dice.ts';
 import { ruleToolSchemas } from '../../rpg_be_local/src/services/ruleLookup.ts';
 import { ruleReadSchema, ruleCitationSchema } from '../../rpg_be_local/src/domain/rules.ts';
 import { validateRuleCitations } from '../../rpg_be_local/src/domain/ruleCitationValidation.ts';
 import {
   systemPromptExamples,
   systemPromptV5Examples,
+  systemPromptV6Examples,
 } from '../../rpg_fe_local/src/features/flow/systemPromptExample.ts';
+import { gameplayResponseV6Schema } from '../../rpg_be_local/src/domain/gameplayResponse.ts';
+import { combatPrepareSchema } from '../../rpg_be_local/src/domain/combat.ts';
 import { buildContext } from '../../rpg_be_local/src/domain/context.ts';
 import {
   nodes,
@@ -116,14 +126,16 @@ test('educational v4 proposal applies its expected-value update without exposing
 });
 
 test('all illustrated payload selections and envelopes match the real context builder', () => {
-  for (const version of [4, 5])
+  for (const version of [4, 5, 6])
     for (const pinned of [false, true])
       for (const mentioned of [false, true])
         for (const book of [false, true]) {
           const expected =
-            version === 5
-              ? examplePayloadV5(pinned, mentioned, book)
-              : examplePayload(pinned, mentioned, book);
+            version === 6
+              ? examplePayloadV6(pinned, mentioned, book)
+              : version === 5
+                ? examplePayloadV5(pinned, mentioned, book)
+                : examplePayload(pinned, mentioned, book);
           const campaign = newCampaign({
             name: 'Teaching example',
             description: 'A river town after the flood.',
@@ -168,19 +180,16 @@ test('all illustrated payload selections and envelopes match the real context bu
               overview: expected.mandatory.rulesOverview ?? '',
             },
             version,
-            version === 5
+            version >= 5
           );
           assert.deepEqual(JSON.parse(manifest.prompt), expected);
-          assert.equal(
-            manifest.systemPrompt,
-            book
-              ? version === 5
-                ? systemPromptV5Examples.book
-                : systemPromptExamples.book
+          const prompts =
+            version === 6
+              ? systemPromptV6Examples
               : version === 5
-                ? systemPromptV5Examples.default
-                : systemPromptExamples.default
-          );
+                ? systemPromptV5Examples
+                : systemPromptExamples;
+          assert.equal(manifest.systemPrompt, book ? prompts.book : prompts.default);
           assert.equal(manifest.prompt.includes('Secret diary'), false);
         }
 });
@@ -207,7 +216,7 @@ test('educational graph, document sections and source references remain navigabl
 });
 
 test('tool arguments, frozen recall results and exact book citation match backend contracts', () => {
-  diceInputSchema.parse(tools.find((tool) => tool.id === 'roll_dice').args);
+  diceInputV6Schema.parse(tools.find((tool) => tool.id === 'roll_dice').args);
   for (const tool of tools.filter((tool) => tool.bookOnly))
     ruleToolSchemas[tool.id === 'rules_find' ? 'rules_search' : tool.id].parse(tool.args);
   const recall = createKnowledgeRecall({
@@ -257,5 +266,49 @@ test('v5 educational proposal validates indexed mechanical explanations', () => 
   assert.throws(
     () => applyResponse(campaign, { ...parsed, operationExplanations: [] }, ids.turn, evidence),
     /explanation/
+  );
+});
+
+test('v6 combat teaching example matches the real preparation, dice and turn validation', () => {
+  combatPrepareSchema.parse(tools.find((tool) => tool.id === 'combat_prepare').args);
+  combatPrepareSchema.parse(combatPrepareArgs);
+  diceInputV6Schema.parse(combatRollArgs);
+  gameplayResponseV6Schema.parse(proposalV6);
+  const campaign = newCampaign({ name: 'Teaching example' });
+  campaign.id = ids.campaign;
+  campaign.characters = [{ ...player, notes: '', revision: 0 }];
+  campaign.state = { location: 'North bridge' };
+  const drafts = combatPrepareResult.createOperations.map((op, index) => ({
+    characterId: op.characterId,
+    receiptId: op.preparationReceiptId,
+    localKey: `soldier-${index + 1}`,
+    label: `Soldier ${index + 1}`,
+    character: op.character,
+    introduction: op.introduction,
+    trackedFields: combatPrepareArgs.participants[index + 1].trackedFields,
+  }));
+  const evidence = {
+    campaignId: ids.campaign,
+    turnId: ids.turn,
+    rolls: [{ ...combatRollArgs, id: combatIds.roll, campaignId: ids.campaign }],
+    combat: {
+      authorization: {
+        encounterId: combatIds.encounter,
+        drafts,
+        participants: combatPrepareResult.participants.map(
+          ({ characterId, label, trackedFields }) => ({ characterId, label, trackedFields })
+        ),
+      },
+    },
+  };
+  const parsed = gameplayResponseV6Schema.parse(combatProposalV6);
+  const result = applyResponse(campaign, parsed, ids.turn, evidence).campaign;
+  const sheet = (id) => result.characters.find((character) => character.id === id);
+  assert.equal(sheet(combatIds.soldierA).attributes.hp, 3);
+  assert.equal(sheet(combatIds.soldierB).attributes.hp, 6);
+  assert.equal(sheet(ids.player).attributes.hp, 10);
+  assert.throws(
+    () => applyResponse(campaign, { ...parsed, combatEffects: [] }, ids.turn, evidence),
+    /combat effect/
   );
 });

@@ -9,7 +9,10 @@ import {
   gameplayResponseJsonSchema,
   gameplayResponseV5Schema,
   gameplayResponseV5WireJsonSchema,
+  gameplayResponseV6Schema,
+  gameplayResponseV6WireJsonSchema,
 } from './gameplayResponse.js';
+import { COMBAT_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from './versions.js';
 import { z } from 'zod';
 import { diceResponseSchema, diceResponseJsonSchema } from './diceResponse.js';
 import { RULE_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from './versions.js';
@@ -23,6 +26,8 @@ export const ruleResponseSchema = diceResponseSchema
 export const ruleResponseJsonSchema = z.toJSONSchema(ruleResponseSchema);
 export type RuleResponse = z.infer<typeof ruleResponseSchema>;
 export const gameplayResponseContract = (context?: RuleContext, responseVersion?: number) => {
+  if (responseVersion === COMBAT_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
+    return { schema: gameplayResponseV6Schema, jsonSchema: gameplayResponseV6WireJsonSchema };
   if (responseVersion === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
     return { schema: gameplayResponseV5Schema, jsonSchema: gameplayResponseV5WireJsonSchema };
   if (responseVersion === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION)

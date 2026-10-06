@@ -2,12 +2,14 @@ import { SourcePurpose } from './options.js';
 import { legacyKnowledge } from './knowledge.js';
 import {
   AUDITED_GAMEPLAY_DIGEST_VERSION,
+  COMBAT_GAMEPLAY_DIGEST_VERSION,
   KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
   LEGACY_GAMEPLAY_DIGEST_VERSION,
 } from './versions.js';
 import { createHash } from 'node:crypto';
 import type { Campaign, Turn } from './types.js';
 import type { RuleContext } from './rules.js';
+import { COMBAT_TRACKING_VERSION } from './combat.js';
 export function diceDigest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
@@ -49,7 +51,7 @@ export function gameplayDigest(
         version,
         status,
         text,
-        ...(digestVersion === AUDITED_GAMEPLAY_DIGEST_VERSION
+        ...(digestVersion >= AUDITED_GAMEPLAY_DIGEST_VERSION
           ? { purpose: source.purpose ?? SourcePurpose.Reference }
           : {}),
       };
@@ -62,5 +64,9 @@ export function gameplayDigest(
     state: campaign.state,
     memory: campaign.memory,
     history: history.map((turn) => turn.id),
+    // Digest 4 = digest 3 content plus the structured combat contract identity.
+    ...(digestVersion >= COMBAT_GAMEPLAY_DIGEST_VERSION
+      ? { combatTracking: COMBAT_TRACKING_VERSION }
+      : {}),
   });
 }

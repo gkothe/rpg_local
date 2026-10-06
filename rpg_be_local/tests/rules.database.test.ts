@@ -108,7 +108,7 @@ test(
       store.pool.query("UPDATE rule_systems SET sources='[{}]' WHERE id=$1", [
         DEFAULT_RULE_SYSTEM_ID,
       ]),
-      /check constraint/
+      (error: { code?: string }) => error.code === '23514'
     );
     await assert.rejects(
       store.pool.query("UPDATE rule_systems SET kind='library' WHERE id=$1", [
@@ -692,7 +692,7 @@ test(
         "UPDATE campaigns SET rule_system_id=$2::uuid,document=jsonb_set(document,'{ruleSystemId}',to_jsonb($2::uuid::text)) WHERE id=$1",
         [id, randomUUID()]
       ),
-      /foreign key/
+      (error: { code?: string }) => error.code === '23503'
     );
     await assert.rejects(
       store.pool.query('UPDATE campaigns SET rule_system_id=$2 WHERE id=$1', [
@@ -705,11 +705,14 @@ test(
       "UPDATE campaigns SET rule_system_id=$2::uuid,document=jsonb_set(document,'{ruleSystemId}',to_jsonb($2::uuid::text)) WHERE id=$1",
       [id, DEFAULT_RULE_SYSTEM_ID]
     );
-    await store.pool.query('UPDATE rule_systems SET revision=2 WHERE id=$1', [
+    // Earlier tests in this file may already have advanced the shared default revision.
+    await store.pool.query('UPDATE rule_systems SET revision=revision+1 WHERE id=$1', [
       DEFAULT_RULE_SYSTEM_ID,
     ]);
     await assert.rejects(
-      store.pool.query('UPDATE rule_systems SET revision=1 WHERE id=$1', [DEFAULT_RULE_SYSTEM_ID]),
+      store.pool.query('UPDATE rule_systems SET revision=revision-1 WHERE id=$1', [
+        DEFAULT_RULE_SYSTEM_ID,
+      ]),
       /cannot decrease/
     );
   }

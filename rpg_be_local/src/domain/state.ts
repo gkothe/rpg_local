@@ -1,15 +1,25 @@
 import { atResponseField, ResponseFieldProblem } from './responseFields.js';
 import { validateOperationExplanations } from './operationExplanations.js';
 import {
-  AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
   KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+  knowledgeContractVersion,
+  usesAuditedContract,
+  usesCombatContract,
 } from './versions.js';
 import {
   gameplayResponseSchema,
-  gameplayResponseV5Schema,
+  auditedResponseSchema,
+  type AuditedGameplayResponse,
   type GameplayResponseV5,
+  type GameplayResponseV6,
   type GameplayResponse,
 } from './gameplayResponse.js';
+import {
+  emptyCombatAuthorization,
+  resolvePreparedCreate,
+  validateCombatTurn,
+  type CombatAuthorization,
+} from './combat.js';
 import {
   applyKnowledgeChanges,
   KnowledgeKind,
@@ -34,22 +44,26 @@ const canonical = (c: Character) => ({
   inventory: c.inventory,
   description: c.description,
 });
+/** Combat evidence for v6: session preparation receipts and the effective final narrative. */
+export type CombatValidation = { authorization: CombatAuthorization; narrative?: string };
 export function applyResponse(
   original: Campaign,
-  raw: GMResponse | GameplayResponse | GameplayResponseV5,
+  raw: GMResponse | GameplayResponse | AuditedGameplayResponse,
   turnId: string,
-  evidence?: KnowledgeValidation
+  evidence?: KnowledgeValidation & { combat?: CombatValidation }
 ): { campaign: Campaign; snapshot: Snapshot; changes: string[] } {
-  const v5 = raw.version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
+  const v5 = usesAuditedContract(raw.version);
+  const v6 = usesCombatContract(raw.version);
   const v4 = raw.version === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION || v5;
   const response = v5
-    ? gameplayResponseV5Schema.parse(raw)
+    ? auditedResponseSchema(raw.version).parse(raw)
     : v4
       ? gameplayResponseSchema.parse(raw)
       : responseSchema.parse(raw);
+  const authorization = evidence?.combat?.authorization ?? emptyCombatAuthorization();
   if (v5)
     validateOperationExplanations(
-      response as GameplayResponseV5,
+      response as AuditedGameplayResponse,
       evidence ?? { campaignId: original.id, turnId }
     );
   const aliases = new Map<number, string>();
@@ -67,9 +81,16 @@ export function applyResponse(
         );
       }
       if (op.op === OPERATION_KIND.Create) {
+        const prepared = v6
+          ? resolvePreparedCreate(
+              op as GameplayResponseV6['operations'][number] & { op: 'create' },
+              authorization,
+              c.characters
+            )
+          : undefined;
         const char: Character = {
           ...op.character,
-          id: randomUUID(),
+          id: prepared?.characterId ?? randomUUID(),
           notes: '',
           revision: c.revision + 1,
         };
@@ -149,7 +170,7 @@ export function applyResponse(
         c.characters,
         aliases,
         evidence ?? { campaignId: c.id, turnId },
-        v5 ? AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION : KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+        knowledgeContractVersion(raw.version),
         (index) =>
           index < introductions.length
             ? [
@@ -192,6 +213,15 @@ export function applyResponse(
     c.knowledge = knowledge.records;
     changes.push(...knowledge.changes);
   }
+  if (v6)
+    validateCombatTurn({
+      before: original,
+      after: c,
+      response: response as GameplayResponseV6,
+      authorization,
+      rolls: evidence?.rolls ?? [],
+      narrative: evidence?.combat?.narrative ?? response.narrative,
+    });
   return {
     campaign: c,
     changes: v5

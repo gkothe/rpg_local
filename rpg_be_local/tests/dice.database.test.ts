@@ -148,10 +148,12 @@ test(
         );
         return {
           ...result,
-          version: 5,
+          version: 6,
           ruleCitations: [],
           knowledgeChanges: [],
           operationExplanations: [],
+          combatEffects: [],
+          participantReferences: [],
         };
       }
       override async generateGameplay(
@@ -165,6 +167,7 @@ test(
             groups: [{ label: 'check', count: 1, sides: 6 }],
             reason: 'Door',
             declaration: 'Target 4',
+            scope: 'character',
           },
           'first'
         );
@@ -581,7 +584,7 @@ test(
           'INSERT INTO dice_records(id,campaign_id,session_id,slot,spec_digest,input,groups) SELECT $2,campaign_id,session_id,slot,spec_digest,input,groups FROM dice_records WHERE id=$1',
           [first.rollId, randomUUID()]
         ),
-        /unique/i
+        (error: { code?: string }) => error.code === '23505'
       );
       for (const groups of [
         [],

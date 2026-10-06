@@ -21,7 +21,7 @@ export function narrativeHumanizerPrompt(
   feedback = '',
   preserveParagraphs = false
 ): string {
-  return `${NARRATIVE_HUMANIZER_INSTRUCTIONS}\n${preserveParagraphs ? 'Keep the same blank-line-separated paragraphs in the same order; edit within paragraphs only. Dice results are linked to their paragraph numbers.\n' : ''}${feedback ? `Correction: ${feedback}\n` : ''}${JSON.stringify({ narrative })}\nResponse schema: ${JSON.stringify(narrativeHumanizerJsonSchema)}`;
+  return `${NARRATIVE_HUMANIZER_INSTRUCTIONS}\n${preserveParagraphs ? 'Keep the same blank-line-separated paragraphs in the same order; edit within paragraphs only. Dice results and character links are tied to their paragraph numbers.\n' : ''}${feedback ? `Correction: ${feedback}\n` : ''}${JSON.stringify({ narrative })}\nResponse schema: ${JSON.stringify(narrativeHumanizerJsonSchema)}`;
 }
 
 export function narrativeDigest(value: unknown): string {
@@ -43,7 +43,7 @@ export function validateHumanizedNarrative(
     throw new Problem(
       502,
       'narrative_anchors',
-      'Preserve narrative paragraph boundaries for dice placement'
+      'Preserve narrative paragraph boundaries for dice and character links'
     );
   const numbers = (text: string) =>
     [...text.matchAll(/\b\d+(?:[.,]\d+)?\b/g)].map((m) => m[0]).sort();

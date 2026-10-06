@@ -8,24 +8,25 @@ import { NarrativeCandidateRepository, humanizeNarrative } from './narrativeHuma
 import { createPromptTrace, traceEvent, type PromptTraceContext } from '../providers/promptLog.js';
 import {
   AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-  AUDITED_GAMEPLAY_DIGEST_VERSION,
+  gameplayDigestVersion,
+  usesAuditedContract,
+  usesCombatContract,
 } from '../domain/versions.js';
 import {
-  gameplayResponseV5Schema,
+  auditedResponseInputSchema,
+  auditedResponseSchema,
   gameplayResponseV5WireJsonSchema,
-  gameplayResponseV5InputSchema,
-  type GameplayResponseV5,
+  gameplayResponseV6WireJsonSchema,
+  type AuditedGameplayResponse,
+  type GameplayResponseV6,
 } from '../domain/gameplayResponse.js';
+import { CombatPreparationService } from './combatPreparation.js';
 import {
   operationalProblem,
   reportProcessingFailure,
   safeProcessingFailure,
 } from '../processingErrors.js';
-import {
-  KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-  KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
-  LEGACY_GAMEPLAY_DIGEST_VERSION,
-} from '../domain/versions.js';
+import { KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION } from '../domain/versions.js';
 import { isDeepStrictEqual } from 'node:util';
 import {
   gameplayResponseSchema,
@@ -189,8 +190,7 @@ export class TurnService {
             system.kind === RuleSystemKind.Library,
           this.rulePrompt(system),
           this.generator.generateOwnedGameplay ? this.responseVersion : undefined,
-          !!this.generator.generateOwnedGameplay &&
-            this.responseVersion === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+          !!this.generator.generateOwnedGameplay && usesAuditedContract(this.responseVersion)
         );
       } catch (e) {
         if (!(e instanceof Problem && e.code === 'context_overflow')) throw e;
@@ -324,7 +324,7 @@ export class TurnService {
           ...((saved.prompt_contract_version ?? 0) >= KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
             ? {
                 diceSessionId: saved.id,
-                promptContractVersion: saved.prompt_contract_version as 4 | 5,
+                promptContractVersion: saved.prompt_contract_version as 4 | 5 | 6,
                 systemPrompt: saved.system_prompt,
                 frozenKnowledge: saved.frozen_knowledge,
                 ...(saved.frozen_sources ? { frozenSources: saved.frozen_sources } : {}),
@@ -386,7 +386,7 @@ export class TurnService {
         [t.diceSessionId, campaignId]
       );
       const session = saved.rows[0];
-      if (!session || session.prompt_contract_version !== AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
+      if (!session || !usesAuditedContract(session.prompt_contract_version))
         throw conflict('Saved editing context is missing');
       t.context = {
         ...t.context!,
@@ -523,8 +523,7 @@ export class TurnService {
               ? this.rulePrompt(await new RuleStore(this.store).guard(t.ruleContext, client))
               : undefined,
             this.generator.generateOwnedGameplay ? this.responseVersion : undefined,
-            !!this.generator.generateOwnedGameplay &&
-              this.responseVersion === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+            !!this.generator.generateOwnedGameplay && usesAuditedContract(this.responseVersion)
           );
           t.context = turn.context;
           await this.store.saveTurn(turn, client);
@@ -539,11 +538,13 @@ export class TurnService {
           await traceEvent(trace, 'execution_attempt', { attempt });
           const dice = new DiceService(this.store);
           let diceResponse:
-            DiceResponse | RuleResponse | GameplayResponse | GameplayResponseV5 | undefined;
-          let response: GMResponse | GameplayResponse | GameplayResponseV5;
-          const v5 = t.context?.promptContractVersion === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
-          const v4 =
-            v5 || t.context?.promptContractVersion === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
+            DiceResponse | RuleResponse | GameplayResponse | AuditedGameplayResponse | undefined;
+          let response: GMResponse | GameplayResponse | AuditedGameplayResponse;
+          const contract = t.context?.promptContractVersion;
+          const v5 = usesAuditedContract(contract);
+          const v6 = usesCombatContract(contract);
+          const v4 = v5 || contract === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
+          const combat = new CombatPreparationService(this.store);
           let registry: GameplayTools | undefined;
           let frozenDefinitions:
             import('../providers/gameplayTools.js').GameplayToolDefinition[] | undefined;
@@ -555,9 +556,8 @@ export class TurnService {
             const root = saved.rows[0];
             if (
               !root ||
-              root.prompt_contract_version !== t.context!.promptContractVersion ||
-              root.digest_version !==
-                (v5 ? AUDITED_GAMEPLAY_DIGEST_VERSION : KNOWLEDGE_GAMEPLAY_DIGEST_VERSION)
+              root.prompt_contract_version !== contract ||
+              root.digest_version !== gameplayDigestVersion(contract)
             )
               throw new Problem(409, 'dice_context', 'Frozen v4 session metadata is missing');
             t.context!.systemPrompt = root.system_prompt;
@@ -573,14 +573,7 @@ export class TurnService {
                 'Owned knowledge gameplay is not available for this provider'
               );
             c = await this.store.campaign(t.campaignId);
-            const frozen =
-              t.context!.frozenKnowledge ??
-              freezeKnowledge(
-                c,
-                v5
-                  ? AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
-                  : KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
-              );
+            const frozen = t.context!.frozenKnowledge ?? freezeKnowledge(c, contract);
             const rules = new RuleStore(this.store);
             const lookup = new RuleLookup();
             const sourceLookup = new CampaignSourceLookup(this.store);
@@ -613,6 +606,7 @@ export class TurnService {
                   await this.lockedOwned(t, client);
                 });
               },
+              ...(v6 ? { prepareCombat: (input: unknown) => combat.prepare(t, input) } : {}),
             });
           }
           if (
@@ -628,16 +622,7 @@ export class TurnService {
               }[];
               t.diceSessionId = await dice.createSession(
                 t,
-                gameplayDigest(
-                  c,
-                  history,
-                  t.ruleContext,
-                  v5
-                    ? AUDITED_GAMEPLAY_DIGEST_VERSION
-                    : v4
-                      ? KNOWLEDGE_GAMEPLAY_DIGEST_VERSION
-                      : LEGACY_GAMEPLAY_DIGEST_VERSION
-                ),
+                gameplayDigest(c, history, t.ruleContext, gameplayDigestVersion(contract)),
                 [
                   ...new Set([
                     ...characters.map((character) => character.id),
@@ -646,20 +631,11 @@ export class TurnService {
                 ],
                 v4
                   ? {
-                      promptContractVersion: t.context!.promptContractVersion,
-                      digestVersion: v5
-                        ? AUDITED_GAMEPLAY_DIGEST_VERSION
-                        : KNOWLEDGE_GAMEPLAY_DIGEST_VERSION,
+                      promptContractVersion: contract,
+                      digestVersion: gameplayDigestVersion(contract),
                       frozenSources: t.context!.frozenSources,
                       systemPrompt: t.context!.systemPrompt!,
-                      knowledge:
-                        t.context!.frozenKnowledge ??
-                        freezeKnowledge(
-                          c,
-                          v5
-                            ? AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
-                            : KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION
-                        ),
+                      knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c, contract),
                       toolDefinitions: registry!.definitions,
                     }
                   : undefined
@@ -693,24 +669,48 @@ export class TurnService {
                 })),
               })
             );
+            // Preparation receipts belong to the logical session; retries reuse their identities.
+            const preparations = v6
+              ? (await combat.authorization(t.diceSessionId)).preparations.map(
+                  ({ preparationKey, payload }) => ({
+                    localKey: preparationKey,
+                    encounterId: payload.encounterId,
+                    participants: payload.participants.map(({ characterId, label }) => ({
+                      characterId,
+                      label,
+                    })),
+                    createOperations: payload.createOperations,
+                  })
+                )
+              : [];
             const prompt =
               t.context!.prompt +
               (feedback ? `\nResponse correction: ${feedback}` : '') +
               (specifications.length
                 ? '\nReplay the original requests in order with exactly these specifications before appending any dice: ' +
                   JSON.stringify(specifications)
+                : '') +
+              (preparations.length
+                ? '\nCombat preparations already recorded for this action; reuse these IDs and repeat combat_prepare only with identical arguments: ' +
+                  JSON.stringify(preparations)
                 : '');
             if (v4) {
               const raw = await this.generator.generateOwnedGameplay!(
                 t.settings,
                 prompt,
-                v5 ? gameplayResponseV5WireJsonSchema : gameplayResponseJsonSchema,
+                v6
+                  ? gameplayResponseV6WireJsonSchema
+                  : v5
+                    ? gameplayResponseV5WireJsonSchema
+                    : gameplayResponseJsonSchema,
                 t.context!.systemPrompt!,
                 this.tracedTools(registry!, trace),
                 ctl.signal,
                 trace
               );
-              diceResponse = v5 ? (raw as GameplayResponseV5) : gameplayResponseSchema.parse(raw);
+              diceResponse = v5
+                ? (raw as AuditedGameplayResponse)
+                : gameplayResponseSchema.parse(raw);
             } else if (t.ruleContext?.kind === RuleSystemKind.Library) {
               const rules = new RuleStore(this.store);
               const lookup = new RuleLookup();
@@ -755,7 +755,7 @@ export class TurnService {
                 )
               );
             response = v4
-              ? (diceResponse as GameplayResponse | GameplayResponseV5)
+              ? (diceResponse as GameplayResponse | AuditedGameplayResponse)
               : {
                   version: GM_RESPONSE_SCHEMA_VERSION,
                   narrative: diceResponse.narrative,
@@ -776,7 +776,7 @@ export class TurnService {
               await validateWithFieldRepair(
                 response,
                 async (candidate) => {
-                  const parsed = gameplayResponseV5InputSchema.parse(candidate);
+                  const parsed = auditedResponseInputSchema(contract!).parse(candidate);
                   await this.persistResponse(t, parsed, parsed, true);
                   response = parsed;
                   diceResponse = parsed;
@@ -811,6 +811,9 @@ export class TurnService {
                       rolls: t.diceSessionId
                         ? await new DiceService(this.store).records(t.diceSessionId, client)
                         : [],
+                      ...(v6 && t.diceSessionId
+                        ? { combat: await combat.authorization(t.diceSessionId, client) }
+                        : {}),
                     };
                   })
               );
@@ -833,7 +836,7 @@ export class TurnService {
         },
         ctl.signal
       );
-      if (t.context?.promptContractVersion === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
+      if (usesAuditedContract(t.context?.promptContractVersion))
         await this.finishEditing(t, ctl.signal, trace);
     } catch (e) {
       await traceEvent(trace, 'execution_failed', {
@@ -886,15 +889,20 @@ export class TurnService {
     if (!candidate || candidate.status === 'abandoned')
       throw conflict('No saved narrative is available for editing');
     const campaign = await this.store.campaign(t.campaignId);
-    const savedResponse = gameplayResponseV5Schema.parse(candidate.rawResponse);
+    const raw = candidate.rawResponse as { version?: number };
+    const savedResponse = auditedResponseSchema(raw.version ?? 0).parse(raw);
+    const combatLinks =
+      savedResponse.version === 6 &&
+      (savedResponse.combatEffects.length > 0 || savedResponse.participantReferences.length > 0);
     const narrative =
       candidate.editedNarrative ??
       (await humanizeNarrative(this.generator, candidate.settings, candidate.rawNarrative, {
         signal,
         trace,
-        preserveParagraphs: savedResponse.rollInterpretations.some(
-          (entry) => entry.afterParagraph !== undefined
-        ),
+        // Dice placements and participant links both address paragraphs by number.
+        preserveParagraphs:
+          combatLinks ||
+          savedResponse.rollInterpretations.some((entry) => entry.afterParagraph !== undefined),
         protectedNames: [
           ...campaign.characters.map((character) => character.name),
           ...savedResponse.operations.flatMap((op) =>
@@ -920,8 +928,9 @@ export class TurnService {
   }
   private async persistResponse(
     t: Turn,
-    response: GMResponse | GameplayResponse | GameplayResponseV5,
-    diceResponse: DiceResponse | RuleResponse | GameplayResponse | GameplayResponseV5 | undefined,
+    response: GMResponse | GameplayResponse | AuditedGameplayResponse,
+    diceResponse:
+      DiceResponse | RuleResponse | GameplayResponse | AuditedGameplayResponse | undefined,
     prepare = false,
     editedNarrative?: string
   ): Promise<void> {
@@ -929,7 +938,7 @@ export class TurnService {
     await this.store.transaction(async (client) => {
       const v4 = response.version >= KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
       const { campaign, turn } = await this.lockedOwned(t, client);
-      if (response.version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION) {
+      if (usesAuditedContract(response.version)) {
         const sourceReads = await new CampaignSourceLookup(this.store).records(
           t.campaignId,
           t.id,
@@ -939,7 +948,7 @@ export class TurnService {
           'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
           [t.id]
         );
-        const bound = bindResponseCitations(response as GameplayResponseV5, {
+        const bound = bindResponseCitations(response as AuditedGameplayResponse, {
           campaignId: t.campaignId,
           turnId: t.id,
           ruleContext: t.ruleContext,
@@ -1011,7 +1020,7 @@ export class TurnService {
       if (
         v4 &&
         t.ruleContext?.kind !== RuleSystemKind.Library &&
-        (diceResponse as GameplayResponse | GameplayResponseV5).ruleCitations.length
+        (diceResponse as GameplayResponse | AuditedGameplayResponse).ruleCitations.length
       )
         throw new Problem(
           502,
@@ -1024,7 +1033,7 @@ export class TurnService {
             [t.id]
           )
         : undefined;
-      if (response.version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
+      if (usesAuditedContract(response.version))
         turn.sourceReads = await new CampaignSourceLookup(this.store).records(
           t.campaignId,
           t.id,
@@ -1035,7 +1044,7 @@ export class TurnService {
         turnId: t.id,
         sourceSpans: [
           ...(t.context?.sourceSpans ?? []),
-          ...(response.version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION
+          ...(usesAuditedContract(response.version)
             ? (turn.sourceReads ?? []).flatMap((read) =>
                 read.payload.sourceSpan ? [sourceSpanSchema.parse(read.payload.sourceSpan)] : []
               )
@@ -1055,6 +1064,17 @@ export class TurnService {
           payload: row.payload,
           createdAt: new Date(row.created_at).toISOString(),
         })),
+        ...(usesCombatContract(response.version) && t.diceSessionId
+          ? {
+              combat: {
+                authorization: await new CombatPreparationService(this.store).authorization(
+                  t.diceSessionId,
+                  client
+                ),
+                narrative: editedNarrative ?? response.narrative,
+              },
+            }
+          : {}),
       });
       if (prepare) {
         await new NarrativeCandidateRepository(this.store.pool).save(
@@ -1079,8 +1099,12 @@ export class TurnService {
       applied.campaign.revision++;
       turn.narrative = editedNarrative ?? response.narrative;
       turn.editingPending = false;
-      if (response.version === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION)
-        turn.operationExplanations = (response as GameplayResponseV5).operationExplanations;
+      if (usesAuditedContract(response.version))
+        turn.operationExplanations = (response as AuditedGameplayResponse).operationExplanations;
+      if (usesCombatContract(response.version)) {
+        turn.combatEffects = (response as GameplayResponseV6).combatEffects;
+        turn.participantReferences = (response as GameplayResponseV6).participantReferences;
+      }
       turn.changes = applied.changes;
       turn.status = TurnStatus.Completed;
       turn.completedAt = new Date().toISOString();

@@ -78,6 +78,9 @@ export function publicTurn(turn: Turn): Turn {
           ),
         }
       : {}),
+    // Committed v6 links reference public sheets; preparation receipts never reach players.
+    ...(safe.combatEffects ? { combatEffects: safe.combatEffects } : {}),
+    ...(safe.participantReferences ? { participantReferences: safe.participantReferences } : {}),
     ...(safe.editingPending ? { editingPending: true } : {}),
     ...(safe.editingResume ? { editingResume: safe.editingResume } : {}),
     ...(safe.traceWarning ? { traceWarning: safe.traceWarning } : {}),

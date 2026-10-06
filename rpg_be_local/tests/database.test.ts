@@ -401,7 +401,8 @@ test(
   async () => {
     const campaign = await create();
     await store.edit(campaign.id, 0, (c) => {
-      c.description = 'Marta owes a favor.';
+      // The description is player-facing; campaign instructions are the persistent GM context.
+      c.instructions = 'Marta owes a favor.';
     });
     const prompts: { provider: string; prompt: string; memory: boolean }[] = [];
     const generator: Generator = {
@@ -432,8 +433,14 @@ test(
     const summaries = prompts.filter((p) => p.memory);
     assert.ok(summaries.length >= 2 && summaries.length < 10);
     for (const p of prompts) {
-      assert.ok(Buffer.byteLength(p.prompt) <= (p.memory ? 8000 : 16000));
-      assert.ok(p.prompt.includes('Marta owes a favor.'));
+      // Gameplay has no prompt target; compaction keeps history from growing with every turn.
+      const uncompactedHistory =
+        prompts.length * 'Dust covers the floor and a door opens. '.length * 30;
+      assert.ok(
+        Buffer.byteLength(p.prompt) <= (p.memory ? 8000 : uncompactedHistory / 1.25),
+        `${p.memory ? 'memory' : 'gameplay'} prompt ${Buffer.byteLength(p.prompt)} bytes`
+      );
+      if (!p.memory) assert.ok(p.prompt.includes('Marta owes a favor.'));
     }
     assert.equal((await store.activeTurns(campaign.id)).length, 20);
     assert.ok((await store.campaign(campaign.id)).memory);

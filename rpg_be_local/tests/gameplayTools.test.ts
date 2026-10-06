@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { GameplayTools } from '../src/providers/gameplayTools.js';
+import {
+  GameplayTools,
+  gameplayEnvelopeBytes,
+  gameplayToolDefinitions,
+  gameplayToolRequestBytes,
+} from '../src/providers/gameplayTools.js';
 import { freezeKnowledge } from '../src/domain/knowledgeRecall.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import { CharacterType } from '../src/domain/options.js';
@@ -302,4 +307,57 @@ test('large aggregate tool transcripts are allowed and cancellation still preven
   assert.deepEqual(await registry.call('rules_get', {}, 'third'), { text: 'x'.repeat(3000) });
   signal.abort();
   await assert.rejects(registry.call('rules_get', {}, 'first'), /cancelled/);
+});
+
+test('combat_prepare exists only in a v6 registry, validates before dispatch and replays by transport identity', async () => {
+  const roll = async () => ({ rollId: randomUUID(), slot: 0, groups: [], reused: false });
+  const v5 = new GameplayTools({ book: false, assertActive: async () => {}, roll });
+  assert.deepEqual(
+    v5.definitions.map((definition) => definition.name),
+    ['roll_dice']
+  );
+  assert.deepEqual(v5.definitions, gameplayToolDefinitions(false));
+  assert.doesNotMatch(JSON.stringify(v5.definitions), /scope|combat/);
+  const prepared: unknown[] = [];
+  const v6 = new GameplayTools({
+    book: false,
+    assertActive: async () => {},
+    roll,
+    prepareCombat: async (input) => {
+      prepared.push(input);
+      return { receiptId: randomUUID() };
+    },
+  });
+  assert.deepEqual(
+    v6.definitions.map((definition) => definition.name),
+    ['combat_prepare', 'roll_dice']
+  );
+  assert.match(JSON.stringify(v6.definitions[1]!.inputSchema), /scope/);
+  await assert.rejects(
+    v6.call('combat_prepare', { localKey: 'fight' }, 'bad'),
+    /registered schema/
+  );
+  assert.equal(prepared.length, 0);
+  const batch = {
+    localKey: 'fight',
+    participants: [
+      {
+        characterId: randomUUID(),
+        label: 'Guard',
+        trackedFields: [{ path: ['health'], kind: 'damage', label: 'Health' }],
+      },
+    ],
+  };
+  const first = await v6.call('combat_prepare', batch, 'p1');
+  assert.deepEqual(await v6.call('combat_prepare', batch, 'p1'), first);
+  assert.equal(prepared.length, 1);
+  await assert.rejects(
+    v6.call('combat_prepare', { ...batch, localKey: 'other' }, 'p1'),
+    /changed tool arguments/
+  );
+  assert.equal(gameplayToolRequestBytes(v5.definitions, 'combat_prepare'), 1024);
+  assert.equal(gameplayToolRequestBytes(v6.definitions, 'combat_prepare'), 1_048_576);
+  assert.equal(gameplayToolRequestBytes(v6.definitions, 'roll_dice'), 1024);
+  assert.equal(gameplayEnvelopeBytes(v5.definitions), 4608);
+  assert.equal(gameplayEnvelopeBytes(v6.definitions), 1_048_576 + 65_536);
 });

@@ -5,6 +5,7 @@ import type {
   CampaignSourceRead,
 } from './campaignSourceRecall.js';
 import type { OperationExplanation } from './operationExplanations.js';
+import type { CombatEffect, ParticipantReference } from './combat.js';
 import type { FrozenKnowledge } from './knowledgeRecall.js';
 import type {
   CHARACTER_MUTABLE_FIELDS,
@@ -20,8 +21,13 @@ import type {
   ARCHIVE_FORMAT_VERSION,
   AUDITED_ARCHIVE_FORMAT_VERSION,
   NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION,
+  COMBAT_ARCHIVE_FORMAT_VERSION,
   GM_RESPONSE_SCHEMA_VERSION,
 } from './versions.js';
+import type {
+  CombatPreparationArchive,
+  CombatPreparedCharacterArchive,
+} from '../services/combatArchive.js';
 import type { DiceRecord, DiceSession } from './dice.js';
 import type { PlacedRollInterpretation } from './diceResponse.js';
 import type { RuleContext, RuleReference, RuleRead, RuleCitation } from './rules.js';
@@ -87,6 +93,8 @@ export type Campaign = {
   updatedAt: string;
 };
 export type Turn = {
+  combatEffects?: CombatEffect[];
+  participantReferences?: ParticipantReference[];
   sourceReads?: CampaignSourceRead[];
   operationExplanations?: OperationExplanation[];
   editingPending?: boolean;
@@ -118,7 +126,7 @@ export type Turn = {
 export type ContextManifest = {
   diceSessionId?: string;
   systemPrompt?: string;
-  promptContractVersion?: 4 | 5;
+  promptContractVersion?: 4 | 5 | 6;
   frozenSources?: FrozenCampaignSources;
   sourceSelection?: SourceSelectionDiagnostics;
   frozenKnowledge?: FrozenKnowledge;
@@ -171,13 +179,16 @@ export type Snapshot = {
   }[];
 };
 export type Archive = {
+  combatPreparations?: CombatPreparationArchive[];
+  combatPreparedCharacters?: CombatPreparedCharacterArchive[];
   diceSessions?: DiceSession[];
   diceRecords?: DiceRecord[];
   format: typeof ARCHIVE_FORMAT_ID;
   version:
     | typeof ARCHIVE_FORMAT_VERSION
     | typeof AUDITED_ARCHIVE_FORMAT_VERSION
-    | typeof NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION;
+    | typeof NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION
+    | typeof COMBAT_ARCHIVE_FORMAT_VERSION;
   campaign: Campaign;
   turns: Turn[];
   snapshots: Snapshot[];

@@ -12,6 +12,7 @@ import {
 } from './knowledge.js';
 import type { Campaign } from './types.js';
 import { npcSnapshotSchema, freezeNpcCharacters } from './npcRecall.js';
+import { usesAuditedContract } from './versions.js';
 export const KNOWLEDGE_SEARCH_TOOL_NAME = 'campaign_knowledge_search';
 export const KNOWLEDGE_GET_TOOL_NAME = 'campaign_knowledge_get';
 export const knowledgeSearchSchema = z
@@ -42,10 +43,11 @@ export const frozenKnowledgeV5Schema = frozenKnowledgeSchema
   .strict();
 export type FrozenKnowledge = z.infer<typeof frozenKnowledgeV5Schema>;
 export function freezeKnowledge(c: Campaign, version = 4, includeNpcs = false): FrozenKnowledge {
+  const audited = usesAuditedContract(version);
   return structuredClone({
     campaignId: c.id,
-    records: version === 5 ? (c.knowledge ?? []) : legacyKnowledge(c.knowledge ?? []),
-    ...(version === 5 && includeNpcs ? { npcCharacters: freezeNpcCharacters(c) } : {}),
+    records: audited ? (c.knowledge ?? []) : legacyKnowledge(c.knowledge ?? []),
+    ...(audited && includeNpcs ? { npcCharacters: freezeNpcCharacters(c) } : {}),
     characters: c.characters.map(({ id, name }) => ({ id, name })),
     sourceIds: c.sources.map((s) => s.id),
     sourceVersions: c.sources.map(({ id, version }) => ({ id, version })),

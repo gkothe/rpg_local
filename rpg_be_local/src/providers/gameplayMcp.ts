@@ -3,12 +3,14 @@ import { createServer } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { DICE_LIMITS } from '../domain/dice.js';
-import { RULE_LIMITS } from '../domain/rules.js';
-import type { GameplayToolDefinition, GameplayToolDispatch } from './gameplayTools.js';
+import {
+  gameplayEnvelopeBytes,
+  gameplayToolRequestBytes,
+  type GameplayToolDefinition,
+  type GameplayToolDispatch,
+} from './gameplayTools.js';
 import { Problem } from '../errors.js';
 
-const RPC_ENVELOPE_BYTES = 512;
 const CAPABILITY_BYTES = 32;
 const HTTP_REQUEST_TIMEOUT_MS = 10_000;
 export type GameplayMcpEndpoint = {
@@ -29,6 +31,7 @@ export async function startGameplayMcp(
     allowed.some((name) => !/^[a-z][a-z0-9_]{0,63}$/.test(name))
   )
     throw new Error('MCP requires the exact owned gameplay tool definitions');
+  const envelopeBytes = gameplayEnvelopeBytes(definitions);
   const authorization = `Bearer ${randomBytes(CAPABILITY_BYTES).toString('hex')}`;
   const expectedAuthorization = Buffer.from(authorization);
   let closed = false;
@@ -63,8 +66,8 @@ export async function startGameplayMcp(
       let bytes = 0;
       for await (const chunk of req) {
         bytes += Buffer.byteLength(chunk);
-        if (bytes > DICE_LIMITS.inputBytes + RPC_ENVELOPE_BYTES) {
-          res.writeHead(413).end();
+        if (bytes > envelopeBytes) {
+          res.writeHead(413, { Connection: 'close' }).end();
           return;
         }
         buffers.push(Buffer.from(chunk));
@@ -91,7 +94,7 @@ export async function startGameplayMcp(
             throw new Problem(422, 'gameplay_tool', 'Only owned gameplay tools are available');
           if (
             Buffer.byteLength(JSON.stringify(request.params.arguments ?? {}), 'utf8') >
-            RULE_LIMITS.requestBytes
+            gameplayToolRequestBytes(definitions, request.params.name)
           )
             throw new Problem(422, 'dice_limit', 'Dice input exceeds byte limit');
           return dispatch(request.params.name, request.params.arguments, rpcId);

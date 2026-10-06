@@ -37,7 +37,19 @@ import {
   KNOWLEDGE_ARCHIVE_FORMAT_VERSION,
   AUDITED_ARCHIVE_FORMAT_VERSION,
   NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION,
+  COMBAT_ARCHIVE_FORMAT_VERSION,
+  usesAuditedContract,
 } from '../domain/versions.js';
+import {
+  combatPreparationArchiveSchema,
+  combatPreparedCharacterArchiveSchema,
+  turnCombatArchiveShape,
+  validateCombatArchive,
+  remapCombatState,
+  remapCombatPreparation,
+  remapPreparedCharacter,
+  remapTurnCombat,
+} from './combatArchive.js';
 import {
   ruleContextSchema,
   ruleReferenceSchema,
@@ -52,7 +64,12 @@ import {
 } from '../domain/rules.js';
 import { RuleStore } from './ruleStore.js';
 import { validateRuleCitations } from '../domain/ruleResponse.js';
-import { DICE_LIMITS, diceRecordSchema, diceSessionSchema } from '../domain/dice.js';
+import {
+  DICE_LIMITS,
+  diceRecordSchema,
+  diceRecordV6Schema,
+  diceSessionSchema,
+} from '../domain/dice.js';
 import {
   placedRollInterpretationSchema,
   validateRollInterpretations,
@@ -308,6 +325,15 @@ const auditedContext = knowledgeContext
       .optional(),
   })
   .strict();
+const auditedTurn = turn
+  .extend({
+    context: auditedContext.nullable(),
+    ruleReads: z.array(ruleReadSchema).optional(),
+    sourceReads: z.array(sourceRead).optional(),
+    operationExplanations: z.array(operationExplanationSchema).optional(),
+    traceId: z.string().optional(),
+  })
+  .strict();
 const auditedArchiveSchema = knowledgeArchiveSchema
   .extend({
     version: z.union([
@@ -326,19 +352,7 @@ const auditedArchiveSchema = knowledgeArchiveSchema
           .max(1000),
       })
       .strict(),
-    turns: z
-      .array(
-        turn
-          .extend({
-            context: auditedContext.nullable(),
-            ruleReads: z.array(ruleReadSchema).optional(),
-            sourceReads: z.array(sourceRead).optional(),
-            operationExplanations: z.array(operationExplanationSchema).optional(),
-            traceId: z.string().optional(),
-          })
-          .strict()
-      )
-      .max(MAX_ARCHIVE_TURNS),
+    turns: z.array(auditedTurn).max(MAX_ARCHIVE_TURNS),
     snapshots: z.array(
       snapshot
         .extend({
@@ -349,28 +363,71 @@ const auditedArchiveSchema = knowledgeArchiveSchema
     ),
   })
   .strict();
+const combatRecord = z.union([diceRecordSchema, diceRecordV6Schema]);
+const combatArchiveSchema = auditedArchiveSchema
+  .extend({
+    version: z.literal(COMBAT_ARCHIVE_FORMAT_VERSION),
+    diceRecords: z
+      .array(combatRecord)
+      .max(MAX_ARCHIVE_TURNS * DICE_LIMITS.slots)
+      .optional(),
+    turns: z
+      .array(
+        auditedTurn
+          .extend({
+            ...turnCombatArchiveShape,
+            rolls: z.array(combatRecord).max(DICE_LIMITS.slots).optional(),
+            context: auditedContext
+              .extend({
+                promptContractVersion: z
+                  .union([z.literal(4), z.literal(5), z.literal(6)])
+                  .optional(),
+              })
+              .strict()
+              .nullable(),
+          })
+          .strict()
+      )
+      .max(MAX_ARCHIVE_TURNS),
+    combatPreparations: z.array(combatPreparationArchiveSchema).optional(),
+    combatPreparedCharacters: z.array(combatPreparedCharacterArchiveSchema).optional(),
+  })
+  .strict();
+/** Version 6 gameplay sessions, combat rolls and preparations need archive version 7. */
+export function assertCombatArchiveFormat(version: number, promptContractVersion?: number | null) {
+  if (version < COMBAT_ARCHIVE_FORMAT_VERSION && promptContractVersion === 6)
+    throw new Problem(422, 'archive_invalid', 'Combat gameplay requires archive version 7');
+}
 export function assertNpcArchiveFormat(version: number, captured?: FrozenKnowledge | null) {
   if (version < NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION && captured?.npcCharacters !== undefined)
     throw new Problem(422, 'archive_invalid', 'Frozen NPC sheets require archive version 6');
 }
 export function remapArchive(raw: unknown): Archive {
-  const isAudited =
+  const isCombat =
     typeof raw === 'object' &&
     raw !== null &&
     'version' in raw &&
-    (raw.version === AUDITED_ARCHIVE_FORMAT_VERSION ||
-      raw.version === NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION);
+    raw.version === COMBAT_ARCHIVE_FORMAT_VERSION;
+  const isAudited =
+    isCombat ||
+    (typeof raw === 'object' &&
+      raw !== null &&
+      'version' in raw &&
+      (raw.version === AUDITED_ARCHIVE_FORMAT_VERSION ||
+        raw.version === NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION));
   const isKnowledge =
     isAudited ||
     (typeof raw === 'object' &&
       raw !== null &&
       'version' in raw &&
       raw.version === KNOWLEDGE_ARCHIVE_FORMAT_VERSION);
-  const legacyParsed = isAudited
-    ? auditedArchiveSchema.parse(raw)
-    : isKnowledge
-      ? knowledgeArchiveSchema.parse(raw)
-      : archiveSchema.parse(raw);
+  const legacyParsed = isCombat
+    ? combatArchiveSchema.parse(raw)
+    : isAudited
+      ? auditedArchiveSchema.parse(raw)
+      : isKnowledge
+        ? knowledgeArchiveSchema.parse(raw)
+        : archiveSchema.parse(raw);
   const campaign = { ...legacyParsed.campaign };
   delete campaign.pinnedFacts;
   const parsed = { ...legacyParsed, campaign };
@@ -382,6 +439,16 @@ export function remapArchive(raw: unknown): Archive {
     'toolDefinitions',
   ] as const;
   for (const session of parsed.diceSessions ?? []) {
+    assertCombatArchiveFormat(parsed.version, session.promptContractVersion);
+    if (
+      session.promptContractVersion === 6 &&
+      (session.digestVersion !== 4 || !session.frozenSources)
+    )
+      throw new Problem(
+        422,
+        'archive_invalid',
+        'Version 6 session requires its digest and frozen sources'
+      );
     if (
       !isAudited &&
       (session.promptContractVersion === 5 || session.digestVersion === 3 || session.frozenSources)
@@ -451,12 +518,21 @@ export function remapArchive(raw: unknown): Archive {
   const archive: Archive = {
     ...parsed,
     version:
-      parsed.version === NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION
-        ? NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION
+      parsed.version === NPC_RETRIEVAL_ARCHIVE_FORMAT_VERSION ||
+      parsed.version === COMBAT_ARCHIVE_FORMAT_VERSION
+        ? parsed.version
         : ARCHIVE_FORMAT_VERSION,
     diceSessions: parsed.diceSessions ?? [],
     diceRecords: parsed.diceRecords ?? [],
+    combatPreparations: ('combatPreparations' in parsed ? parsed.combatPreparations : []) ?? [],
+    combatPreparedCharacters:
+      ('combatPreparedCharacters' in parsed ? parsed.combatPreparedCharacters : []) ?? [],
   };
+  for (const record of archive.diceRecords!) {
+    const session = archive.diceSessions!.find((s) => s.id === record.sessionId);
+    if (session?.promptContractVersion === 6 ? !record.scope : record.scope !== undefined)
+      throw new Problem(422, 'archive_invalid', 'Dice record scope does not match its session');
+  }
   if (isKnowledge || ARCHIVE_FORMAT_VERSION >= KNOWLEDGE_ARCHIVE_FORMAT_VERSION)
     archive.campaign.knowledge ??= [];
   const old = archive.campaign;
@@ -472,6 +548,7 @@ export function remapArchive(raw: unknown): Archive {
   archive.memories.forEach((m) => register(m.id));
   archive.diceSessions!.forEach((session) => register(session.id));
   archive.diceRecords!.forEach((record) => register(record.id));
+  archive.combatPreparations!.forEach((prep) => register(prep.id));
   for (const entry of archive.turns) {
     for (const read of entry.ruleReads ?? []) register(read.id);
     for (const read of entry.sourceReads ?? []) register(read.id);
@@ -486,6 +563,7 @@ export function remapArchive(raw: unknown): Archive {
     ...mids,
     ...archive.diceSessions!.map((session) => session.id),
     ...archive.diceRecords!.map((record) => record.id),
+    ...archive.combatPreparations!.map((prep) => prep.id),
     ...archive.turns.flatMap((turn) => (turn.ruleReads ?? []).map((read) => read.id)),
     ...archive.turns.flatMap((turn) => (turn.sourceReads ?? []).map((read) => read.id)),
   ]);
@@ -550,7 +628,7 @@ export function remapArchive(raw: unknown): Archive {
   for (const turn of archive.turns) {
     if (
       turn.context?.frozenKnowledge?.npcCharacters !== undefined &&
-      turn.context.promptContractVersion !== 5
+      !usesAuditedContract(turn.context.promptContractVersion)
     )
       throw new Problem(422, 'archive_invalid', 'Frozen NPC sheets require version 5 gameplay');
   }
@@ -670,6 +748,33 @@ export function remapArchive(raw: unknown): Archive {
         throw new Problem(422, 'archive_invalid', 'Invalid frozen source span coordinates');
     }
   }
+  const encounterIds = new Set<string>();
+  validateCombatArchive(
+    {
+      campaignId: old.id,
+      states: [
+        old.state,
+        ...archive.snapshots.flatMap((snap) => [snap.beforeState, snap.afterState]),
+      ],
+      sessions: archive.diceSessions!,
+      turns: archive.turns,
+      records: archive.diceRecords!,
+      preparations: archive.combatPreparations!,
+      prepared: archive.combatPreparedCharacters!,
+      completed: TurnStatus.Completed,
+    },
+    {
+      character: characterLink,
+      encounter: (id) => {
+        if (encounterIds.has(id)) return;
+        if (ids.has(id) || historicalCharacters.has(id))
+          throw new Problem(422, 'archive_invalid', 'Encounter ID collides with another entity');
+        ids.set(id, randomUUID());
+        encounterIds.add(id);
+        nonCharacterIds.add(id);
+      },
+    }
+  );
   for (const records of knowledgeCollections)
     for (const record of records) {
       if (
@@ -893,7 +998,14 @@ export function remapArchive(raw: unknown): Archive {
     if (
       record.campaignId !== old.id ||
       !session ||
-      [record.actorId, record.targetId].some((id) => id && !session.characterIds.includes(id)) ||
+      [record.actorId, record.targetId].some(
+        (id) =>
+          id &&
+          !session.characterIds.includes(id) &&
+          !archive.combatPreparedCharacters!.some(
+            (draft) => draft.id === id && draft.sessionId === session.id
+          )
+      ) ||
       (record.rerollOf &&
         !archive.diceRecords!.some(
           (previous) =>
@@ -961,8 +1073,7 @@ export function remapArchive(raw: unknown): Archive {
         record.sessionId !== session.id ||
         record.slot !== index ||
         !canonical ||
-        JSON.stringify(diceRecordSchema.parse(record)) !==
-          JSON.stringify(diceRecordSchema.parse(canonical))
+        JSON.stringify(combatRecord.parse(record)) !== JSON.stringify(combatRecord.parse(canonical))
       )
         throw new Problem(
           422,
@@ -998,6 +1109,7 @@ export function remapArchive(raw: unknown): Archive {
     record.campaignId = mapped(record.campaignId);
     if (record.actorId) record.actorId = mapped(record.actorId);
     if (record.targetId) record.targetId = mapped(record.targetId);
+    if (record.encounterId) record.encounterId = mapped(record.encounterId);
     if (record.rerollOf) record.rerollOf.rollId = mapped(record.rerollOf.rollId);
   };
   const remapKnowledge = (record: CampaignKnowledge) => {
@@ -1045,6 +1157,9 @@ export function remapArchive(raw: unknown): Archive {
     session.imported = true;
   }
   for (const record of out.diceRecords!) remapRecord(record);
+  for (const prep of out.combatPreparations!) remapCombatPreparation(prep, mapped);
+  for (const draft of out.combatPreparedCharacters!) remapPreparedCharacter(draft, mapped);
+  remapCombatState(out.campaign.state, mapped);
   out.campaign.id = mapped(old.id);
   out.campaign.ruleSystemId = null;
   if (out.campaign.ruleReference?.kind === RuleSystemKind.Library)
@@ -1122,6 +1237,7 @@ export function remapArchive(raw: unknown): Archive {
     if (t.retryOfTurnId) t.retryOfTurnId = mapped(t.retryOfTurnId);
     for (const record of t.rolls ?? []) remapRecord(record);
     for (const entry of t.rollInterpretations ?? []) entry.rollId = mapped(entry.rollId);
+    remapTurnCombat(t, mapped);
     t.id = mapped(t.id);
     t.campaignId = out.campaign.id;
     t.requestId = randomUUID();
@@ -1145,8 +1261,14 @@ export function remapArchive(raw: unknown): Archive {
     for (const c of [...snapshot.beforeCharacters, ...snapshot.afterCharacters])
       c.id = mapped(c.id);
     if (snapshot.beforeMemory) remapMemory(snapshot.beforeMemory);
+    remapCombatState(snapshot.beforeState, mapped);
+    remapCombatState(snapshot.afterState, mapped);
     for (const change of snapshot.changedFields ?? [])
       change.characterId = mapped(change.characterId);
+  }
+  if (!isCombat) {
+    delete out.combatPreparations;
+    delete out.combatPreparedCharacters;
   }
   out.campaign.createdAt = new Date().toISOString();
   out.campaign.updatedAt = out.campaign.createdAt;
@@ -1257,8 +1379,46 @@ export class LibraryService {
       );
       for (const turn of turns)
         assertNpcArchiveFormat(ARCHIVE_FORMAT_VERSION, turn.context?.frozenKnowledge);
-      for (const row of sessions.rows)
+      for (const row of sessions.rows) {
         assertNpcArchiveFormat(ARCHIVE_FORMAT_VERSION, row.frozen_knowledge);
+        assertCombatArchiveFormat(ARCHIVE_FORMAT_VERSION, row.prompt_contract_version);
+      }
+      const combat =
+        ARCHIVE_FORMAT_VERSION >= COMBAT_ARCHIVE_FORMAT_VERSION
+          ? {
+              combatPreparations: (
+                await client.query(
+                  'SELECT * FROM combat_preparations WHERE campaign_id=$1 ORDER BY created_at,id',
+                  [id]
+                )
+              ).rows.map((row) => ({
+                id: row.id,
+                campaignId: row.campaign_id,
+                sessionId: row.session_id,
+                turnId: row.turn_id,
+                encounterId: row.encounter_id,
+                preparationKey: row.preparation_key,
+                argumentDigest: row.argument_digest,
+                payload: row.payload,
+                createdAt: new Date(row.created_at).toISOString(),
+              })),
+              combatPreparedCharacters: (
+                await client.query(
+                  'SELECT * FROM combat_prepared_characters WHERE campaign_id=$1 ORDER BY created_at,id',
+                  [id]
+                )
+              ).rows.map((row) => ({
+                id: row.id,
+                campaignId: row.campaign_id,
+                sessionId: row.session_id,
+                preparationId: row.preparation_id,
+                localKey: row.local_key,
+                specificationDigest: row.specification_digest,
+                draft: row.draft,
+                createdAt: new Date(row.created_at).toISOString(),
+              })),
+            }
+          : {};
       return {
         format: ARCHIVE_FORMAT_ID,
         version: ARCHIVE_FORMAT_VERSION,
@@ -1304,6 +1464,7 @@ export class LibraryService {
         turns,
         snapshots: snaps.rows.map((r) => r.document as Snapshot),
         memories: memories.rows.map((r) => r.document as Memory),
+        ...combat,
       };
     });
   }
@@ -1415,6 +1576,35 @@ export class LibraryService {
           ]
         );
       }
+      for (const prep of archive.combatPreparations ?? [])
+        await client.query(
+          'INSERT INTO combat_preparations(id,campaign_id,session_id,turn_id,encounter_id,preparation_key,argument_digest,payload,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+          [
+            prep.id,
+            prep.campaignId,
+            prep.sessionId,
+            prep.turnId,
+            prep.encounterId,
+            prep.preparationKey,
+            prep.argumentDigest,
+            prep.payload,
+            prep.createdAt,
+          ]
+        );
+      for (const draft of archive.combatPreparedCharacters ?? [])
+        await client.query(
+          'INSERT INTO combat_prepared_characters(id,campaign_id,session_id,preparation_id,local_key,specification_digest,draft,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+          [
+            draft.id,
+            draft.campaignId,
+            draft.sessionId,
+            draft.preparationId,
+            draft.localKey,
+            draft.specificationDigest,
+            draft.draft,
+            draft.createdAt,
+          ]
+        );
       await this.store.reindex(archive.campaign, client);
       return archive.campaign;
     });
@@ -1448,6 +1638,8 @@ export class LibraryService {
       const template = r.rows[0].document;
       const setup = { ...template.setup };
       delete setup.pinnedFacts;
+      // Templates never carry play state: no encounter or its character links can transplant.
+      delete setup.state;
       const c = { ...newCampaign({ name: name ?? template.name }), ...setup } as Campaign;
       // Even an older externally stored template cannot transplant another campaign's timeline.
       if (ARCHIVE_FORMAT_VERSION >= KNOWLEDGE_ARCHIVE_FORMAT_VERSION) c.knowledge = [];

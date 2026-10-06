@@ -370,3 +370,54 @@ test('compaction excludes protected pairs even when they are huge; one older tur
   assert.equal(olderHistoryBytes(c, [old, ...recent]), 0);
   assert.equal(JSON.parse(compactionBatch(c, [old, ...recent]).prompt).priorMemory, 'Prior memory');
 });
+
+test('v6 context includes every active encounter participant by ID without a lexical mention', () => {
+  const c = newCampaign({ name: 'Ambush' });
+  const guard = (name: string) => ({
+    id: randomUUID(),
+    name,
+    type: 'npc' as const,
+    attributes: { health: { damage: 0 } },
+    inventory: {},
+    description: {},
+    notes: 'PRIVATE',
+    revision: 1,
+  });
+  const a = guard('Soldier');
+  const b = guard('Soldier');
+  const absent = guard('Merchant');
+  c.characters.push(a, b, absent);
+  const fields = [{ path: ['health', 'damage'], kind: 'damage', label: 'Damage' }];
+  c.state = {
+    combat: {
+      trackingVersion: 1,
+      id: randomUUID(),
+      active: true,
+      round: 2,
+      participants: [a, b].map((x) => ({
+        characterId: x.id,
+        label: x.name,
+        trackedFields: fields,
+      })),
+    },
+  };
+  const ids = (version: number) =>
+    (
+      JSON.parse(buildContext(c, [], 'I dodge', [], 16000, true, undefined, version, true).prompt)
+        .mandatory.characters as { id: string }[]
+    ).map((x) => x.id);
+  assert.deepEqual(ids(6), [a.id, b.id]);
+  const v6 = buildContext(c, [], 'I dodge', [], 16000, true, undefined, 6, true);
+  assert.equal(v6.promptContractVersion, 6);
+  assert.doesNotMatch(v6.prompt, /PRIVATE/);
+  assert.match(v6.systemPrompt!, /combat_prepare/);
+  assert.doesNotMatch(
+    buildContext(c, [], 'I dodge', [], 16000, true, undefined, 5, true).systemPrompt!,
+    /combat_prepare/
+  );
+  // Legacy free-form combat is never interpreted as identities.
+  c.state = { combat: { enemies: [a.id] } };
+  assert.deepEqual(ids(6), [a.id]);
+  c.state = { combat: { enemies: ['two raiders'] } };
+  assert.deepEqual(ids(6), []);
+});

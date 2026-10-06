@@ -28,6 +28,7 @@ export function selectRepairEvidence(response: unknown, paths: ResponsePath[], e
     evidenceCollections.map((key) => [key, new Set<unknown>()])
   ) as Record<(typeof evidenceCollections)[number], Set<unknown>>;
   let includeState = false;
+  let includeCombat = false;
   const visited = new Set<unknown>();
   const operations = Array.isArray(candidate.operations) ? candidate.operations : [];
   const explanations = Array.isArray(candidate.operationExplanations)
@@ -94,7 +95,8 @@ export function selectRepairEvidence(response: unknown, paths: ResponsePath[], e
       if (typeof row.id === 'string') find('knowledge', (record) => record.id === row.id);
       else fallbackReasons.add('incomplete_knowledge_reference');
     }
-    if (row.op === 'state') includeState = true;
+    if (row.op === 'state') includeState = includeCombat = true;
+    if ('preparationReceiptId' in row) includeCombat = true;
     if ('operationIndex' in row) operation(row.operationIndex);
     if (
       (row.origin === 'source' || row.basis === 'source' || row.basis === 'rule') &&
@@ -121,6 +123,7 @@ export function selectRepairEvidence(response: unknown, paths: ResponsePath[], e
         if ((id && row?.characterId === id) || row?.op === 'state') operation(prior);
       }
     }
+    if (field === 'combatEffects' || field === 'participantReferences') includeCombat = true;
     if (field === 'rollInterpretations' && typeof asRow(item)?.rollId !== 'string')
       fallbackReasons.add('incomplete_roll_reference');
     if (field === 'ruleCitations' && typeof asRow(item)?.receiptId !== 'string')
@@ -132,6 +135,8 @@ export function selectRepairEvidence(response: unknown, paths: ResponsePath[], e
     evidence: {
       ...Object.fromEntries(evidenceCollections.map((key) => [key, [...selected[key]]])),
       ...(includeState ? { state: bundle.state } : {}),
+      // Version 6 preparation receipts identify reserved NPCs and encounter bindings.
+      ...(includeCombat && bundle.combat ? { combat: bundle.combat } : {}),
     },
     mode: 'selected' as const,
     fallbackReasons: [],

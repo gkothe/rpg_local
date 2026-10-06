@@ -1,5 +1,6 @@
 import { responseSchemaExample } from './responseSchemaExample';
 import { responseSchemaV5Example } from './responseSchemaV5Example';
+import { responseSchemaV6Example } from './responseSchemaV6Example';
 // Authored teaching fixtures, never submitted to a provider or campaign API.
 export const ids = {
   player: '22222222-2222-4222-8222-222222222222',
@@ -221,3 +222,156 @@ export function examplePayloadV5(pinned: boolean, mentioned: boolean, book: bool
     },
   };
 }
+
+export function examplePayloadV6(pinned: boolean, mentioned: boolean, book: boolean) {
+  const v5 = examplePayloadV5(pinned, mentioned, book);
+  return { ...v5, mandatory: { ...v5.mandatory, schema: responseSchemaV6Example } };
+}
+// Version 6 adds combat links; a scene without combat leaves them empty.
+export const proposalV6 = {
+  ...proposalV5,
+  version: 6 as const,
+  combatEffects: [],
+  participantReferences: [],
+};
+
+// Illustrative v6 ambush: two soldiers from one description are two sheets with their own IDs.
+export const combatIds = {
+  soldierA: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  soldierB: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  encounter: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  receipt: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+  roll: '99999999-9999-4999-8999-999999999999',
+};
+const damage = [{ path: ['hp'], kind: 'vitality' as const, label: 'HP' }];
+const soldierDraft = {
+  name: 'Bridge soldier',
+  type: 'npc' as const,
+  attributes: { hp: 6 },
+  inventory: { spear: 1 },
+  description: { role: 'Toll guard' },
+};
+const introduction = { origin: 'gm' as const, evidence: [], visibility: 'player' as const };
+export const combatPrepareArgs = {
+  localKey: 'bridge-ambush',
+  participants: [
+    { characterId: ids.player, label: 'Mira', trackedFields: damage },
+    {
+      localKey: 'soldier-1',
+      label: 'Soldier 1',
+      character: soldierDraft,
+      introduction,
+      trackedFields: damage,
+    },
+    {
+      localKey: 'soldier-2',
+      label: 'Soldier 2',
+      character: soldierDraft,
+      introduction,
+      trackedFields: damage,
+    },
+  ],
+};
+const createSoldier = (characterId: string) => ({
+  op: 'create' as const,
+  characterId,
+  preparationReceiptId: combatIds.receipt,
+  character: soldierDraft,
+  introduction,
+});
+export const combatPrepareResult = {
+  receiptId: combatIds.receipt,
+  encounterId: combatIds.encounter,
+  encounter: 'new',
+  legacyCombat: false,
+  participants: [
+    {
+      characterId: ids.player,
+      label: 'Mira',
+      trackedFields: damage,
+      origin: 'existing',
+      sheet: player,
+    },
+    ...[combatIds.soldierA, combatIds.soldierB].map((id, index) => ({
+      characterId: id,
+      label: `Soldier ${index + 1}`,
+      trackedFields: damage,
+      origin: 'prepared',
+      sheet: { id, ...soldierDraft },
+    })),
+  ],
+  createOperations: [createSoldier(combatIds.soldierA), createSoldier(combatIds.soldierB)],
+  guidance:
+    'Use these character IDs in roll_dice actorId/targetId, combatEffects and participantReferences. Each prepared NPC you use must be created with its exact createOperations entry; add every participant you use to state.combat with the returned label and trackedFields. Unused prepared drafts remain audit only.',
+};
+export const combatRollArgs = {
+  slot: 0,
+  groups: [{ label: 'Attack', count: 1, sides: 20 }],
+  reason: 'Mira strikes the first soldier',
+  declaration: 'Attack roll; the GM applies the system rules to the result',
+  scope: 'combat' as const,
+  encounterId: combatIds.encounter,
+  combatKind: 'attack' as const,
+  actorId: ids.player,
+  targetId: combatIds.soldierA,
+};
+export const combatProposalV6 = {
+  version: 6 as const,
+  narrative:
+    'Two toll soldiers step out with spears raised.\n\nMira lunges past the first spear and cuts the nearest soldier.',
+  operations: [
+    createSoldier(combatIds.soldierA),
+    createSoldier(combatIds.soldierB),
+    {
+      op: 'set' as const,
+      characterId: combatIds.soldierA,
+      field: 'attributes' as const,
+      expected: { hp: 6 },
+      value: { hp: 3 },
+    },
+    {
+      op: 'state' as const,
+      expected: { location: 'North bridge' },
+      value: {
+        location: 'North bridge',
+        combat: {
+          trackingVersion: 1,
+          id: combatIds.encounter,
+          active: true,
+          round: 1,
+          participants: combatPrepareResult.participants.map(
+            ({ characterId, label, trackedFields }) => ({ characterId, label, trackedFields })
+          ),
+        },
+      },
+    },
+  ],
+  rollInterpretations: [
+    { rollId: combatIds.roll, explanation: 'A solid hit on the first soldier.', afterParagraph: 2 },
+  ],
+  ruleCitations: [],
+  knowledgeChanges: [],
+  operationExplanations: [0, 1, 2, 3].map((operationIndex) => ({
+    operationIndex,
+    reason:
+      operationIndex === 2 ? 'The saved attack roll hits for three damage.' : 'The ambush begins.',
+    basis: operationIndex === 2 ? 'dice' : 'initial_state',
+    rollIds: operationIndex === 2 ? [combatIds.roll] : [],
+    evidence: [],
+    visibility: 'player',
+  })),
+  combatEffects: [
+    {
+      characterId: combatIds.soldierA,
+      operationIndex: 2,
+      paths: [['hp']],
+      reason: 'Cut by Mira',
+      rollIds: [combatIds.roll],
+      afterParagraph: 2,
+    },
+  ],
+  participantReferences: [
+    { afterParagraph: 1, characterIds: [combatIds.soldierA, combatIds.soldierB] },
+    { afterParagraph: 2, characterIds: [ids.player, combatIds.soldierA] },
+  ],
+};

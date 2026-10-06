@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Problem } from '../errors.js';
-import { RULE_LIMITS, canonicalRuleJson, serializedBytes } from '../domain/rules.js';
+import { canonicalRuleJson, serializedBytes } from '../domain/rules.js';
 import { BOOK_GAMEPLAY_NARRATOR } from '../domain/gameplayNarrator.js';
 import { ruleResponseJsonSchema } from '../domain/ruleResponse.js';
 import { diceResponseJsonSchema } from '../domain/diceResponse.js';
@@ -13,7 +13,11 @@ import type { Executable } from './discovery.js';
 import { generateAntigravity } from './antigravity.js';
 import { antigravityDiceEnvironment } from './antigravityDice.js';
 import { startGameplayMcp } from './gameplayMcp.js';
-import { gameplayToolDefinitions, type BookGameplayAdapter } from './gameplayTools.js';
+import {
+  gameplayToolDefinitions,
+  gameplayToolRequestBytes,
+  type BookGameplayAdapter,
+} from './gameplayTools.js';
 import { DICE_NARRATOR } from './diceProtocol.js';
 import { logPrompt, traceEvent, safeTraceFailure, type PromptTraceContext } from './promptLog.js';
 import { responseRetryFeedback } from '../domain/responseRetry.js';
@@ -253,7 +257,8 @@ export async function generateAntigravityMcpBook(
                   !input ||
                   typeof input !== 'object' ||
                   Array.isArray(input) ||
-                  serializedBytes(input) > RULE_LIMITS.requestBytes
+                  serializedBytes(input) >
+                    gameplayToolRequestBytes(definitions, parameters.ToolName ?? '')
                 )
                   throw new Problem(
                     422,

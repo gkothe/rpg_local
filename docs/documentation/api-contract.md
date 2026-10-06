@@ -24,6 +24,7 @@ Campaigns also include `pinnedSourceSections: {sourceId:string,version:number,in
 
 - GET `/health`: `{status:'ok'|'degraded',database:boolean}` (503 when database unavailable).
 - GET `/settings`: `{version:1,turnStatuses:string[],sourceKinds:string[],characterTypes:string[],audio:{available:boolean,reason:string|null,maxSeconds:number},lan:{enabled:boolean},limits:{uploadBytes:number}}`.
+  Also `gameplay:{responseVersion,archiveVersion}` (the enabled contracts) and `combat:{enabled,trackingVersion,fieldKindOptions,rollScopeOptions,rollKindOptions,limits}`; `combat.enabled` is true only when the enabled response version is 6.
   Additional canonical options: `turnStatusOptions[{id,label,active,terminal,completed}]`, `sourceStatusOptions[{id,label,confirmed}]`, `sourceKindOptions[{id,label}]`, `characterTypeOptions[{id,label,default}]`, `ocrLanguageOptions[{id,label,default}]`, `transcriptionLanguageOptions[{id,label,default}]`, and `defaults{characterType,ocrLanguage,transcriptionLanguage,budgets}`. Frontend derives labels/state behavior from these options.
 - GET `/providers`: `Provider[]` where `{id,name,available:boolean,supported:boolean,reason:string|null,version:string|null,models:{id,label,efforts:string[],inputTokens:number}[],catalogProvenance:string}`. Installed but unsupported isolation is disabled, not a working adapter. Models are administrator configured/verified options, never guessed dynamic subscription availability.
 - GET/POST `/campaigns`; POST `{name,description?,instructions?,settings?}` => Campaign. GET rows are Campaign summaries (same shape; FE can use name/updatedAt).
@@ -262,7 +263,9 @@ instead of the generic invalid-response message. No game changes are committed.
 
 ## Current audited gameplay contract (v5)
 
-New actions use response version 5, archive version 5 and context digest version 3.
+Version 5 used response version 5, archive version 5/6 and context digest version 3; it remains
+the frozen contract for its retries and editing resumes. New actions use version 6 (below), which
+keeps every v5 rule.
 Older response/archive contracts remain strict and retain their original retry semantics.
 Campaign sources have a `purpose`: `campaign`, `character` or `reference`. Legacy sources
 without a purpose become references when preparing a v5 context. Confirmed source text
@@ -340,3 +343,43 @@ The wrapper stores only constituent search/get receipts, with deterministic chil
 ### Inline roll placement
 
 Version-5 roll interpretations may include `afterParagraph`, a positive 1-based index into blank-line-separated narrative paragraphs. The gameplay prompt requests it for every roll. Indices beyond the narrative are rejected. The narrative editor preserves paragraph count and order when placement is present. Versions 1-4 retain their original response schemas; stored turns and archives without placement remain supported. The Play transcript shows trusted rolls, declarations, interpretations and corrections directly after their linked paragraph, independently of debug information. Unplaced historical rolls and terminal attempts without narration append results at the end of the same GM message, without a separate box. Read-aloud uses only the original narrative text and offsets.
+
+## Individual combat identity (current gameplay contract, v6)
+
+New actions use response version 6 and context digest 4; exports use archive version 7. Turns
+started under v5 keep their frozen v5 contract for retries and editing resumes. `/settings`
+reports the enabled versions and `combat.enabled: true`.
+
+- Every combatant is its own character sheet and UUID. Before combat dice, the GM calls the owned
+  tool `combat_prepare` once per batch: `{localKey, encounterId?, participants:[{characterId,label,trackedFields} | {localKey,label,character:NpcDraft,introduction,trackedFields}]}`.
+  New NPC drafts (`type:'npc'`, no notes, public `introduction`) receive server-reserved UUIDs.
+  The tool is idempotent by batch `localKey` and per-individual `localKey`; reuse with different
+  arguments fails with `combat_preparation_conflict`. One logical action (dice session, shared by
+  its retries) prepares at most one encounter; later batches continue it. Preparation writes only
+  append-only receipts (`combat_preparations`, `combat_prepared_characters`, migration 0014);
+  nothing is published until the turn commits. Batches may reach 1 MiB of UTF-8 arguments (plus a
+  64 KiB JSON-RPC envelope); other tools keep their historical 1024-byte argument ceiling.
+- `trackedFields` are `{path,kind:'vitality'|'damage'|'condition'|'resource',label}`; paths are
+  1–16 own-property segments inside `attributes` (no prototype keys, no prefix overlaps) and must
+  already exist. At least one `vitality` or `damage` field is required. Values stay on the sheet.
+- `state.combat` becomes `{trackingVersion:1,id,active,round,participants:[{characterId,label,trackedFields}]}`.
+  State without `trackingVersion` is legacy and is never converted implicitly. An active encounter
+  ends only with `active:false`; a new encounter ID must come from `combat_prepare`.
+- v6 `roll_dice` requires `scope`: `combat` (`encounterId`, `combatKind`, prepared `actorId`;
+  attacks also `targetId`), `character`, or `oracle` (no actor/target). Participants of the
+  active/prepared encounter roll with combat scope. Prepared IDs are authorized by receipt; the
+  frozen session character list is unchanged.
+- A prepared NPC is created by its exact `create` operation with `characterId` and
+  `preparationReceiptId`. Response fields `combatEffects[{characterId,operationIndex,paths,reason,rollIds,afterParagraph}]`
+  and `participantReferences[{afterParagraph,characterIds}]` are required structures: every change
+  to a tracked path needs an effect on an attributes `set`; every effect and combat-roll participant
+  needs a paragraph reference. Errors: `combat_identity`, `combat_preparation_conflict`,
+  `combat_state`, `combat_effect`, `combat_reference`. Effect/reference/state paths are repairable;
+  prepared identities and receipts are not.
+- Committed turns expose `combatEffects` and `participantReferences`; receipts and drafts are never
+  in player projections. Manual PATCH cannot create, replace or remove the structured encounter
+  (an ended one may be removed); character edits keep tracked paths but may change values;
+  deleting an active participant returns 409.
+- Archive v7 adds `combatPreparations` and `combatPreparedCharacters` and remaps encounter,
+  receipt and participant IDs in state, snapshots, rolls, effects and references; free JSON and
+  text keep historical UUIDs. Versions 1–6 reject these fields. Templates never carry state.

@@ -7,8 +7,10 @@ import { BOOK_GAMEPLAY_NARRATOR, gameplayInstructionEnvelope } from './gameplayN
 import { selectRelevantKnowledge, freezeKnowledge } from './knowledgeRecall.js';
 import {
   KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
-  AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION,
+  usesAuditedContract,
+  usesCombatContract,
 } from './versions.js';
+import { combatTracking } from './combat.js';
 import { gameplayResponseContract } from './ruleResponse.js';
 import { RuleSystemKind, type RulePrompt } from './rules.js';
 import {
@@ -88,7 +90,7 @@ export function buildContext(
   responseVersion?: number,
   npcLookup = false
 ): ContextManifest {
-  const sourceContext = responseVersion === AUDITED_GAMEPLAY_RESPONSE_SCHEMA_VERSION;
+  const sourceContext = usesAuditedContract(responseVersion);
   const envelope = responseVersion === KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION || sourceContext;
   const frozenSources = sourceContext ? freezeCampaignSources(c) : undefined;
   const bootstrap =
@@ -142,9 +144,17 @@ export function buildContext(
     state: c.state,
     recent: format(turns.filter((t) => t.status === TurnStatus.Completed && !t.undone).slice(-3)),
   }).toLowerCase();
+  // Version 6: every participant of the current structured encounter is mandatory by ID.
+  const tracking = usesCombatContract(responseVersion) ? combatTracking(c.state) : undefined;
+  const participants = new Set(
+    tracking?.kind === 'structured' && tracking.encounter.active
+      ? tracking.encounter.participants.map((p) => p.characterId)
+      : []
+  );
   const relevantCharacters = c.characters.filter(
     (char) =>
       char.type === CharacterType.Player ||
+      participants.has(char.id) ||
       sceneTerms.includes(char.id.toLowerCase()) ||
       sceneTerms.includes(char.name.toLowerCase())
   );
@@ -232,7 +242,12 @@ export function buildContext(
   const prompt = JSON.stringify(payload);
   return {
     ...(envelope
-      ? { systemPrompt, promptContractVersion: sourceContext ? (5 as const) : (4 as const) }
+      ? {
+          systemPrompt,
+          promptContractVersion: sourceContext
+            ? (responseVersion as 5 | 6)
+            : (KNOWLEDGE_GAMEPLAY_RESPONSE_SCHEMA_VERSION as 4),
+        }
       : {}),
     ...(sourceContext
       ? {

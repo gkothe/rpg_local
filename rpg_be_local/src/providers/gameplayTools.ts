@@ -1,7 +1,18 @@
 import { z } from 'zod';
 import { withSuppliedRuleReads } from './ruleReadReuse.js';
-import { DICE_TOOL_NAME, diceInputSchema, type DiceResult } from '../domain/dice.js';
-import { RULE_TOOLS, serializedBytes, type RuleTool } from '../domain/rules.js';
+import {
+  DICE_LIMITS,
+  DICE_TOOL_NAME,
+  diceInputSchema,
+  diceInputV6Schema,
+  type DiceResult,
+} from '../domain/dice.js';
+import { RULE_LIMITS, RULE_TOOLS, serializedBytes, type RuleTool } from '../domain/rules.js';
+import {
+  COMBAT_PREPARATION_LIMITS,
+  COMBAT_PREPARE_TOOL_NAME,
+  combatPrepareSchema,
+} from '../domain/combat.js';
 import { ruleToolSchemas } from '../services/ruleLookup.js';
 import { Problem } from '../errors.js';
 import {
@@ -72,13 +83,32 @@ function definition(registration: GameplayToolRegistration): GameplayToolDefinit
     }) as GameplayToolDefinition['inputSchema'],
   };
 }
+/** Historical tools keep the original argument and envelope ceilings. */
+const RPC_ENVELOPE_BYTES = 512;
+/** Argument byte ceiling for one owned tool; only a v6 registry grants combat_prepare more. */
+export function gameplayToolRequestBytes(
+  definitions: readonly GameplayToolDefinition[],
+  name: string
+): number {
+  return name === COMBAT_PREPARE_TOOL_NAME &&
+    definitions.some((definition) => definition.name === name)
+    ? COMBAT_PREPARATION_LIMITS.requestBytes
+    : RULE_LIMITS.requestBytes;
+}
+/** Transport body ceiling: the largest owned argument plus its JSON-RPC envelope. */
+export function gameplayEnvelopeBytes(definitions: readonly GameplayToolDefinition[]): number {
+  return definitions.some((definition) => definition.name === COMBAT_PREPARE_TOOL_NAME)
+    ? COMBAT_PREPARATION_LIMITS.requestBytes + COMBAT_PREPARATION_LIMITS.rpcEnvelopeBytes
+    : DICE_LIMITS.inputBytes + RPC_ENVELOPE_BYTES;
+}
 function ownedRegistrations(
   roll: GameplayToolRegistration['handler'],
   read: GameplayTools['options']['read'],
   knowledge?: FrozenKnowledge,
   sourceRead?: GameplayTools['options']['readCampaignSource'],
   ruleFind = false,
-  assertActive: () => Promise<void> = async () => {}
+  assertActive: () => Promise<void> = async () => {},
+  prepareCombat?: GameplayTools['options']['prepareCombat']
 ): GameplayToolRegistration[] {
   const ruleRead = read && ruleFind ? withSuppliedRuleReads(read) : read;
   const recall = knowledge ? createKnowledgeRecall(knowledge) : undefined;
@@ -109,11 +139,25 @@ function ownedRegistrations(
           },
         ]
       : []),
+    ...(prepareCombat
+      ? [
+          {
+            name: COMBAT_PREPARE_TOOL_NAME,
+            description:
+              'Before combat dice, register each individual combatant in one batch: reuse saved characters by ID or prepare new NPC drafts that receive reserved IDs. Track the attribute paths that hold vitality/damage and optional conditions/resources. Idempotent by localKey; nothing is published until the final response creates and updates the sheets.',
+            schema: combatPrepareSchema,
+            purpose: 'default' as const,
+            capability: 'characters' as const,
+            handler: async (input: unknown) => prepareCombat(input),
+          },
+        ]
+      : []),
     {
       name: DICE_TOOL_NAME,
-      description:
-        'Request genuine persisted dice faces. Declare known modifiers/targets before sequential slots.',
-      schema: diceInputSchema,
+      description: prepareCombat
+        ? 'Request genuine persisted dice faces. Declare known modifiers/targets before sequential slots. Set scope: combat (encounterId, combatKind, prepared actorId; attacks need targetId), character, or oracle (no actor/target).'
+        : 'Request genuine persisted dice faces. Declare known modifiers/targets before sequential slots.',
+      schema: prepareCombat ? diceInputV6Schema : diceInputSchema,
       purpose: 'default',
       capability: 'dice',
       handler: roll,
@@ -242,6 +286,8 @@ export class GameplayTools {
         input: unknown,
         requestId: string
       ) => Promise<Record<string, unknown>>;
+      /** Present only for the version 6 contract. */
+      prepareCombat?: (input: unknown) => Promise<Record<string, unknown>>;
     }
   ) {
     if (options.book && !options.read)
@@ -258,7 +304,8 @@ export class GameplayTools {
           if (options.signal?.aborted)
             throw new Problem(409, 'cancelled', 'Gameplay attempt cancelled');
           await options.assertActive();
-        }
+        },
+        options.prepareCombat
       )
     ).filter((tool) => options.book || tool.purpose === 'default');
     if (new Set(this.registrations.map((tool) => tool.name)).size !== this.registrations.length)
