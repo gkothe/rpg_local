@@ -67,12 +67,14 @@ test('real production NIC-origin device pairing, secure cookie, reload and revok
     await expect(mobile.getByRole('dialog')).not.toBeVisible();
     await expect(mobile.getByLabel('Your action')).toHaveValue('Preserve my unsent phone action');
     await mobile.getByRole('button', { name: 'Journal', exact: true }).click();
-    await mobile.getByLabel('Personal notes').fill('Saved from a paired LAN browser.');
+    await mobile
+      .getByRole('textbox', { name: /Personal notes/ })
+      .fill('Saved from a paired LAN browser.');
     await mobile.getByRole('button', { name: 'Save notes' }).click();
     await expect(mobile.getByText('Changes saved.', { exact: true })).toBeVisible();
     await mobile.reload();
     await mobile.getByRole('button', { name: 'Journal', exact: true }).click();
-    await expect(mobile.getByLabel('Personal notes')).toHaveValue(
+    await expect(mobile.getByRole('textbox', { name: /Personal notes/ })).toHaveValue(
       'Saved from a paired LAN browser.'
     );
     expect([...apiOrigins]).toEqual([new URL(phoneUrl).origin]);

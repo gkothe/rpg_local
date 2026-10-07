@@ -80,6 +80,7 @@ it('searches and toggles past items through the server, keeping notes drafts unt
   );
   const notes = screen.getAllByRole('textbox')[0]!;
   fireEvent.change(notes, { target: { value: 'my draft' } });
+  fireEvent.click(screen.getByRole('tab', { name: 'Campaign knowledge' }));
   await screen.findByText('Mira runs the inn.');
   fireEvent.change(screen.getByLabelText('Search knowledge'), { target: { value: 'mira' } });
   await waitFor(() =>

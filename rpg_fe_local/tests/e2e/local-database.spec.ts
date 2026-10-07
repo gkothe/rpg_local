@@ -49,12 +49,14 @@ test('real isolated PostgreSQL manual campaign, source, notes and archive round 
   await expect(page.getByText(/confirmed.*version/)).toBeVisible();
   await page.getByRole('button', { name: 'Journal', exact: true }).click();
   await page.getByRole('button', { name: 'Reload current journal' }).click();
-  await page.getByLabel('Personal notes').fill('Private smoke note');
+  await page.getByRole('textbox', { name: /Personal notes/ }).fill('Private smoke note');
   await page.getByRole('button', { name: 'Save notes' }).click();
   await expect(page.getByRole('status')).toHaveText('Changes saved.');
   await page.reload();
   await page.getByRole('button', { name: 'Journal', exact: true }).click();
-  await expect(page.getByLabel('Personal notes')).toHaveValue('Private smoke note');
+  await expect(page.getByRole('textbox', { name: /Personal notes/ })).toHaveValue(
+    'Private smoke note'
+  );
   page.once('dialog', (dialog) => dialog.accept(`${name} template`));
   await page.getByRole('button', { name: 'Utility', exact: true }).click();
   await page.getByRole('button', { name: 'Save campaign template' }).click();
@@ -70,7 +72,9 @@ test('real isolated PostgreSQL manual campaign, source, notes and archive round 
   await expect(page.getByRole('heading', { name })).toBeVisible();
   expect(page.url()).not.toBe(originalUrl);
   await page.getByRole('button', { name: 'Journal', exact: true }).click();
-  await expect(page.getByLabel('Personal notes')).toHaveValue('Private smoke note');
+  await expect(page.getByRole('textbox', { name: /Personal notes/ })).toHaveValue(
+    'Private smoke note'
+  );
   await page.getByRole('button', { name: 'Characters', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Smoke character player' })).toHaveCount(2);
   await page.getByRole('link', { name: 'Back to library' }).click();

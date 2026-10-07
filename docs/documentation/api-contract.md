@@ -82,8 +82,9 @@ is retired from campaign DTOs and PATCH requests; migration 0013 removes it with
 text. Archives no longer accept it; frozen historical prompts remain unchanged.
 The GM does not update Description automatically.
 GM auxiliary state and its JSON editor/save action also live in Game master. The Journal
-retains campaign memory and private notes; manual memory replacement and saved context inspection
-are currently hidden.
+organizes Personal notes, Campaign knowledge, Campaign memory and History recall into nested
+tabs. Switching Journal sections preserves drafts; links to a knowledge entry open Campaign
+knowledge. Manual memory replacement and saved context inspection are currently hidden.
 Automatic memory summaries request bullet points in the existing `text` field, with
 one `- ` item per line. Journal renders bullet-only summaries as lists and retains paragraph
 display for older summaries. The format instruction preserves the same information and detail

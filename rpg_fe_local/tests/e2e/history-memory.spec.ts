@@ -163,6 +163,7 @@ test('search, originals, protection, prepare, review, activate and turn off', as
   const api = await mockApi(page);
   page.on('dialog', (dialog) => void dialog.accept());
   await page.goto(`/campaigns/${campaign.id}?tab=journal`);
+  await page.getByRole('tab', { name: 'History recall' }).click();
   await expect(page.getByText('The arena', { exact: true })).toBeVisible();
   await expect(page.getByText('Selective history is off.')).toBeVisible();
   await page.getByRole('button', { name: 'Show originals' }).click();
@@ -171,6 +172,7 @@ test('search, originals, protection, prepare, review, activate and turn off', as
   await expect(page.getByRole('button', { name: 'Unprotect', exact: true })).toBeVisible();
   // Reload keeps the protection because the server owns it.
   await page.reload();
+  await page.getByRole('tab', { name: 'History recall' }).click();
   await expect(page.getByRole('button', { name: 'Unprotect', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Prepare compact history' }).click();
   await expect(page.getByText('Review before activating')).toBeVisible({ timeout: 10_000 });
@@ -188,6 +190,7 @@ test('history panel fits a phone without horizontal scrolling', async ({ page })
   await mockApi(page);
   await page.setViewportSize({ width: 360, height: 800 });
   await page.goto(`/campaigns/${campaign.id}?tab=journal`);
+  await page.getByRole('tab', { name: 'History recall' }).click();
   await expect(page.getByText('The arena', { exact: true })).toBeVisible();
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth

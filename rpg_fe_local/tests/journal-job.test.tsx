@@ -208,6 +208,7 @@ it('leaves unsaved notes untouched while a task runs and progresses', async () =
   );
   const notes = screen.getAllByRole('textbox')[0]!;
   fireEvent.change(notes, { target: { value: 'my unsaved draft' } });
+  fireEvent.click(screen.getByRole('tab', { name: 'Campaign knowledge' }));
   open();
   fireEvent.click(startButton());
   await screen.findByText(/Working: 0 of 5/);

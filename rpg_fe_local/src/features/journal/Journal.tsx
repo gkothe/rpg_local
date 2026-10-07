@@ -1,5 +1,5 @@
 import { isCompleted } from '../../services/options';
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { CampaignDetail, Settings } from '../../services/types';
 import { Field, ErrorNotice } from '../../components/Controls';
 import { request, json, errorMessage } from '../../services/client';
@@ -8,6 +8,14 @@ import JournalKnowledge from './JournalKnowledge';
 import MemoryRebuild from './MemoryRebuild';
 import { MemoryText } from './MemoryText';
 import HistoryMemory from './HistoryMemory';
+const JOURNAL_TABS = [
+  { id: 'notes', label: 'Personal notes' },
+  { id: 'knowledge', label: 'Campaign knowledge' },
+  { id: 'memory', label: 'Campaign memory' },
+  { id: 'history', label: 'History recall' },
+] as const;
+type JournalTab = (typeof JOURNAL_TABS)[number]['id'];
+
 export default function Journal({
   campaign,
   onSaved,
@@ -22,6 +30,13 @@ export default function Journal({
   /** Knowledge loads only while the Journal tab is visible; notes drafts stay mounted. */
   active?: boolean;
 }) {
+  const tabId = useId();
+  const [tab, setTab] = useState<JournalTab>(initialEntryId ? 'knowledge' : 'notes');
+  const [entryTarget, setEntryTarget] = useState(initialEntryId);
+  if (entryTarget !== initialEntryId) {
+    setEntryTarget(initialEntryId);
+    if (initialEntryId) setTab('knowledge');
+  }
   const baseRevision = useRef(campaign.revision),
     baseNotesRevision = useRef(campaign.notesRevision),
     savingGuard = useRef(false);
@@ -68,7 +83,43 @@ export default function Journal({
       >
         Reload current journal
       </button>
-      <div className="panel stack">
+      <div className="tabs" role="tablist" aria-label="Journal sections">
+        {JOURNAL_TABS.map(({ id, label }, index) => (
+          <button
+            key={id}
+            id={`${tabId}-tab-${id}`}
+            role="tab"
+            aria-selected={tab === id}
+            aria-controls={`${tabId}-panel-${id}`}
+            tabIndex={tab === id ? 0 : -1}
+            className={tab === id ? 'selected' : ''}
+            onClick={() => setTab(id)}
+            onKeyDown={(event) => {
+              let next: number;
+              if (event.key === 'ArrowRight') next = (index + 1) % JOURNAL_TABS.length;
+              else if (event.key === 'ArrowLeft')
+                next = (index + JOURNAL_TABS.length - 1) % JOURNAL_TABS.length;
+              else if (event.key === 'Home') next = 0;
+              else if (event.key === 'End') next = JOURNAL_TABS.length - 1;
+              else return;
+              event.preventDefault();
+              const nextTab = JOURNAL_TABS[next]!.id;
+              setTab(nextTab);
+              document.getElementById(`${tabId}-tab-${nextTab}`)?.focus();
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div
+        className="panel stack"
+        role="tabpanel"
+        id={`${tabId}-panel-notes`}
+        aria-labelledby={`${tabId}-tab-notes`}
+        hidden={tab !== 'notes'}
+        tabIndex={0}
+      >
         <Field label="Personal notes" hint="Private notes are not sent to the GM.">
           <textarea rows={6} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
@@ -83,96 +134,121 @@ export default function Journal({
           Save notes
         </button>
       </div>
-      {active && (
-        <JournalKnowledge
-          campaignId={campaign.id}
-          revision={campaign.revision}
-          options={options}
-          initialEntryId={initialEntryId}
-          onChanged={() => void onSaved()}
-        />
-      )}
-      <div className="panel stack">
-        <h3>Campaign memory</h3>
-        <MemoryText
-          text={
-            campaign.memory?.valid ? campaign.memory.text : 'No campaign memory checkpoint yet.'
-          }
-        />
-        <small className="muted">
-          Memory is a compact record; character state is saved separately. Full turns remain in your
-          transcript.
-        </small>
-        <MemoryRebuild
-          campaignId={campaign.id}
-          options={options}
-          active={active}
-          onApplied={onSaved}
-        />
+      <div
+        role="tabpanel"
+        id={`${tabId}-panel-knowledge`}
+        aria-labelledby={`${tabId}-tab-knowledge`}
+        hidden={tab !== 'knowledge'}
+        tabIndex={0}
+      >
+        {active && (
+          <JournalKnowledge
+            campaignId={campaign.id}
+            revision={campaign.revision}
+            options={options}
+            initialEntryId={initialEntryId}
+            onChanged={() => void onSaved()}
+          />
+        )}
       </div>
-
-      <details className="panel" hidden>
-        <summary>Advanced: replace campaign memory</summary>
-        <div className="stack">
-          <p>
-            Only confirm events you have read. This checkpoint replaces the covered transcript in
-            future prompts.
-          </p>
-          <Field label="Replacement memory">
-            <textarea rows={6} value={memory} onChange={(e) => setMemory(e.target.value)} />
-          </Field>
-          <fieldset>
-            <legend>Covered completed turns (consecutive prefix required)</legend>
-            {campaign.turns
-              .filter((t) => isCompleted(t, options) && !t.undone)
-              .map((t) => (
-                <label className="check" key={t.id}>
-                  <input
-                    type="checkbox"
-                    checked={coverage.includes(t.id)}
-                    onChange={(e) =>
-                      setCoverage(
-                        e.target.checked
-                          ? [...coverage, t.id]
-                          : coverage.filter((id) => id !== t.id)
-                      )
-                    }
-                  />
-                  {t.action}
-                </label>
-              ))}
-          </fieldset>
-          <button
-            disabled={!memory.trim() || !coverage.length}
-            onClick={async () => {
-              if (!confirm('Confirm that the memory accurately covers every selected turn?'))
-                return;
-              try {
-                await request(
-                  `/campaigns/${campaign.id}/memory`,
-                  json('POST', {
-                    revision: campaign.revision,
-                    text: memory,
-                    coveredTurnIds: campaign.turns
-                      .filter(
-                        (t) => isCompleted(t, options) && !t.undone && coverage.includes(t.id)
-                      )
-                      .map((t) => t.id),
-                    confirm: true,
-                  })
-                );
-                await onSaved();
-                setError('');
-              } catch (e) {
-                setError(errorMessage(e));
-              }
-            }}
-          >
-            Confirm memory checkpoint
-          </button>
+      <div
+        className="stack"
+        role="tabpanel"
+        id={`${tabId}-panel-memory`}
+        aria-labelledby={`${tabId}-tab-memory`}
+        hidden={tab !== 'memory'}
+        tabIndex={0}
+      >
+        <div className="panel stack">
+          <h3>Campaign memory</h3>
+          <MemoryText
+            text={
+              campaign.memory?.valid ? campaign.memory.text : 'No campaign memory checkpoint yet.'
+            }
+          />
+          <small className="muted">
+            Memory is a compact record; character state is saved separately. Full turns remain in
+            your transcript.
+          </small>
+          <MemoryRebuild
+            campaignId={campaign.id}
+            options={options}
+            active={active}
+            onApplied={onSaved}
+          />
         </div>
-      </details>
-      <HistoryMemory campaign={campaign} options={options} active={active} onChanged={onSaved} />
+
+        <details className="panel" hidden>
+          <summary>Advanced: replace campaign memory</summary>
+          <div className="stack">
+            <p>
+              Only confirm events you have read. This checkpoint replaces the covered transcript in
+              future prompts.
+            </p>
+            <Field label="Replacement memory">
+              <textarea rows={6} value={memory} onChange={(e) => setMemory(e.target.value)} />
+            </Field>
+            <fieldset>
+              <legend>Covered completed turns (consecutive prefix required)</legend>
+              {campaign.turns
+                .filter((t) => isCompleted(t, options) && !t.undone)
+                .map((t) => (
+                  <label className="check" key={t.id}>
+                    <input
+                      type="checkbox"
+                      checked={coverage.includes(t.id)}
+                      onChange={(e) =>
+                        setCoverage(
+                          e.target.checked
+                            ? [...coverage, t.id]
+                            : coverage.filter((id) => id !== t.id)
+                        )
+                      }
+                    />
+                    {t.action}
+                  </label>
+                ))}
+            </fieldset>
+            <button
+              disabled={!memory.trim() || !coverage.length}
+              onClick={async () => {
+                if (!confirm('Confirm that the memory accurately covers every selected turn?'))
+                  return;
+                try {
+                  await request(
+                    `/campaigns/${campaign.id}/memory`,
+                    json('POST', {
+                      revision: campaign.revision,
+                      text: memory,
+                      coveredTurnIds: campaign.turns
+                        .filter(
+                          (t) => isCompleted(t, options) && !t.undone && coverage.includes(t.id)
+                        )
+                        .map((t) => t.id),
+                      confirm: true,
+                    })
+                  );
+                  await onSaved();
+                  setError('');
+                } catch (e) {
+                  setError(errorMessage(e));
+                }
+              }}
+            >
+              Confirm memory checkpoint
+            </button>
+          </div>
+        </details>
+      </div>
+      <div
+        role="tabpanel"
+        id={`${tabId}-panel-history`}
+        aria-labelledby={`${tabId}-tab-history`}
+        hidden={tab !== 'history'}
+        tabIndex={0}
+      >
+        <HistoryMemory campaign={campaign} options={options} active={active} onChanged={onSaved} />
+      </div>
       <details
         className="panel"
         hidden

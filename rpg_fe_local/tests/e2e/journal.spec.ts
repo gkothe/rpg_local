@@ -227,27 +227,19 @@ async function mockApi(page: Page) {
   return { requests };
 }
 
-test('knowledge sits below unsaved notes, filters without losing them and links to old conversations', async ({
+test('knowledge has its own tab, preserves notes while filtering and links to old conversations', async ({
   page,
   context,
 }) => {
   await mockApi(page);
   await page.goto(`/campaigns/${campaign.id}?tab=journal`);
-  const notes = page.getByRole('textbox').first();
+  const notes = page.getByLabel('Personal notes').and(page.locator('textarea'));
   await notes.fill('my unsaved draft');
+  await page.getByRole('tab', { name: 'Campaign knowledge' }).click();
   await expect(page.getByRole('heading', { name: 'Mira', level: 5 })).toBeVisible();
-  // Placement: notes, then knowledge, then campaign memory.
-  const order = await page.evaluate(() => {
-    const knowledge = document.querySelector('.journal-knowledge')!;
-    const textarea = document.querySelector('textarea')!;
-    const memory = [...document.querySelectorAll('h3')].find(
-      (h) => h.textContent === 'Campaign memory'
-    )!;
-    const before = (a: Element, b: Element) =>
-      !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    return [before(textarea, knowledge), before(knowledge, memory)];
-  });
-  expect(order).toEqual([true, true]);
+  await expect(page.getByRole('tab')).toHaveCount(4);
+  await expect(page.getByRole('tabpanel', { name: 'Campaign knowledge' })).toBeVisible();
+  await expect(notes).toBeHidden();
   await expect(page.getByRole('region', { name: 'People and places' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Unfinished business' })).toBeVisible();
   await expect(page.getByText('Returned the healer book.')).toBeHidden();
@@ -306,13 +298,18 @@ test('backfill and correction flows run without gameplay writes or hidden text',
   const { requests } = await mockApi(page);
   await page.goto(`/campaigns/${campaign.id}?tab=journal`);
   await page.getByRole('textbox').first().fill('keep this draft');
+  await page.getByRole('tab', { name: 'Campaign knowledge' }).click();
   await page.locator('details.journal-fill > summary').click();
   await expect(page.getByText(/uses your provider allowance/)).toBeVisible();
   await page.getByRole('button', { name: 'Fill from past conversations' }).click();
   await expect(page.getByText(/Working: 0 of 4 conversations checked/)).toBeVisible();
   await expect(page.getByText(/Finished: 1 added, 0 skipped\./)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole('heading', { name: 'Recovered promise', level: 5 })).toBeVisible();
-  await expect(page.getByRole('textbox').first()).toHaveValue('keep this draft');
+  await page.getByRole('tab', { name: 'Personal notes' }).click();
+  await expect(page.getByRole('textbox', { name: /Personal notes/ })).toHaveValue(
+    'keep this draft'
+  );
+  await page.getByRole('tab', { name: 'Campaign knowledge' }).click();
 
   await page.getByRole('button', { name: 'Details for Mira' }).click();
   await page.getByRole('button', { name: 'Flag a mistake' }).click();

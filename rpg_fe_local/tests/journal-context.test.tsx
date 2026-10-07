@@ -21,6 +21,7 @@ it('renders memory bullet points as list items while keeping legacy paragraphs r
     createdAt: new Date().toISOString(),
   };
   const view = render(<Journal campaign={campaign} options={options} onSaved={async () => {}} />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Campaign memory' }));
   expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
     'Marta has the key.',
     'The gate remains locked.',

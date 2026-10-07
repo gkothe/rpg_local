@@ -100,11 +100,13 @@ async function mockApi(page: import('@playwright/test').Page) {
 test('rebuild progress, reload recovery, review and apply', async ({ page }) => {
   const api = await mockApi(page);
   await page.goto(`/campaigns/${campaign.id}?tab=journal`);
+  await page.getByRole('tab', { name: 'Campaign memory' }).click();
   await expect(page.getByText('Old thin summary').first()).toBeVisible();
   await page.getByRole('button', { name: 'Rebuild memory' }).click();
   await expect(page.getByText(/Rebuilding: 1 of 3 turns summarized/)).toBeVisible();
   // Leaving and returning restores the running job instead of starting another.
   await page.reload();
+  await page.getByRole('tab', { name: 'Campaign memory' }).click();
   await expect(page.getByText(/Rebuilding: 1 of 3 turns summarized/)).toBeVisible();
   await expect(page.getByText('Ready to review')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Covers 3 turns.')).toBeVisible();

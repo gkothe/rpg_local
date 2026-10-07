@@ -23,13 +23,36 @@ it('shows the Rebuild memory control under the memory text and keeps notes draft
     createdAt: new Date().toISOString(),
   };
   const view = render(<Journal campaign={campaign} options={options} onSaved={async () => {}} />);
+  fireEvent.change(screen.getByLabelText(/Personal notes/, { selector: 'textarea' }), {
+    target: { value: 'my draft' },
+  });
+  fireEvent.click(screen.getByRole('tab', { name: 'Campaign memory' }));
   const button = await screen.findByRole('button', { name: 'Rebuild memory' });
   await waitFor(() => expect(button).toBeEnabled());
   expect(button.closest('details')).toBeNull();
-  fireEvent.change(screen.getByLabelText(/Personal notes/), { target: { value: 'my draft' } });
   view.rerender(
     <Journal campaign={{ ...campaign, revision: 2 }} options={options} onSaved={async () => {}} />
   );
-  expect(screen.getByLabelText(/Personal notes/)).toHaveValue('my draft');
+  expect(screen.getByLabelText(/Personal notes/, { selector: 'textarea' })).toHaveValue('my draft');
   expect(screen.getByText('Marta has the key.')).toBeInTheDocument();
+});
+
+it('shows one Journal section at a time and supports keyboard tab navigation', () => {
+  render(<Journal campaign={fixtureCampaign()} options={options} onSaved={async () => {}} />);
+  expect(screen.getAllByRole('tab')).toHaveLength(4);
+  expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+  expect(screen.getByRole('tabpanel', { name: 'Personal notes' })).toBeVisible();
+  const notes = screen.getByLabelText(/Personal notes/, { selector: 'textarea' });
+  fireEvent.change(notes, { target: { value: 'Keep my notes' } });
+  const notesTab = screen.getByRole('tab', { name: 'Personal notes' });
+  fireEvent.keyDown(notesTab, { key: 'ArrowRight' });
+  expect(screen.getByRole('tab', { name: 'Campaign knowledge' })).toHaveFocus();
+  expect(screen.getByRole('tabpanel', { name: 'Campaign knowledge' })).toBeVisible();
+  expect(notes).not.toBeVisible();
+  fireEvent.keyDown(screen.getByRole('tab', { name: 'Campaign knowledge' }), { key: 'End' });
+  expect(screen.getByRole('tab', { name: 'History recall' })).toHaveFocus();
+  expect(screen.getByRole('tabpanel', { name: 'History recall' })).toBeVisible();
+  fireEvent.keyDown(screen.getByRole('tab', { name: 'History recall' }), { key: 'Home' });
+  expect(notes).toBeVisible();
+  expect(notes).toHaveValue('Keep my notes');
 });
