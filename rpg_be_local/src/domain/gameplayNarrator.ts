@@ -3,7 +3,7 @@ import { NARRATIVE_READABILITY_GUIDANCE } from './narrativeWriting.js';
 // Adapted from humanizer for gameplay prose, not its editorial workflow.
 export const GAMEPLAY_WRITING_GUIDANCE = `Narrative writing guidance:
 ${NARRATIVE_READABILITY_GUIDANCE}
-- Try no to go over 250 words per turn; less when enough, longer only for necessary information or requested detail.
+- Try no to go over 300 words per turn; less when enough, longer only for necessary information or requested detail.
 - Apply only to new narration/dialogue. Concrete details, direct verbs, varied sentence lengths; distinct NPC voices fitting scene.
 - Observable situation first. One or two concrete sensory details per scene; no stacked metaphors. Each paragraph advances scene or informs decisions.
 - No chatbot greetings, reflexive praise/agreement, inflated significance, filler, repeated summaries, forced threes or formulaic contrasts.
