@@ -13,6 +13,7 @@ The app keeps campaigns, characters and game history in a local PostgreSQL datab
 - Keep reusable rule libraries, or play with the instructions-only **Model knowledge** default. The GM interprets the rules; the app supplies original book text through lookup tools.
 - Roll dice automatically through an app-owned tool. The backend generates and saves the faces; the GM explains the result and applies the rules.
 - Save important campaign facts and NPCs as play unfolds. The GM can recall them in later turns, including after a provider switch.
+- Browse what your character knows in the **Journal**: people and places, unfinished business and discoveries, with one search, completed items collapsed, and links back to the conversation or source quote. Entries come from normal play; reading and searching never call the AI.
 - Undo completed turns, retry failed turns with their saved dice, export/import campaigns and save templates. Rule libraries have a separate backup.
 - Dictate an action with local Faster-Whisper, edit the transcript and send it. Read GM replies aloud using an installed browser/OS voice.
 
@@ -58,6 +59,16 @@ System instructions are the main GM guidance. Campaign **GM instructions** are o
 A new player action starts a fresh provider conversation assembled from the saved campaign. Tool calls and their follow-up reasoning stay in that conversation until the GM finishes. The app validates the final response before saving game changes. Malformed responses can receive up to two automatic correction attempts. Cancel remains available while the GM works.
 
 Dice faces survive a failed attempt. **Retry with saved dice** continues the original action when its context is still compatible. It does not reroll saved faces. Changing campaign state or rules can make an older retry unavailable. Dice integrity and validated JSON do not guarantee correct narration or rule interpretation.
+
+## The Journal
+
+The Journal tab shows, below your private notes, only what your character has learned. Reported rumors are labeled, your own suspicions are never recorded as facts, and hidden GM information never appears. Completed items collapse to a short line; open **Details** for the full text, connections, sources and history.
+
+- **Fill from past conversations** asks the selected campaign CLI/model to read all saved conversations in order and add missing people, places and unfinished business. It uses your provider allowance, can take a while across a long campaign, and adds entries only when it finishes; cancelling or failing adds nothing. Running it again fills only what is still missing. While it runs you cannot play, retry or undo (your notes stay editable).
+- **Flag a mistake** on an entry checks your saved conversations and proposes a correction with the exact quotes it relies on. Nothing changes until you accept; inconclusive results propose nothing. An accepted correction updates the GM's canonical knowledge, is kept in the entry's history, and never rewrites the original conversation, sheets or inventory. It also retires existing memory summaries so they are regenerated with the correction.
+- Undo will not overwrite an accepted correction or remove a conversation one relies on; it explains the conflict instead. Undoing a turn also rewinds anything recovered from it.
+
+Backups include this history; campaign templates do not. Mocked checks cannot show how well a particular model classifies significance, so review recovered entries and corrections yourself.
 
 ## Your data
 

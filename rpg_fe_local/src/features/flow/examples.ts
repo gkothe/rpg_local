@@ -342,3 +342,33 @@ export const combatProposal = {
     { afterParagraph: 2, characterIds: [ids.player, combatIds.soldierA] },
   ],
 };
+
+// Journal teaching fixture: one flagged fact, the evidence that contradicts it and the accepted fix.
+export const journalIds = {
+  record: '99999999-0000-4000-8000-000000000001',
+  olderTurn: '99999999-0000-4000-8000-000000000002',
+  newerTurn: '99999999-0000-4000-8000-000000000003',
+  job: '99999999-0000-4000-8000-000000000004',
+};
+export const journalExample = {
+  record: {
+    id: journalIds.record,
+    title: 'Mira',
+    text: 'Mira is the innkeeper, employed by Ada.',
+  },
+  turns: [
+    {
+      id: journalIds.olderTurn,
+      action: 'I ask about her work',
+      narrative: 'Mira works for Ada at the inn, she says.',
+    },
+    {
+      id: journalIds.newerTurn,
+      action: 'I listen',
+      narrative: 'Mira admits she is a sister of the temple.',
+    },
+  ],
+  flagged: 'Mira is a sister of the temple, not an innkeeper.',
+  quote: 'sister of the temple',
+  correctedText: 'Mira is a sister of the temple.',
+};

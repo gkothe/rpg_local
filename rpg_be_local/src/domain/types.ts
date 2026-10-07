@@ -1,4 +1,5 @@
 import type { CampaignKnowledge, SourceSpan } from './knowledge.js';
+import type { JournalLedger } from './journalLedger.js';
 import type {
   FrozenCampaignSources,
   SourceSelectionDiagnostics,
@@ -64,6 +65,8 @@ export type Memory = {
 };
 export type Campaign = {
   knowledge?: CampaignKnowledge[];
+  /** Private audit ledger of Journal backfills and accepted corrections; never in player DTOs. */
+  journal?: JournalLedger;
   ruleSystemId?: string | null;
   ruleReference?: RuleReference;
   ruleResolution?: { status: 'unresolved'; reference: RuleReference };

@@ -644,6 +644,21 @@ export const storageItems: FlowItem[] = [
     '2.7',
     ['rpg_be_local/src/services/ruleLibrary.ts', 'rpg_be_local/src/services/ruleUpload.ts']
   ),
+  item(
+    'journal',
+    'Journal ledger & jobs',
+    'The Journal shows what your character knows from saved knowledge. Optional backfill and correction jobs add a private ledger of what changed and why.',
+    'When you open the Journal, run Fill from past conversations, or flag and accept a correction.',
+    'Your saved conversations and the facts your character can see, never private notes, hidden GM knowledge or your own suspicions.',
+    'New entries, or one corrected fact with its exact quotes, a before and after value and a retained history.',
+    'Journal jobs live in journal_jobs and finish only when you start them, so a failed or cancelled run adds nothing. The ledger is stored in the campaign document and travels with backups, not templates. Accepting a correction retires memory summaries and changes the facts the next GM context uses.',
+    '2.12',
+    [
+      'rpg_be_local/src/services/journal.ts',
+      'rpg_be_local/src/domain/journalChanges.ts',
+      'rpg_be_local/src/domain/journalCompatibility.ts',
+    ]
+  ),
 ];
 export const branches = [
   {
@@ -665,6 +680,11 @@ export const branches = [
     label: 'Archives & templates',
     text: 'Archives include private notes, unrevealed GM knowledge and combat preparation receipts but leave out original binary files. Import assigns new IDs to structured records and refuses files exported by an older app. Saved templates may contain notes; creating a campaign from a template clears those notes and leaves out the played knowledge timeline.',
     section: '2.8',
+  },
+  {
+    label: 'Journal backfill & corrections',
+    text: 'You can ask the selected CLI to read every saved conversation in order and add missing people, places and unfinished business, or to check one fact you flag. Both run sequentially outside gameplay, make no turns or dice rolls, and commit nothing unless they finish. A correction is proposed with exact quotes and changes the record only after you accept it. Old conversations are never rewritten.',
+    section: '2.12',
   },
   {
     label: 'Prompt logs & privacy',

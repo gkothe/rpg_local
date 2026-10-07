@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { databaseUrl } from './config.js';
 import { conflict, Problem } from './errors.js';
 import type { Campaign, Turn, Memory, Snapshot } from './domain/types.js';
+import { frozenContextConflict } from './domain/journalCompatibility.js';
+import type { KnowledgeSnapshotVersion } from './domain/journalProjection.js';
 import { SourceStatus, TurnStatus } from './domain/options.js';
 import type { DiceRecord } from './domain/dice.js';
 import { DEFAULT_RULE_SYSTEM_ID, type RuleRead } from './domain/rules.js';
@@ -175,9 +177,10 @@ export class Store {
             ? 'This attempt predates the current game contract; start a new action'
             : latest.rows[0]?.id !== turn.id
               ? 'A later action superseded this attempt'
-              : outdatedRules || campaign.ruleResolution
-                ? 'Rule library changed or is unresolved; start a new action after selecting current rules'
-                : null;
+              : (frozenContextConflict(session.frozen_knowledge, campaign) ??
+                (outdatedRules || campaign.ruleResolution
+                  ? 'Rule library changed or is unresolved; start a new action after selecting current rules'
+                  : null));
       if (turn.editingPending) {
         turn.editingResume = { available: reason === null, reason };
         delete turn.diceRetry;
@@ -223,12 +226,45 @@ export class Store {
       t.status,
     ]);
   }
-  async assertIdle(id: string, client: PoolClient): Promise<void> {
+  /** A running Journal job owns the campaign; `exemptJournalJobId` lets that job's own commit through. */
+  async assertIdle(id: string, client: PoolClient, exemptJournalJobId?: string): Promise<void> {
     const r = await client.query(
       "SELECT id FROM turns WHERE campaign_id=$1 AND (status IN ($2,$3) OR document->>'editingPending'='true')",
       [id, TurnStatus.Pending, TurnStatus.Running]
     );
     if (r.rowCount) throw conflict('Wait for or cancel the active turn first');
+    const journal = await client.query(
+      "SELECT id FROM journal_jobs WHERE campaign_id=$1 AND status IN ('pending','running') AND ($2::uuid IS NULL OR id<>$2::uuid)",
+      [id, exemptJournalJobId ?? null]
+    );
+    if (journal.rowCount)
+      throw new Problem(
+        409,
+        'journal_busy',
+        'Wait for or cancel the Journal task first (Journal tab)'
+      );
+  }
+  /** Stored before/after versions of one record from non-undone turns, oldest first. */
+  async knowledgeSnapshots(
+    campaignId: string,
+    knowledgeId: string
+  ): Promise<KnowledgeSnapshotVersion[]> {
+    const r = await this.pool.query(
+      "SELECT s.turn_id,s.document FROM snapshots s JOIN turns t ON t.id=s.turn_id AND t.campaign_id=s.campaign_id WHERE s.campaign_id=$1 AND s.document->'afterKnowledge' @> $2::jsonb AND NOT COALESCE((t.document->>'undone')::boolean,false) ORDER BY t.created_at,t.id",
+      [campaignId, JSON.stringify([{ id: knowledgeId }])]
+    );
+    return r.rows.flatMap((row) => {
+      const doc = row.document as Snapshot;
+      const after = doc.afterKnowledge?.find((k) => k.id === knowledgeId);
+      if (!after) return [];
+      return [
+        {
+          turnId: row.turn_id as string,
+          before: doc.beforeKnowledge?.find((k) => k.id === knowledgeId) ?? null,
+          after,
+        },
+      ];
+    });
   }
   async edit(
     id: string,
@@ -261,7 +297,11 @@ export class Store {
         'The app restarted during this turn; use Retry to preserve its recorded dice',
       ]
     );
-    return r.rowCount ?? 0;
+    // Journal jobs whose owner lease expired cannot commit; surface them for an explicit retry.
+    const journal = await this.pool.query(
+      "UPDATE journal_jobs SET status='interrupted',owner=NULL,lease_until=NULL,updated_at=now(),safe_error='The app restarted during this Journal task; retry it.',error_code='journal_interrupted' WHERE status IN ('pending','running') AND (lease_until IS NULL OR lease_until < now())"
+    );
+    return (r.rowCount ?? 0) + (journal.rowCount ?? 0);
   }
   async reindex(c: Campaign, client: PoolClient): Promise<void> {
     await client.query('DELETE FROM source_chunks WHERE campaign_id=$1', [c.id]);

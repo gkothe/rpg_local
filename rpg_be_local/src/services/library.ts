@@ -66,6 +66,8 @@ import {
   type CampaignKnowledge,
 } from '../domain/knowledge.js';
 import { frozenKnowledgeSchema, type FrozenKnowledge } from '../domain/knowledgeRecall.js';
+import { JournalEventKind } from '../domain/journal.js';
+import { eventDigest, journalLedgerSchema, sha256 } from '../domain/journalLedger.js';
 /** Identifies a Local RPG campaign export; any other JSON document is rejected. */
 export const ARCHIVE_FORMAT_ID = 'local-rpg';
 const uuid = z.uuid();
@@ -161,6 +163,8 @@ const campaign = z
     state: object,
     memory: memory.nullable(),
     knowledge: z.array(campaignKnowledgeSchema),
+    // Optional: archives exported before the Journal ledger carry none and import with an empty one.
+    journal: journalLedgerSchema.optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -274,6 +278,50 @@ const archiveSchema = z
     combatPreparedCharacters: z.array(combatPreparedCharacterArchiveSchema),
   })
   .strict();
+
+/** Journal evidence must still match the archived final transcript; undone turns remain audit-only. */
+function validateJournalArchive(archive: z.infer<typeof archiveSchema>): void {
+  const ledger = archive.campaign.journal;
+  if (!ledger) return;
+  const invalid = (detail: string) => new Problem(422, 'archive_invalid', detail);
+  const turns = new Map(archive.turns.map((t) => [t.id, t]));
+  const quote = (e: {
+    turnId: string;
+    field: 'action' | 'narrative';
+    quote: string;
+    start: number;
+    end: number;
+    digest: string;
+  }) => {
+    const turn = turns.get(e.turnId);
+    if (!turn) throw invalid('Journal evidence references a missing conversation');
+    const text = e.field === 'action' ? turn.action : (turn.narrative ?? '');
+    if (text.slice(e.start, e.end) !== e.quote || sha256(text) !== e.digest)
+      throw invalid('Journal evidence no longer matches the archived conversation');
+  };
+  for (const id of [...ledger.coverageTurnIds, ...ledger.undoneTurnIds])
+    if (!turns.has(id)) throw invalid('Journal ledger references a missing conversation');
+  const eventIds = new Set<string>();
+  for (const event of ledger.events) {
+    if (eventIds.has(event.id)) throw invalid('Duplicate Journal event ID');
+    eventIds.add(event.id);
+    if (eventDigest(event as unknown as Record<string, unknown>) !== event.digest)
+      throw invalid('Journal event digest mismatch');
+    if (event.kind === JournalEventKind.Correction) {
+      event.evidence.forEach(quote);
+      continue;
+    }
+    const ordinals = new Set<number>();
+    for (const x of event.contributions) {
+      if (ordinals.has(x.ordinal) || !event.knowledgeIds.includes(x.knowledgeId))
+        throw invalid('Journal contribution is inconsistent');
+      ordinals.add(x.ordinal);
+      if (!turns.has(x.turnId))
+        throw invalid('Journal contribution references a missing conversation');
+      x.evidence.forEach(quote);
+    }
+  }
+}
 export function remapArchive(raw: unknown): Archive {
   if (raw && typeof raw === 'object' && 'version' in raw)
     throw new Problem(
@@ -282,6 +330,7 @@ export function remapArchive(raw: unknown): Archive {
       'This file was exported by an older app and can no longer be imported.'
     );
   const parsed = archiveSchema.parse(raw);
+  validateJournalArchive(parsed);
   const metadata = ['systemPrompt', 'frozenKnowledge', 'toolDefinitions'] as const;
   for (const session of parsed.diceSessions) {
     const count = metadata.filter((key) => session[key] !== undefined).length;
@@ -881,6 +930,46 @@ export function remapArchive(raw: unknown): Archive {
     for (const source of captured.sourceVersions ?? []) source.id = mapped(source.id);
   };
   out.campaign.knowledge.forEach(remapKnowledge);
+  if (out.campaign.journal) {
+    // Journal ids that name removed (undone) records still need one consistent new identity.
+    const jid = (id: string) => {
+      if (!ids.has(id)) ids.set(id, randomUUID());
+      return ids.get(id)!;
+    };
+    const ledger = out.campaign.journal;
+    ledger.coverageTurnIds = ledger.coverageTurnIds.map(jid);
+    ledger.undoneTurnIds = ledger.undoneTurnIds.map(jid);
+    const remapEvidence = (e: { turnId: string }) => {
+      e.turnId = jid(e.turnId);
+    };
+    for (const event of ledger.events) {
+      event.id = jid(event.id);
+      event.jobId = jid(event.jobId);
+      if (event.kind === JournalEventKind.Correction) {
+        event.knowledgeId = jid(event.knowledgeId);
+        event.evidence.forEach(remapEvidence);
+        for (const patch of [event.before, event.after]) {
+          if (patch.characterIds) patch.characterIds = patch.characterIds.map(jid);
+          if (patch.holderId) patch.holderId = jid(patch.holderId);
+        }
+      } else {
+        event.knowledgeIds = event.knowledgeIds.map(jid);
+        for (const x of event.contributions) {
+          x.turnId = jid(x.turnId);
+          x.knowledgeId = jid(x.knowledgeId);
+          x.dependsOn = x.dependsOn.map(jid);
+          x.evidence.forEach(remapEvidence);
+          for (const fields of [x.before, x.after]) {
+            if (!fields) continue;
+            fields.characterIds = fields.characterIds.map(jid);
+            if (fields.holderId) fields.holderId = jid(fields.holderId);
+          }
+        }
+      }
+      // Digests cover remapped structured payloads; frozen prompts are untouched.
+      event.digest = eventDigest(event as unknown as Record<string, unknown>);
+    }
+  }
   for (const session of out.diceSessions) {
     session.id = mapped(session.id);
     session.campaignId = mapped(session.campaignId);
@@ -1352,6 +1441,8 @@ export class LibraryService {
       delete setup.pinnedFacts;
       // Templates never carry play state: no encounter or its character links can transplant.
       delete setup.state;
+      // Journal history and audit events belong to one campaign's timeline.
+      delete setup.journal;
       const c = { ...newCampaign({ name: name ?? template.name }), ...setup } as Campaign;
       // Even an externally stored template cannot transplant another campaign's timeline.
       c.knowledge = [];

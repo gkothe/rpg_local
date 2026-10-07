@@ -302,7 +302,84 @@ export interface CharacterTemplate {
   character: Record<string, unknown>;
   createdAt: string;
 }
+export interface JournalConnection {
+  id: string;
+  title: string;
+  group: string;
+}
+export interface JournalEvidenceRef {
+  id: string;
+  kind: 'turn' | 'campaign_source' | 'book';
+  label: string;
+  turnId?: string;
+  available: boolean;
+}
+export interface JournalEntry {
+  id: string;
+  title: string;
+  kind: string;
+  group: string;
+  status: string;
+  statusLabel: string;
+  certainty: string;
+  certaintyLabel: string;
+  overview: string;
+  excerpt: boolean;
+  text?: string;
+  updatedAt: string;
+  connections: JournalConnection[];
+  evidence?: JournalEvidenceRef[];
+  history?: {
+    at: string;
+    kind: string;
+    origin: string;
+    turnId: string | null;
+    summary: string;
+    reason?: string;
+    changes?: { field: string; label: string; before: string | null; after: string | null }[];
+  }[];
+}
+export interface JournalPage {
+  entries: JournalEntry[];
+  groups: { id: string; label: string; count: number }[];
+  total: number;
+  nextCursor: string | null;
+}
+export interface JournalFindingView {
+  outcome: string;
+  outcomeLabel: string;
+  reason: string;
+  knowledgeId: string;
+  proposalDigest: string | null;
+  changes: { field: string; label: string; before: string | null; after: string | null }[];
+  evidence: { turnId: string; field: string; quote: string }[];
+}
+export interface JournalJobView {
+  id: string;
+  jobId?: string;
+  kind: string;
+  status: string;
+  statusLabel: string;
+  active: boolean;
+  progress: {
+    processedPairs: number;
+    eligiblePairs: number;
+    created: number | null;
+    skipped: number | null;
+  } | null;
+  error: { code: string; message: string } | null;
+  finding: JournalFindingView | null;
+  decision: 'accepted' | 'dismissed' | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export type JournalEvidenceDetail =
+  | { kind: 'turn'; label: string; turnId: string; available: boolean }
+  | { kind: 'campaign_source' | 'book'; label: string; quote: string; available: true };
 export interface Settings {
+  journal?: {
+    limits: { queryMaxChars: number; pageSizeDefault: number; explanationMaxChars: number };
+  };
   sourcePurposeOptions?: { id: string; label: string; default: boolean }[];
   knowledgeKindOptions?: { id: string; label: string }[];
   knowledgeOriginOptions?: { id: string; label: string }[];

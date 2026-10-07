@@ -4,14 +4,20 @@ import type { CampaignDetail, Settings } from '../../services/types';
 import { Field, ErrorNotice } from '../../components/Controls';
 import { request, json, errorMessage } from '../../services/client';
 import { useResource } from '../../hooks/useResource';
+import JournalKnowledge from './JournalKnowledge';
 export default function Journal({
   campaign,
   onSaved,
   options,
+  initialEntryId,
+  active = true,
 }: {
   campaign: CampaignDetail;
   onSaved: () => Promise<void>;
   options: Settings | null;
+  initialEntryId?: string | null;
+  /** Knowledge loads only while the Journal tab is visible; notes drafts stay mounted. */
+  active?: boolean;
 }) {
   const baseRevision = useRef(campaign.revision),
     baseNotesRevision = useRef(campaign.notesRevision),
@@ -74,6 +80,15 @@ export default function Journal({
           Save notes
         </button>
       </div>
+      {active && (
+        <JournalKnowledge
+          campaignId={campaign.id}
+          revision={campaign.revision}
+          options={options}
+          initialEntryId={initialEntryId}
+          onChanged={() => void onSaved()}
+        />
+      )}
       <div className="panel stack">
         <h3>Campaign memory</h3>
         <MemoryText

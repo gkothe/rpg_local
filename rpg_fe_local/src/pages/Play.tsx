@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Send,
@@ -35,6 +35,15 @@ import { TurnNarrative } from '../features/play/TurnNarrative';
 import RuleSystemPicker from '../features/rules/RuleSystemPicker';
 import RuleEvidence from '../features/rules/RuleEvidence';
 const CHAT_BOTTOM_THRESHOLD_PX = 100;
+const CAMPAIGN_TABS = [
+  'play',
+  'characters',
+  'npcs',
+  'journal',
+  'sources',
+  'game master',
+  'utility',
+];
 export default function PlayPage() {
   const { id } = useParams();
   const [search] = useSearchParams();
@@ -42,7 +51,15 @@ export default function PlayPage() {
     providers = useResource<Provider[]>('/providers'),
     ruleSystem = useResource<RuleSystemMetadata>(`/campaigns/${id}/rule-system`),
     settings = useResource<Settings>('/settings');
-  const [tab, setTab] = useState(search.get('setup') === '1' ? 'sources' : 'play'),
+  const location = useLocation();
+  const requestedTab = search.get('tab');
+  const [tab, setTab] = useState(
+      search.get('setup') === '1'
+        ? 'sources'
+        : requestedTab && CAMPAIGN_TABS.includes(requestedTab)
+          ? requestedTab
+          : 'play'
+    ),
     [draft, setDraft] = useState(''),
     [error, setError] = useState(''),
     [saving, setSaving] = useState(false),
@@ -50,6 +67,12 @@ export default function PlayPage() {
     savingGuard = useRef(false);
   const [showAudit, setShowAudit] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
+  // In-app links (for example Journal sources) change only the query string; follow them.
+  const navigatedTab = search.get('tab');
+  const setupMode = search.get('setup') === '1';
+  useEffect(() => {
+    if (!setupMode && navigatedTab && CAMPAIGN_TABS.includes(navigatedTab)) setTab(navigatedTab);
+  }, [location.key, navigatedTab, setupMode]);
   const game = useTurn(resource.data, resource.reload, settings.data),
     campaign = resource.data;
   const transcript = useRef<HTMLElement | null>(null);
@@ -132,7 +155,7 @@ export default function PlayPage() {
       <ErrorNotice message={error || resource.error || providers.error} />
       {feedback && <p role="status">{feedback}</p>}
       <nav className="tabs" aria-label="Campaign sections">
-        {['play', 'characters', 'npcs', 'journal', 'sources', 'game master', 'utility'].map((t) => (
+        {CAMPAIGN_TABS.map((t) => (
           <button
             aria-current={tab === t ? 'page' : undefined}
             className={tab === t ? 'selected' : ''}
@@ -270,6 +293,9 @@ export default function PlayPage() {
         <GmState key={campaign.id} campaign={campaign} onSaved={resource.reload} />
       </div>
       <div hidden={tab !== 'play'}>
+        {search.get('turn') && (
+          <ReferencedTurn campaignId={campaign.id} turnId={search.get('turn')!} />
+        )}
         <div className="play-layout">
           <section
             className="transcript"
@@ -633,7 +659,13 @@ export default function PlayPage() {
         />
       </div>
       <div hidden={tab !== 'journal'}>
-        <Journal campaign={campaign} options={settings.data} onSaved={resource.reload} />
+        <Journal
+          campaign={campaign}
+          options={settings.data}
+          onSaved={resource.reload}
+          initialEntryId={search.get('entry')}
+          active={tab === 'journal'}
+        />
       </div>
       <div hidden={tab !== 'sources'}>
         {search.get('setup') === '1' && (
@@ -650,5 +682,32 @@ export default function PlayPage() {
         />
       </div>
     </div>
+  );
+}
+
+/** An older conversation opened from a Journal source link; loaded by id so it need not be in the recent list. */
+function ReferencedTurn({ campaignId, turnId }: { campaignId: string; turnId: string }) {
+  const turn = useResource<Turn>(`/campaigns/${campaignId}/turns/${turnId}`);
+  const heading = useRef<HTMLHeadingElement | null>(null);
+  const ready = !!turn.data;
+  useEffect(() => {
+    if (ready) heading.current?.focus();
+  }, [ready, turnId]);
+  if (turn.loading) return <p role="status">Opening the referenced conversation…</p>;
+  if (turn.error) return <ErrorNotice message={turn.error} />;
+  const t = turn.data;
+  if (!t || t.undone)
+    return <p className="notice">That conversation is no longer part of the story.</p>;
+  return (
+    <section className="panel referenced-turn" aria-label="Referenced conversation">
+      <h2 tabIndex={-1} ref={heading}>
+        Referenced conversation
+      </h2>
+      <time className="muted" dateTime={t.createdAt}>
+        {new Date(t.createdAt).toLocaleString()}
+      </time>
+      <p className="player-action">{t.action}</p>
+      {t.narrative && <p className="prose">{t.narrative}</p>}
+    </section>
   );
 }

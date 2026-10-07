@@ -41,6 +41,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createCampaignSourceRecall } from '../../rpg_be_local/src/domain/campaignSourceRecall.ts';
 import { findRules } from '../../rpg_be_local/src/providers/rulesFind.ts';
 import { createNpcRecall } from '../../rpg_be_local/src/domain/npcRecall.ts';
+import { journalExample, journalIds } from '../../rpg_fe_local/src/features/flow/examples.ts';
+import { applyCorrection, locateQuote } from '../../rpg_be_local/src/domain/journalChanges.ts';
+import { correctionGuidance } from '../../rpg_be_local/src/domain/journalCompatibility.ts';
+import { listEntries } from '../../rpg_be_local/src/domain/journalProjection.ts';
 
 test('illustrated NPC lookup retrieves an off-prompt saved sheet without private notes', () => {
   const lookup = createNpcRecall(ids.campaign, [{ ...npc, revision: 0 }], []);
@@ -271,4 +275,60 @@ test('combat teaching example matches the real preparation, dice and turn valida
     () => applyResponse(campaign, { ...parsed, combatEffects: [] }, ids.turn, evidence),
     /combat effect/
   );
+});
+
+test('illustrated Journal correction matches real evidence, apply, projection and context rules', () => {
+  const now = '2026-01-01T00:00:00.000Z';
+  const campaign = newCampaign({ name: 'Journal example' });
+  campaign.knowledge = [
+    {
+      id: journalIds.record,
+      kind: 'npc',
+      title: journalExample.record.title,
+      text: journalExample.record.text,
+      certainty: 'established',
+      status: 'active',
+      characterIds: [],
+      characterNames: {},
+      origin: 'gm',
+      evidence: [],
+      createdTurnId: journalIds.olderTurn,
+      updatedTurnId: journalIds.olderTurn,
+      createdAt: now,
+      updatedAt: now,
+      revision: 1,
+      attributions: [
+        { origin: 'gm', evidence: [], turnId: journalIds.olderTurn, at: now, visibility: 'player' },
+      ],
+      visibility: 'player',
+      introductionVisibility: 'player',
+    },
+  ];
+  const turns = new Map(
+    journalExample.turns.map((turn) => [turn.id, { ...turn, status: 'completed', undone: false }])
+  );
+  const evidence = locateQuote(turns.get(journalIds.newerTurn), 'narrative', journalExample.quote);
+  assert.ok(evidence, 'the illustrated quote is an exact substring of the illustrated turn');
+  const { campaign: corrected } = applyCorrection(
+    campaign,
+    {
+      knowledgeId: journalIds.record,
+      changes: { text: journalExample.correctedText },
+      reason: journalExample.flagged,
+      evidence: [evidence],
+    },
+    turns,
+    journalIds.job
+  );
+  assert.equal(corrected.knowledge[0].text, journalExample.correctedText);
+  assert.equal(corrected.journal.events[0].kind, 'correction');
+  assert.equal(correctionGuidance(corrected)[0].correctedFields.text, journalExample.correctedText);
+  const listed = listEntries(corrected.knowledge, corrected.characters, {
+    query: 'sister',
+    includePast: false,
+    limit: 20,
+  });
+  assert.equal(listed.entries[0].overview, journalExample.correctedText);
+  const section = journalExample.turns.map((turn) => turn.narrative).join(' ');
+  assert.match(section, /sister of the temple/);
 });

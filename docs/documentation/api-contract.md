@@ -387,3 +387,30 @@ both snapshot states, removes the marker from structured encounters, removes ret
 keys from saved turn contexts, and drops the `dice_sessions` contract columns while keeping
 sessions immutable. Failed or cancelled turns recorded before the upgrade can no longer be
 retried; start a new action.
+
+## Journal knowledge browser
+
+Read-only player projection of canonical campaign knowledge under `/api/campaigns/:id/journal`. No AI call is made.
+
+- `GET /entries?query=&includePast=false&cursor=&limit=20` returns `{entries, groups, counts, total, nextCursor}`. `groups` carries backend-owned order and labels (`people_places`, `unfinished_business`, `discoveries`). Default shows active entries; `includePast=true` adds resolved/retracted ones. `limit` is 1..100 and `query` at most 200 characters. The cursor is bound to the query, filter and view digest; a changed view returns 409 `journal_changed`, a malformed cursor 422 `journal_invalid`.
+- `GET /entries/:entryId` returns the full permitted text, connections (records sharing a linked character), evidence locators and attribution history.
+- `GET /entries/:entryId/evidence/:evidenceId` returns a turn locator (with availability) or only the recorded quote of a campaign-source or book citation, never the whole source.
+- Visibility: `publicKnowledge` runs first; `gm_only` records and `belief` certainty records never appear in lists, search, counts or details (404 `journal_not_found`). Kinds map npc/place to people and places, debt/objective to unfinished business, event/relationship/other to discoveries.
+- Overviews are at most 400 characters (180 for completed items, labeled `excerpt`). A generic "X was introduced." NPC record is supplemented with the linked character's public description text only.
+- `GET /api/settings` advertises `journal.groupOptions` and `journal.limits`.
+- Frontend deep links: `/campaigns/:id?tab=journal&entry=:entryId` and `/campaigns/:id?tab=play&turn=:turnId` (loads the turn by id).
+
+Jobs (all `POST` bodies are strict and carry a UUID `requestId`; `202` starts a durable job, replays of the same identity return the original job, a different body for a used identity is 409 `journal_request_reused`):
+
+- `POST /backfills {requestId}` runs a whole-history, tools-free backfill with the campaign's selected CLI/model.
+- `POST /entries/:entryId/checks {requestId, explanation}` (`explanation` 1..2000 characters) checks one recorded fact; the target must be a visible, non-belief record (404 otherwise).
+- `GET /jobs/:jobId` returns `{id, jobId?, kind, status, statusLabel, active, progress, error, finding, decision, createdAt, updatedAt}`. `progress` is `{processedPairs, eligiblePairs, created, skipped}`, never a percentage; `finding` is `{outcome, outcomeLabel, reason, knowledgeId, proposalDigest, changes[{field,label,before,after}], evidence[{turnId,field,quote}]}` and never includes frozen inputs or raw model output.
+- `POST /jobs/:jobId/cancel {requestId}` is idempotent. `POST /jobs/:jobId/retry {requestId}` resumes an interrupted or failed uncommitted job with its original capture (409 `journal_changed` when facts or history changed).
+- `POST /jobs/:jobId/accept {requestId, proposalDigest}` updates the same canonical record, records the correction, retires every memory row and returns `{decision, entry}`; `POST /jobs/:jobId/dismiss {requestId}` changes nothing. A job has one terminal decision; the same request replays it. Findings that are not `proposed` cannot be accepted (422 `journal_invalid`).
+- Named errors: `journal_not_found` 404; `journal_invalid`, `evidence_invalid` 422; `journal_busy`, `journal_changed`, `journal_proposal_changed`, `journal_request_reused`, `journal_correction_conflict`, `journal_correction_evidence`, `journal_context_changed` 409; `journal_provider_unavailable`, `journal_database_setup` 503.
+- While a job is pending/running, gameplay, retry, undo, resume-editing and export return 409 `journal_busy`; reads and personal notes stay available.
+- `GET /api/settings` also advertises `journal.jobKindOptions`, `jobStatusOptions` and `checkOutcomeOptions`.
+
+Detail history items are `{at, kind: recorded|updated|recovered|corrected, origin, turnId, summary, changes?, reason?}`. A correction never rewrites the original conversation, sheets, inventory or campaign state.
+
+Archives: the current unversioned campaign archive gains the optional `campaign.journal` ledger (`events`, `coverageTurnIds`, `undoneTurnIds`). Import validates digests and quotes against the archived transcript and remaps ids; archives without it import with an empty ledger, numbered archives remain `archive_unsupported`, and templates never include it.

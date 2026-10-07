@@ -14,6 +14,7 @@ import {
   type SourceSelectionDiagnostics,
 } from './campaignSourceRecall.js';
 import { publicKnowledge } from './playerProjection.js';
+import { CORRECTION_PROMPT_INSTRUCTION, correctionGuidance } from './journalCompatibility.js';
 // UTF-8 bytes is a deliberately pessimistic upper estimate: no raw text is assumed to compress.
 export const estimateTokens = (text: string) => Buffer.byteLength(text, 'utf8');
 // Book prompts include verbose JSON schemas; this soft planning heuristic guides
@@ -143,6 +144,8 @@ export function buildContext(
       sceneTerms.includes(char.id.toLowerCase()) ||
       sceneTerms.includes(char.name.toLowerCase())
   );
+  // Live canonical values of accepted corrections outrank older transcript text and summaries.
+  const corrections = correctionGuidance(c);
   const base = {
     ...(rulePrompt
       ? {
@@ -153,6 +156,9 @@ export function buildContext(
         }
       : {}),
     knowledge: selectRelevantKnowledge(c, action, sceneTerms),
+    ...(corrections.length
+      ? { journalCorrections: { instruction: CORRECTION_PROMPT_INSTRUCTION, items: corrections } }
+      : {}),
     pinnedRules: pinned,
     campaignSources: [] as ReturnType<typeof campaignSourceCatalog>,
     campaignSourceSeeds: seed.spans,
@@ -243,6 +249,8 @@ export function compactionBatch(
 ): { prompt: string; turns: Turn[] } {
   const history = recentGameplayHistory(c, turns).older;
   const selected: Turn[] = [];
+  const corrections = correctionGuidance(c);
+  const correctedIds = new Set(corrections.map((x) => x.knowledgeId));
   const make = (items: Turn[]) =>
     JSON.stringify({
       instruction:
@@ -251,14 +259,23 @@ export function compactionBatch(
       priorMemory: c.memory?.valid ? c.memory.text : '',
       ...(c.knowledge
         ? {
-            knowledge: publicKnowledge(c.knowledge).filter((record) =>
-              items.some(
-                (turn) =>
-                  turn.id === record.createdTurnId ||
-                  turn.id === record.updatedTurnId ||
-                  record.attributions.some((entry) => entry.turnId === turn.id)
-              )
+            knowledge: publicKnowledge(c.knowledge).filter(
+              (record) =>
+                // Corrections have no gameplay turn, so they are selected by identity.
+                correctedIds.has(record.id) ||
+                items.some(
+                  (turn) =>
+                    turn.id === record.createdTurnId ||
+                    turn.id === record.updatedTurnId ||
+                    record.attributions.some((entry) => entry.turnId === turn.id)
+                )
             ),
+            ...(corrections.length
+              ? {
+                  correctedFacts: corrections,
+                  correctionInstruction: CORRECTION_PROMPT_INSTRUCTION,
+                }
+              : {}),
             knowledgeInstruction:
               'Preserve origins and certainty: allegations, rumors and beliefs must remain attributed and uncertain; memory never replaces canonical registry records.',
           }

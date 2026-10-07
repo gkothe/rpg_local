@@ -72,3 +72,19 @@ test('book and model-knowledge prompts include one prose block before exact GM i
     assert.doesNotMatch(GAMEPLAY_WRITING_GUIDANCE, /[\u2013\u2014]/);
   }
 });
+
+test('every envelope asks for Journal-quality knowledge without adding a response field or stage', () => {
+  for (const book of [false, true]) {
+    const result = gameplayInstructionEnvelope('System', 'Campaign', book);
+    assert.match(result, /significant known people and places, debts, promises, objectives/);
+    assert.match(result, /skip incidental mentions/);
+    assert.match(result, /update an existing record by id instead of introducing a duplicate/);
+    assert.match(result, /rumors attributed and uncertain/);
+    assert.match(result, /never turn a player suspicion without support into an established fact/);
+    assert.match(result, /set that record to resolved and state the outcome in its text/);
+    // Existing provenance, NPC and combat instructions remain in place.
+    assert.match(result, /Never change origin merely to make evidence pass validation/);
+    assert.match(result, /combat_prepare/);
+    assert.match(result, /campaign_npcs_search/);
+  }
+});

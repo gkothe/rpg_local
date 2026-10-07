@@ -35,6 +35,12 @@ import {
 } from '../domain/context.js';
 import { memoryJsonSchema, memorySchema } from '../domain/schemas.js';
 import { applyResponse, undoSnapshot } from '../domain/state.js';
+import { assertFrozenContext } from '../domain/journalCompatibility.js';
+import {
+  assertNoCorrectionEvidence,
+  assertNoLaterCorrection,
+  reconcileBackfillUndo,
+} from '../domain/journalChanges.js';
 import { TurnStatus } from '../domain/options.js';
 import { DiceService, gameplayDigest } from './dice.js';
 import { validateRollInterpretations, validateRollPlacement } from '../domain/diceResponse.js';
@@ -187,6 +193,8 @@ export class TurnService {
     )
       throw new Problem(409, 'cancelled', 'Turn is no longer active');
     if (t.ruleContext) await new RuleStore(this.store).guard(t.ruleContext, client);
+    // A saved attempt must not replay facts a Journal correction has since superseded.
+    assertFrozenContext(t.context?.frozenKnowledge, campaign);
     return { campaign, turn };
   }
   async retry(
@@ -256,6 +264,7 @@ export class TurnService {
         throw conflict(
           'Game context changed or this archive session is non-executable; start a new action'
         );
+      assertFrozenContext(saved.frozen_knowledge, campaign);
       const turn: Turn = {
         ...previous,
         id: randomUUID(),
@@ -312,7 +321,7 @@ export class TurnService {
   ): Promise<Turn> {
     let launch = false;
     const turn = await this.store.transaction(async (client) => {
-      await this.store.campaign(campaignId, client, true);
+      const campaign = await this.store.campaign(campaignId, client, true);
       const t = await this.store.turn(campaignId, turnId, client, true);
       const existing = await client.query(
         'SELECT candidate_digest FROM narrative_edit_requests WHERE turn_id=$1 AND request_id=$2',
@@ -334,6 +343,7 @@ export class TurnService {
       );
       const session = saved.rows[0];
       if (!session?.system_prompt) throw conflict('Saved editing context is missing');
+      assertFrozenContext(session.frozen_knowledge, campaign);
       t.context = {
         ...t.context!,
         prompt: session.frozen_prompt,
@@ -891,7 +901,16 @@ export class TurnService {
       const turns = await this.store.activeTurns(c.id, client);
       const last = turns.at(-1);
       if (!last) throw conflict('No completed active turn to undo');
-      const restored = undoSnapshot(c, await this.store.snapshot(last.id, client));
+      const snapshot = await this.store.snapshot(last.id, client);
+      // Journal changes made after this turn are never silently overwritten or left unsupported.
+      assertNoCorrectionEvidence(c, last.id);
+      assertNoLaterCorrection(c, snapshot.afterKnowledge ?? []);
+      const restored = undoSnapshot(c, snapshot);
+      reconcileBackfillUndo(
+        restored,
+        last.id,
+        new Set((snapshot.afterKnowledge ?? []).map((record) => record.id))
+      );
       last.undone = true;
       await this.store.saveTurn(last, client);
       const rows = await client.query(

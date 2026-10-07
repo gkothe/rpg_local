@@ -16,6 +16,19 @@ import { Store } from './store.js';
 import { ProviderService } from './providers/service.js';
 import { TurnService } from './services/turns.js';
 import { LibraryService } from './services/library.js';
+import { JournalService } from './services/journal.js';
+import {
+  JOURNAL_CHECK_OUTCOME_OPTIONS,
+  JOURNAL_GROUP_OPTIONS,
+  JOURNAL_JOB_KIND_OPTIONS,
+  JOURNAL_JOB_STATUS_OPTIONS,
+  JOURNAL_LIMITS,
+  JournalJobKind,
+  journalAcceptRequestSchema,
+  journalCheckRequestSchema,
+  journalListQuerySchema,
+  journalRequestSchema,
+} from './domain/journal.js';
 import {
   audioDiagnostics,
   extractFile,
@@ -99,6 +112,7 @@ export function createApp(options: AppOptions) {
   const turns = store ? new TurnService(store, providers) : null;
   const library = store ? new LibraryService(store) : null;
   const campaigns = store ? new CampaignService(store, providers) : null;
+  const journal = store ? new JournalService(store, providers) : null;
   const sources = store ? new SourceLibrary(store) : null;
   const rules = store ? new RuleStore(store) : null;
   const ruleLookup = new RuleLookup();
@@ -181,6 +195,13 @@ export function createApp(options: AppOptions) {
           knowledgeOriginOptions: KNOWLEDGE_ORIGIN_OPTIONS,
           knowledgeCertaintyOptions: KNOWLEDGE_CERTAINTY_OPTIONS,
           knowledgeStatusOptions: KNOWLEDGE_STATUS_OPTIONS,
+          journal: {
+            groupOptions: JOURNAL_GROUP_OPTIONS,
+            jobKindOptions: JOURNAL_JOB_KIND_OPTIONS,
+            jobStatusOptions: JOURNAL_JOB_STATUS_OPTIONS,
+            checkOutcomeOptions: JOURNAL_CHECK_OUTCOME_OPTIONS,
+            limits: JOURNAL_LIMITS,
+          },
           sourceStatusOptions: SOURCE_STATUS_OPTIONS,
           ocrLanguageOptions: OCR_LANGUAGE_OPTIONS,
           transcriptionLanguageOptions: TRANSCRIPTION_LANGUAGE_OPTIONS,
@@ -742,6 +763,91 @@ export function createApp(options: AppOptions) {
     '/api/campaigns/:id/turns/:turnId/context',
     wrap(async (req, res) => {
       res.json({ data: await store!.turnContext(param(req, 'id'), param(req, 'turnId')) });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/journal/entries',
+    wrap(async (req, res) => {
+      const query = journalListQuerySchema.parse(req.query);
+      res.json({ data: await journal!.list(param(req, 'id'), query) });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/journal/entries/:entryId',
+    wrap(async (req, res) => {
+      res.json({ data: await journal!.entry(param(req, 'id'), param(req, 'entryId')) });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/journal/entries/:entryId/evidence/:evidenceId',
+    wrap(async (req, res) => {
+      const evidenceId = z
+        .string()
+        .regex(/^(turn-[0-9a-f-]{36}|evidence-\d{1,6})$/)
+        .parse(req.params.evidenceId);
+      res.json({
+        data: await journal!.evidence(param(req, 'id'), param(req, 'entryId'), evidenceId),
+      });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/journal/backfills',
+    wrap(async (req, res) => {
+      const { requestId } = journalRequestSchema.parse(req.body);
+      const job = await journal!.start(param(req, 'id'), JournalJobKind.Backfill, requestId);
+      res.status(202).json({ data: { jobId: job.id, ...job } });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/journal/entries/:entryId/checks',
+    wrap(async (req, res) => {
+      const { requestId, explanation } = journalCheckRequestSchema.parse(req.body);
+      const job = await journal!.start(param(req, 'id'), JournalJobKind.Check, requestId, {
+        entryId: param(req, 'entryId'),
+        explanation,
+      });
+      res.status(202).json({ data: { jobId: job.id, ...job } });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/journal/jobs/:jobId',
+    wrap(async (req, res) => {
+      res.json({ data: await journal!.status(param(req, 'id'), param(req, 'jobId')) });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/journal/jobs/:jobId/cancel',
+    wrap(async (req, res) => {
+      journalRequestSchema.parse(req.body);
+      res.json({ data: await journal!.cancel(param(req, 'id'), param(req, 'jobId')) });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/journal/jobs/:jobId/retry',
+    wrap(async (req, res) => {
+      journalRequestSchema.parse(req.body);
+      res.status(202).json({ data: await journal!.retry(param(req, 'id'), param(req, 'jobId')) });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/journal/jobs/:jobId/accept',
+    wrap(async (req, res) => {
+      const { requestId, proposalDigest } = journalAcceptRequestSchema.parse(req.body);
+      res.json({
+        data: await journal!.accept(
+          param(req, 'id'),
+          param(req, 'jobId'),
+          requestId,
+          proposalDigest
+        ),
+      });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/journal/jobs/:jobId/dismiss',
+    wrap(async (req, res) => {
+      const { requestId } = journalRequestSchema.parse(req.body);
+      res.json({ data: await journal!.dismiss(param(req, 'id'), param(req, 'jobId'), requestId) });
     })
   );
   app.get(
