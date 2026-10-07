@@ -31,6 +31,11 @@ type PendingCall = { index: number; key: string; claimed: boolean };
 const REJECTED_STEP_FIELD_LIMIT = 32;
 const TRACE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]{0,79}$/;
 
+function traceIdentifier(value: unknown) {
+  if (value === undefined) return null;
+  return typeof value === 'string' && TRACE_IDENTIFIER_PATTERN.test(value) ? value : 'unrecognized';
+}
+
 /** Keep the stream shape for diagnosis, never arguments, text or arbitrary values. */
 function rejectedStepMetadata(step: Record<string, unknown>) {
   const keys = Object.keys(step);
@@ -243,9 +248,35 @@ export async function generateAntigravityMcpBook(
                   parameters?.ServerName !== MCP_SERVER ||
                   !tools.includes(parameters?.ToolName ?? '')
                 ) {
-                  await traceEvent(trace, 'rejected_tool', { code: 'dice_isolation' });
                   const ownedDirectCall = typeof gateway === 'string' && tools.includes(gateway);
                   const recoverable = gateway === MCP_GATEWAY || ownedDirectCall;
+                  await traceEvent(trace, 'rejected_tool', {
+                    code: recoverable ? 'gameplay_tool_unavailable' : 'dice_isolation',
+                    ...rejectedStepMetadata(step),
+                    gateway: traceIdentifier(gateway),
+                    toolName: traceIdentifier(step.tool_name),
+                    toolInfoName: traceIdentifier(step.tool_info?.name),
+                    serverName: traceIdentifier(parameters?.ServerName),
+                    requestedTool: traceIdentifier(parameters?.ToolName),
+                    hasParameters: parameters !== undefined,
+                    argumentsType:
+                      parameters?.Arguments === null
+                        ? 'null'
+                        : Array.isArray(parameters?.Arguments)
+                          ? 'array'
+                          : typeof parameters?.Arguments,
+                    gatewayMatches: gateway === MCP_GATEWAY,
+                    serverMatches: parameters?.ServerName === MCP_SERVER,
+                    toolRegistered: tools.includes(parameters?.ToolName ?? ''),
+                    ownedDirectCall,
+                    initialized,
+                    completed,
+                    pendingCalls: pending.length,
+                    unclaimedCalls: pending.filter((entry) => !entry.claimed).length,
+                    matchingStepClaimed: pending.some(
+                      (entry) => entry.index === step.step_index && entry.claimed
+                    ),
+                  });
                   throw new Problem(
                     502,
                     recoverable ? 'gameplay_tool_unavailable' : 'dice_isolation',

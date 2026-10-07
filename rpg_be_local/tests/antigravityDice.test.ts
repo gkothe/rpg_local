@@ -51,6 +51,8 @@ else if(args.includes('/hooks')) {
     if(process.env.RPG_TEST_AGY_MODE==='orphan-completion') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:99,state:'DONE',tool_name:'call_mcp_tool'}}));
     if(process.env.RPG_TEST_AGY_MODE==='direct-owned') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:2,state:'ACTIVE',tool_name:'rules_search',tool_info:{name:'rules_search',parameters:{query:'original rules'}}}}));
     if(process.env.RPG_TEST_AGY_MODE==='direct-foreign') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:2,state:'ACTIVE',tool_name:'shell',tool_info:{name:'shell',parameters:{command:'forbidden'}}}}));
+    if(process.env.RPG_TEST_AGY_MODE==='private-tool') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:2,state:'ACTIVE',tool_name:'PRIVATE/path',tool_info:{name:'PRIVATE NAME',parameters:{ServerName:'PRIVATE SERVER',ToolName:'PRIVATE TOOL',Arguments:{command:'PRIVATE_COMMAND'}}},response:'PRIVATE_RESPONSE'}}));
+    if(process.env.RPG_TEST_AGY_MODE==='missing-tool') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:2,state:'ACTIVE'}}));
     const mode=process.env.RPG_TEST_AGY_MODE;
     if(['zero-turns','missing-turns'].includes(mode)) {
       console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:mode==='zero-turns'?0:undefined,response:'PRIVATE_RESPONSE'}}));
@@ -125,6 +127,70 @@ test('rejected unknown activity logs structural diagnostics without values or di
     await rm(root, { recursive: true, force: true });
   }
 });
+
+for (const [mode, gateway, serverName, requestedTool, code] of [
+  ['direct-foreign', 'shell', null, null, 'dice_isolation'],
+  ['direct-owned', 'rules_search', null, null, 'gameplay_tool_unavailable'],
+  ['foreign-server', 'call_mcp_tool', 'outside', 'roll_dice', 'gameplay_tool_unavailable'],
+  ['foreign-tool', 'call_mcp_tool', 'local_rpg', 'shell', 'gameplay_tool_unavailable'],
+  ['missing-tool', null, null, null, 'dice_isolation'],
+  ['private-tool', 'unrecognized', 'unrecognized', 'unrecognized', 'dice_isolation'],
+] as const) {
+  test(`rejected tool diagnostics identify ${mode} without exposing private values`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-rejected-tool-'));
+    try {
+      const filename = path.join(root, 'cli.mjs');
+      const traceFile = path.join(root, 'trace.jsonl');
+      const executionId = randomUUID();
+      const trace = new PromptTrace(traceFile, { executionId });
+      await writeFile(filename, fixture);
+      await assert.rejects(
+        generateAntigravityMcpBook(
+          { binary: process.execPath, prefix: [filename] },
+          settings,
+          'Synthetic',
+          root,
+          { ...process.env, RPG_TEST_AGY_MODE: mode },
+          adapter(async () => assert.fail('Rejected tool must never dispatch'), true),
+          undefined,
+          { executionId, trace }
+        ),
+        (error: unknown) => (error as { code: string }).code === code
+      );
+      const raw = await readFile(traceFile, 'utf8');
+      const entry = raw
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .find((row) => row.kind === 'rejected_tool');
+      assert.equal(entry.executionId, executionId);
+      assert.equal(entry.payload.code, code);
+      assert.equal(entry.payload.gateway, gateway);
+      assert.equal(entry.payload.serverName, serverName);
+      assert.equal(entry.payload.requestedTool, requestedTool);
+      assert.equal(entry.payload.gatewayMatches, gateway === 'call_mcp_tool');
+      assert.equal(entry.payload.serverMatches, serverName === 'local_rpg');
+      assert.equal(entry.payload.toolRegistered, requestedTool === 'roll_dice');
+      assert.equal(entry.payload.ownedDirectCall, mode === 'direct-owned');
+      assert.equal(entry.payload.hasParameters, mode !== 'missing-tool');
+      assert.equal(
+        entry.payload.argumentsType,
+        ['foreign-server', 'foreign-tool', 'private-tool'].includes(mode) ? 'object' : 'undefined'
+      );
+      assert.equal(entry.payload.stepType, 'tool');
+      assert.equal(entry.payload.state, 'ACTIVE');
+      assert.equal(entry.payload.stepIndex, mode.startsWith('foreign-') ? 1 : 2);
+      assert.equal(entry.payload.initialized, true);
+      assert.equal(entry.payload.completed, false);
+      assert.equal(entry.payload.pendingCalls, 0);
+      assert.equal(entry.payload.unclaimedCalls, 0);
+      assert.equal(entry.payload.matchingStepClaimed, false);
+      assert.doesNotMatch(raw, /PRIVATE|forbidden/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
 
 for (const mode of ['zero-turns', 'missing-turns']) {
   test(`Antigravity ${mode} completion records diagnostics without accepting or exposing its response`, async () => {
