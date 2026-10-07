@@ -11,6 +11,8 @@ import {
   type RuleSystem,
 } from '../domain/rules.js';
 import { Problem } from '../errors.js';
+import { SHEET_LAYOUT_OPTIONS, type SheetLayout } from '../domain/sheetLayout.js';
+import type { SheetLayoutState } from './ruleStore.js';
 import { createHash, randomUUID } from 'node:crypto';
 type BookPreview = { baseRevision: number; book: ParsedRuleBook };
 export class RuleLibrary {
@@ -126,9 +128,29 @@ export class RuleLibrary {
       return result;
     });
   }
+  async sheetLayout(id: string, requestId: string, layout: SheetLayout): Promise<SheetLayoutState> {
+    const inputHash = createHash('sha256').update(JSON.stringify(layout)).digest('hex');
+    const identity = { operation: 'sheetLayout', requestId, inputHash };
+    return this.rules.store.transaction(async (client) => {
+      await this.rules.get(id, client, 'update');
+      const replay = await this.rules.confirmation<SheetLayoutState>(
+        id,
+        requestId,
+        identity,
+        client
+      );
+      if (replay) return replay;
+      const saved = await this.rules.setSheetLayout(id, layout, client);
+      await this.rules.saveConfirmation(id, requestId, identity, inputHash, saved, client);
+      return saved;
+    });
+  }
   async metadata(id: string) {
     const current = await this.rules.get(id);
+    const layout = await this.rules.sheetLayout(id);
     return {
+      ...layout,
+      sheetLayoutOptions: SHEET_LAYOUT_OPTIONS,
       ...ruleContext(current),
       instructions: current.instructions,
       sources: current.sources,

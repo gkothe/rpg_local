@@ -19,6 +19,7 @@ import {
   type RuleContext,
 } from '../domain/rules.js';
 import { Problem, conflict } from '../errors.js';
+import { sheetLayoutSchema } from '../domain/sheetLayout.js';
 
 const backupSchema = z
   .object({
@@ -30,6 +31,7 @@ const backupSchema = z
         kind: z.enum(RuleSystemKind),
         revision: z.number().int().positive(),
         contentHash: ruleHashSchema,
+        sheetLayout: sheetLayoutSchema.optional(),
         content: z
           .object({
             instructions: z.string(),
@@ -57,6 +59,7 @@ export class RuleBackup {
   ) {}
   async export(id: string) {
     const system = await this.rules.get(id);
+    const { sheetLayout } = await this.rules.sheetLayout(id);
     const backup = {
       format: 'local-rpg-rules',
       system: {
@@ -65,6 +68,7 @@ export class RuleBackup {
         kind: system.kind,
         revision: system.revision,
         contentHash: system.contentHash,
+        sheetLayout,
         content: ruleContent(system),
       },
     };
@@ -105,6 +109,11 @@ export class RuleBackup {
       [backup.system.systemKey]
     );
     const base = existing.rows[0] ? ruleContext(await this.rules.get(existing.rows[0].id)) : null;
+    const currentLayout = base ? (await this.rules.sheetLayout(base.systemId)).sheetLayout : null;
+    const layoutDiffers =
+      !!currentLayout &&
+      backup.system.sheetLayout !== undefined &&
+      canonicalRuleJson(currentLayout) !== canonicalRuleJson(backup.system.sheetLayout);
     const systemId = base?.systemId ?? randomUUID();
     const inputHash = createHash('sha256').update(canonicalRuleJson(backup)).digest('hex');
     const staged = await this.previews.stage(
@@ -127,6 +136,9 @@ export class RuleBackup {
         'This private backup contains original book text. Keep it outside public repositories.',
         ...(base && base.contentHash !== backup.system.contentHash
           ? ['The existing local content differs; replacement requires explicit confirmation.']
+          : []),
+        ...(layoutDiffers
+          ? ['The backup sheet layout replaces the existing local sheet layout.']
           : []),
       ],
     };
@@ -187,6 +199,8 @@ export class RuleBackup {
         client,
         !!staged.base
       );
+      if (staged.backup.system.sheetLayout)
+        await this.rules.setSheetLayout(current.systemId, staged.backup.system.sheetLayout, client);
       await this.rules.saveConfirmation(
         current.systemId,
         input.requestId,

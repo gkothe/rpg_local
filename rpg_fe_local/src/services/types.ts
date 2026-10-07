@@ -37,7 +37,36 @@ export interface RuleCitation {
   pdfPages: number[];
   printedPages: string[];
 }
+export interface SheetFieldHint {
+  path: string[];
+  widget: string;
+  label?: string;
+  max?: number;
+  maxPath?: string[];
+  modifierPath?: string[];
+  order?: number;
+}
+export interface SheetLayout {
+  fields: SheetFieldHint[];
+}
+export interface SheetWidgetOption {
+  id: string;
+  label: string;
+  description: string;
+  params: {
+    max?: { min: number; max: number; required: boolean };
+    maxPath?: boolean;
+    modifierPath?: boolean;
+  };
+}
+export interface SheetLayoutOptions {
+  widgets: SheetWidgetOption[];
+  limits: { fields: number; bytes: number; labelChars: number; pathSegments: number };
+}
 export interface RuleSystemMetadata extends RuleContext {
+  sheetLayout?: SheetLayout;
+  sheetLayoutUpdatedAt?: string | null;
+  sheetLayoutOptions?: SheetLayoutOptions;
   booksAllowed: boolean;
   limits: {
     instructionsBytes: number;

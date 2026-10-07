@@ -155,3 +155,20 @@ describe('draft protection', () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe('sheet layout wiring', () => {
+  it('passes the layout to every character section', () => {
+    const campaign = fixtureCampaign();
+    campaign.characters[0].attributes = { skills: { Brawl: 2 } };
+    render(
+      <CharacterSheet
+        campaign={campaign}
+        options={options}
+        onSaved={vi.fn()}
+        category="npcs"
+        layout={{ fields: [{ path: ['attributes', 'skills'], widget: 'dots', max: 5 }] }}
+      />
+    );
+    expect(screen.getByRole('img', { name: 'Brawl 2 of 5' })).toBeInTheDocument();
+  });
+});

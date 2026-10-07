@@ -42,7 +42,7 @@
 .flow-tabs a[aria-current],
 .flow-page button[aria-pressed='true'] {
   border-color: var(--sage);
-  background: #414a36;
+  background: var(--hover);
   box-shadow: inset 0 0 0 1px var(--sage);
 }
 .flow-tabs a small {
@@ -186,7 +186,7 @@
   font:
     0.8rem/1.6 Consolas,
     monospace;
-  background: #20241c;
+  background: var(--ground);
   border-radius: 12px;
   padding: 1rem;
   white-space: pre-wrap;

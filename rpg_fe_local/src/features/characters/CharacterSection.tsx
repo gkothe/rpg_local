@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
-import type { Campaign, Character } from '../../services/types';
+import type { Campaign, Character, SheetLayout } from '../../services/types';
 import { request, json, errorMessage } from '../../services/client';
 import { parseObject } from '../../services/validation';
 import { ErrorNotice, Field } from '../../components/Controls';
-import CharacterData from './CharacterData';
+import SheetView from './SheetView';
 import { CHARACTER_SECTIONS } from './sectionOptions';
 
 export default function CharacterSection({
@@ -11,12 +11,14 @@ export default function CharacterSection({
   character,
   field,
   label,
+  layout,
   onSaved,
 }: {
   campaign: Campaign;
   character: Character;
   field: (typeof CHARACTER_SECTIONS)[number]['key'];
   label: string;
+  layout?: SheetLayout;
   onSaved: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -98,7 +100,15 @@ export default function CharacterSection({
           </small>
         </>
       ) : (
-        <CharacterData value={character[field]} />
+        <SheetView
+          section={field}
+          sections={{
+            attributes: character.attributes,
+            inventory: character.inventory,
+            description: character.description,
+          }}
+          layout={layout}
+        />
       )}
     </section>
   );

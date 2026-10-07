@@ -25,3 +25,5 @@ test-results/
 *.wav
 *.webm
 *.mp3
+# Agent worktrees are separate checkouts, never repository content.
+**/.claude/worktrees/

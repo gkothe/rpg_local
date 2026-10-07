@@ -6,6 +6,7 @@ import type { Turn, Campaign } from '../domain/types.js';
 import { RuleLookup } from './ruleLookup.js';
 import { ZodError } from 'zod';
 import { Problem, conflict } from '../errors.js';
+import { sheetLayoutSchema, type SheetLayout } from '../domain/sheetLayout.js';
 import {
   DEFAULT_RULE_SYSTEM_ID,
   RuleSystemKind,
@@ -24,6 +25,10 @@ import {
   canonicalRuleJson,
 } from '../domain/rules.js';
 
+export type SheetLayoutState = {
+  sheetLayout: SheetLayout;
+  sheetLayoutUpdatedAt: string | null;
+};
 const contentFields = ['instructions', 'sources', ...RULE_COLUMNS, 'mapping'] as const;
 type RuleRow = Record<string, unknown>;
 const snapshotCaches = new WeakMap<Store, Map<string, { system: RuleSystem; bytes: number }>>();
@@ -96,6 +101,40 @@ export class RuleStore {
     );
     if (!result.rows[0]) throw new Problem(404, 'rules_system_missing', 'Rule system not found');
     return ruleSystemFromRow(result.rows[0]);
+  }
+  /** Display-only; read separately so it never enters rule content, hashes or cached snapshots. */
+  async sheetLayout(id: string, client?: PoolClient, lock?: 'update'): Promise<SheetLayoutState> {
+    if (lock && !client) throw new Error('A rule lock requires a transaction client');
+    const result = await (client ?? this.store.pool).query(
+      'SELECT sheet_layout,sheet_layout_updated_at FROM rule_systems WHERE id=$1' +
+        (lock ? ' FOR UPDATE' : ''),
+      [id]
+    );
+    const row = result.rows[0];
+    if (!row) throw new Problem(404, 'rules_system_missing', 'Rule system not found');
+    return {
+      sheetLayout: sheetLayoutSchema.parse(row.sheet_layout),
+      sheetLayoutUpdatedAt: row.sheet_layout_updated_at
+        ? new Date(row.sheet_layout_updated_at as string).toISOString()
+        : null,
+    };
+  }
+  /** Writes only the layout columns: revision, content hash and updated_at stay unchanged. */
+  async setSheetLayout(
+    id: string,
+    layout: SheetLayout,
+    client: PoolClient
+  ): Promise<SheetLayoutState> {
+    const result = await client.query(
+      'UPDATE rule_systems SET sheet_layout=$2,sheet_layout_updated_at=now() WHERE id=$1 RETURNING sheet_layout,sheet_layout_updated_at',
+      [id, JSON.stringify(layout)]
+    );
+    const row = result.rows[0];
+    if (!row) throw new Problem(404, 'rules_system_missing', 'Rule system not found');
+    return {
+      sheetLayout: layout,
+      sheetLayoutUpdatedAt: new Date(row.sheet_layout_updated_at as string).toISOString(),
+    };
   }
   async list(
     limit = 20,
@@ -198,12 +237,12 @@ export class RuleStore {
     if (!result.rows[0]) throw conflict('Rule system changed during publication');
     return ruleContext(ruleSystemFromRow(result.rows[0]));
   }
-  async confirmation(
+  async confirmation<T = RuleContext>(
     id: string,
     requestId: string,
     identity: Record<string, unknown>,
     client: PoolClient
-  ): Promise<RuleContext | null> {
+  ): Promise<T | null> {
     const result = await client.query(
       'SELECT identity,result FROM rule_confirmations WHERE system_id=$1 AND request_id=$2',
       [id, requestId]
@@ -218,14 +257,14 @@ export class RuleStore {
       )
         throw conflict('Confirmation request identity was reused with changed input');
     }
-    return result.rows[0].result as RuleContext;
+    return result.rows[0].result as T;
   }
-  async saveConfirmation(
+  async saveConfirmation<T = RuleContext>(
     id: string,
     requestId: string,
     identity: Record<string, unknown>,
     inputHash: string,
-    result: RuleContext,
+    result: T,
     client: PoolClient
   ): Promise<void> {
     await client.query(

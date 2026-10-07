@@ -1,10 +1,13 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, ArrowRight, Upload, Trash2 } from 'lucide-react';
 import { useResource } from '../hooks/useResource';
 import { request, requestCollection, json, errorMessage } from '../services/client';
 import type { Campaign, Template } from '../services/types';
 import { Empty, ErrorNotice } from '../components/Controls';
+// Presentation only: each campaign keeps one cover colour derived from its id.
+const coverHue = (id: string) =>
+  [...id].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) % 360, 7);
 export default function LibraryPage() {
   const campaigns = useResource<Campaign[]>('/campaigns', requestCollection<Campaign>),
     templates = useResource<Template[]>('/templates', requestCollection<Template>),
@@ -48,7 +51,11 @@ export default function LibraryPage() {
       ) : campaigns.data?.length ? (
         <div className="campaign-grid">
           {campaigns.data.map((c) => (
-            <article className="campaign-card" key={c.id}>
+            <article
+              className="campaign-card"
+              key={c.id}
+              style={{ '--cover-hue': coverHue(c.id) } as CSSProperties}
+            >
               <p className="eyebrow">Updated {new Date(c.updatedAt).toLocaleDateString()}</p>
               <h2>{c.name}</h2>
               <p>{c.description || 'No description yet.'}</p>

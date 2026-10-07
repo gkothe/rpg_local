@@ -640,7 +640,7 @@ export const storageItems: FlowItem[] = [
     'During upload preview, then when you choose to publish it.',
     'A manifest describing the upload and files for the book columns. The limit is 12 files, including the manifest.',
     "An organized rule library that the app's book tools can read.",
-    'Temporary previews expire after 30 minutes. Disk backups and published rule systems in PostgreSQL have separate lifetimes.',
+    'Temporary previews expire after 30 minutes. Disk backups and published rule systems in PostgreSQL have separate lifetimes. Each rule system also stores a display-only character sheet layout that is never sent to the GM.',
     '2.7',
     ['rpg_be_local/src/services/ruleLibrary.ts', 'rpg_be_local/src/services/ruleUpload.ts']
   ),

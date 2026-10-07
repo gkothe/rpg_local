@@ -18,6 +18,10 @@ Optional metadata arguments are `--converter-id`, `--converter-version`, `--pdf-
 
 Select the generated manifest and its unchanged column files together in the Rules import dialog. Inspect the import preview and publish the library change through the interface. Each new campaign action uses the current published system; an action already running uses the snapshot it started with.
 
+## After importing: choose a sheet layout
+
+Character sheets are free-form, so a new rule system draws them with the plain base layer. To get dots, tracks or percentiles that match the book, have an agent read [sheet layouts](sheet-layouts.md), inspect a sample character and save a layout for the system. The layout is display-only and never changes rule content, revisions or what the GM sees.
+
 ## Source text and citations
 
 Generator annotations, navigation headings and node markers describe the extraction structure. They are not original rule prose. Body text is normalized to LF, and citation offsets address the resulting canonical UTF-16 string. Structural parent nodes with no substantive body cannot support citations. Unknown page ranges can remain unknown rather than being invented.

@@ -24,7 +24,10 @@ export default function App() {
       </a>
       <header className="app-header">
         <NavLink className="brand" to="/">
-          <BookOpen size={25} />
+          <svg className="brand-sigil" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+            <path d="M24 3 L42 13.5 V34.5 L24 45 L6 34.5 V13.5 Z" />
+            <path d="M24 3 L33 24 L24 45 M24 3 L15 24 L24 45 M6 13.5 L33 24 M42 13.5 L15 24" />
+          </svg>
           <span>
             Local RPG<small>Campaign journal</small>
           </span>

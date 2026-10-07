@@ -109,3 +109,16 @@ it('protected default exposes instructions only and renders imported text safely
   expect(screen.queryByLabelText('Book package files')).toBeNull();
   expect(view.container.querySelector('img')).toBeNull();
 });
+
+it('shows a Sheet layout panel prefilled with the served layout', async () => {
+  const layout = { fields: [{ path: ['attributes', 'skills'], widget: 'dots', max: 5 }] };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...system, sheetLayout: layout })));
+  render(
+    <MemoryRouter>
+      <RuleSystemEditor id="system-id" />
+    </MemoryRouter>
+  );
+  await screen.findByRole('heading', { name: 'Sheet layout' });
+  const editor = screen.getByLabelText('Sheet layout JSON') as HTMLTextAreaElement;
+  expect(JSON.parse(editor.value)).toEqual(layout);
+});

@@ -112,3 +112,25 @@ describe('character section editing', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
+
+describe('character section layout', () => {
+  it('draws hinted fields in view mode while Edit JSON still opens the raw section', () => {
+    const campaign = fixtureCampaign();
+    const character = { ...campaign.characters[0], attributes: { skills: { Brawl: 2 } } };
+    render(
+      <CharacterSection
+        campaign={campaign}
+        character={character}
+        field="attributes"
+        label="Skills / Attributes"
+        layout={{ fields: [{ path: ['attributes', 'skills'], widget: 'dots', max: 5 }] }}
+        onSaved={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('img', { name: 'Brawl 2 of 5' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit JSON' }));
+    expect(screen.getByLabelText('Skills / Attributes JSON')).toHaveValue(
+      JSON.stringify({ skills: { Brawl: 2 } }, null, 2)
+    );
+  });
+});

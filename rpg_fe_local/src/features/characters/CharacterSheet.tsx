@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { Campaign, Character, Settings } from '../../services/types';
+import type { Campaign, Character, Settings, SheetLayout } from '../../services/types';
 import { request, json, errorMessage } from '../../services/client';
 import { Field, ErrorNotice } from '../../components/Controls';
 import CharacterSection from './CharacterSection';
@@ -9,11 +9,13 @@ function Editor({
   character,
   onSaved,
   canDelete,
+  layout,
 }: {
   campaign: Campaign;
   character: Character;
   onSaved: () => Promise<void>;
   canDelete: boolean;
+  layout?: SheetLayout;
 }) {
   const baseRevision = useRef(campaign.revision),
     savingGuard = useRef(false);
@@ -54,6 +56,7 @@ function Editor({
             character={character}
             field={key}
             label={label}
+            layout={layout}
             onSaved={onSaved}
           />
         </div>
@@ -154,11 +157,13 @@ export default function CharacterSheet({
   onSaved,
   options,
   category = 'players',
+  layout,
 }: {
   campaign: Campaign;
   onSaved: () => Promise<void>;
   options: Settings | null;
   category?: 'players' | 'npcs';
+  layout?: SheetLayout;
 }) {
   return (
     <section className="stack">
@@ -170,7 +175,13 @@ export default function CharacterSheet({
             {player === false ? (
               <details className="npc-entry panel">
                 <summary>{c.name}</summary>
-                <Editor campaign={campaign} character={c} onSaved={onSaved} canDelete />
+                <Editor
+                  campaign={campaign}
+                  character={c}
+                  onSaved={onSaved}
+                  canDelete
+                  layout={layout}
+                />
               </details>
             ) : (
               <Editor
@@ -179,6 +190,7 @@ export default function CharacterSheet({
                 character={c}
                 onSaved={onSaved}
                 canDelete={false}
+                layout={layout}
               />
             )}
           </div>

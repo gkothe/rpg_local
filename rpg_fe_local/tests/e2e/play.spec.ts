@@ -289,6 +289,12 @@ test('transcript button precedes messages and checkboxes sit below the composer'
   page,
 }) => {
   const campaign = fixtureCampaign();
+  campaign.characters.push({
+    ...campaign.characters[0],
+    id: '55555555-5555-4555-8555-555555555555',
+    name: 'Mira',
+    type: 'player',
+  });
   campaign.memory = {
     id: 'long-memory',
     text: 'The campaign continues through the crowded arena. '.repeat(200),
@@ -319,7 +325,10 @@ test('transcript button precedes messages and checkboxes sit below the composer'
     await expect(page.locator('.transcript > :first-child')).toHaveText(
       'Load full saved transcript'
     );
-    await expect(page.locator('.campaign-aside')).toBeEmpty();
+    const aside = page.locator('.campaign-aside');
+    await expect(aside.getByRole('region', { name: 'Party' })).toContainText('Mira');
+    await expect(aside.getByRole('region', { name: 'Scene' })).toHaveCount(0);
+    await expect(aside.getByRole('region', { name: 'Chronicle' })).toHaveCount(0);
   }
   const composer = page.locator('.composer');
   const transcriptOptions = page.locator('.transcript-options');

@@ -14,6 +14,7 @@ import { ErrorNotice, Empty } from '../components/Controls';
 import ProviderPicker from '../features/providers/ProviderPicker';
 import { providerValid as validProvider, isCompleted } from '../services/options';
 import CharacterSheet from '../features/characters/CharacterSheet';
+import PlayAside from '../features/play/PlayAside';
 import CharacterTemplates from '../features/characters/CharacterTemplates';
 import CharacterCreator from '../features/characters/CharacterCreator';
 import SourceManager from '../features/sources/SourceManager';
@@ -444,7 +445,13 @@ export default function PlayPage() {
                 </article>
               ))}
           </section>
-          <aside className="campaign-aside panel" />
+          <aside className="campaign-aside panel" aria-label="Campaign at a glance">
+            <PlayAside
+              campaign={campaign}
+              options={settings.data}
+              layout={ruleSystem.data?.sheetLayout}
+            />
+          </aside>
         </div>
         <section className="composer panel">
           <ErrorNotice message={game.error} />
@@ -535,6 +542,7 @@ export default function PlayPage() {
               </div>
               {game.busy && (
                 <div className="composer-progress row wrap">
+                  <span className="candle" aria-hidden="true" />
                   <p role="status">
                     <LoaderCircle className="loading-spinner" aria-hidden="true" />{' '}
                     {game.submitting
@@ -601,6 +609,7 @@ export default function PlayPage() {
           options={settings.data}
           onSaved={resource.reload}
           category={tab === 'npcs' ? 'npcs' : 'players'}
+          layout={ruleSystem.data?.sheetLayout}
         />
       </div>
       <div hidden={tab !== 'journal'}>

@@ -24,6 +24,7 @@ import {
   transcribe,
 } from './services/sources.js';
 import { Problem } from './errors.js';
+import { sheetLayoutRequestSchema } from './domain/sheetLayout.js';
 import { appRoot, uploadBytes } from './config.js';
 import {
   campaignCreateSchema,
@@ -442,6 +443,30 @@ export function createApp(options: AppOptions) {
           input.revision,
           input.instructions,
           input.requestId
+        ),
+      });
+    })
+  );
+  app.put(
+    '/api/rule-systems/:id/sheet-layout',
+    wrap(async (req, res) => {
+      const parsed = sheetLayoutRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        const layoutIssues = parsed.error.issues.filter((issue) => issue.path[0] === 'sheetLayout');
+        if (layoutIssues.length)
+          throw new Problem(
+            422,
+            'sheet_layout_invalid',
+            'Invalid sheet layout: ' +
+              layoutIssues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')
+          );
+        throw parsed.error;
+      }
+      res.json({
+        data: await getRuleLibrary().sheetLayout(
+          param(req, 'id'),
+          parsed.data.requestId,
+          parsed.data.sheetLayout
         ),
       });
     })

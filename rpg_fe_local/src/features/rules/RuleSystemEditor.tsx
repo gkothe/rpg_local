@@ -6,6 +6,7 @@ import { Field, ErrorNotice } from '../../components/Controls';
 import type { RuleSystemMetadata, RuleImportPreview, RuleContext } from '../../services/types';
 import RuleBrowser from './RuleBrowser';
 import RuleBackup from './RuleBackup';
+import SheetLayoutEditor from './SheetLayoutEditor';
 function Editor({ initial }: { initial: RuleSystemMetadata }) {
   const [system, setSystem] = useState(initial);
   const [instructions, setInstructions] = useState(initial.instructions);
@@ -194,6 +195,12 @@ function Editor({ initial }: { initial: RuleSystemMetadata }) {
           )}
         </section>
       )}
+      <SheetLayoutEditor
+        key={`${system.systemId}:${system.sheetLayoutUpdatedAt ?? ''}`}
+        systemId={system.systemId}
+        layout={system.sheetLayout}
+        options={system.sheetLayoutOptions}
+      />
       <RuleBrowser key={`${system.systemId}:${system.revision}`} system={system} />
       <RuleBackup
         systemId={system.systemId}

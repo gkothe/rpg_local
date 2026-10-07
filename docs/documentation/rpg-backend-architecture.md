@@ -585,6 +585,10 @@ Game rulebooks (e.g., core manuals, bestiaries) operate as standalone shared lib
     - `POST /api/rule-systems/backups/imports`: Validates schema and hash, saving a 30-minute preview.
     - `POST /api/rule-systems/backups/imports/:previewId/confirm`: Atomically publishes the system under a database lock with optimistic concurrency (`revision`, nullable for a new target), target identity, `requestId` and explicit `replace`.
 
+#### Sheet layouts (`domain/sheetLayout.ts`, migration 0016)
+
+`rule_systems.sheet_layout` holds per-system character-sheet display hints. It is read through `RuleStore.sheetLayout()` and written by `setSheetLayout()`, never through `RuleSystem` or `ruleContent()`, so a layout save does not change `revision`, `content_hash`, cached gameplay snapshots, rule context or any prompt sent to the GM. Saves are idempotent through `rule_confirmations` and are served in rule-system metadata. See [sheet layouts](sheet-layouts.md).
+
 #### Rulebook AST, Mapping & Overview Synthesis (`domain/ruleMapping.ts`)
 
 To allow models to navigate massive rulebooks without context exhaustion, `generateRuleMapping()` parses the canonical rule tree into a lightweight navigation schema:
@@ -769,7 +773,9 @@ PostgreSQL Database: configured loopback DB (commonly rpg_local)
 │   ├── core_rules, lore, archetypes, abilities, traits, items, creatures,
 │   │   procedures, glossary, gm_guidance, others (JSONB trees)
 │   ├── mapping (JSONB tree)
-│   └── has_original_text (BOOLEAN GENERATED ALWAYS)
+│   ├── has_original_text (BOOLEAN GENERATED ALWAYS)
+│   ├── sheet_layout (JSONB display-only sheet hints, default {"fields":[]}; outside content_hash)
+│   └── sheet_layout_updated_at (TIMESTAMPTZ, NULL until first save)
 │
 ├── rule_confirmations            (Immutable audit receipts for rule imports/updates)
 │   ├── system_id (UUID, FK -> rule_systems.id)

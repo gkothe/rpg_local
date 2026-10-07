@@ -9,7 +9,7 @@ Read `../CLAUDE.md`, `../AGENTS.md` and the backend-owned `../docs/documentation
 - Imported source/GM content is rendered as text. No unsanitized HTML. FormData never receives a manually set Content-Type.
 - Microphone access is explicit. Cancellation/unmount discards audio and stops tracks; confirmed transcript goes into the editable composer, never directly into a game turn.
 - Read-aloud offers only `localService` browser voices; no AI call, autoplay or cloud fallback.
-- Dark earth journal theme; English copy, visible keyboard focus, 44px mobile controls. Mobile forms have one field per row.
+- Candlelit Tome theme (dark ground, parchment narrative, bundled Cinzel and EB Garamond fonts); English copy, visible keyboard focus, 44px mobile controls. Mobile forms have one field per row.
 - Run lint (zero warnings), typecheck, formatting check, unit tests and synthetic browser tests. Report real CLI/OCR/phone/browser-voice validation separately.
 
 ## Verified gotchas

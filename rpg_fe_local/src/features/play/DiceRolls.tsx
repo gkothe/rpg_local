@@ -1,4 +1,18 @@
 import type { Character, Turn } from '../../services/types';
+import { dieShape } from './dieShapes';
+
+function Die({ sides, face }: { sides: number; face: number }) {
+  const shape = dieShape(sides);
+  return (
+    <span className={`die die-${shape.name}`} data-sides={sides}>
+      <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+        <path className="die-outline" d={shape.outline} />
+        {shape.inner && <path className="die-inner" d={shape.inner} />}
+      </svg>
+      <span className="die-face">{face}</span>
+    </span>
+  );
+}
 export function DiceRolls({
   turn,
   characters,
@@ -29,7 +43,15 @@ export function DiceRolls({
             {roll.groups.map((group) => (
               <p key={group.label}>
                 <strong>{group.label}</strong> · {group.faces.length}d{group.sides}:{' '}
-                <span className="dice-faces">{group.faces.join(', ')}</span>
+                <span
+                  className="dice-faces"
+                  role="img"
+                  aria-label={`faces ${group.faces.join(', ')}`}
+                >
+                  {group.faces.map((face, index) => (
+                    <Die key={index} sides={group.sides} face={face} />
+                  ))}
+                </span>
               </p>
             ))}
             {roll.rerollOf && <p className="muted">Reroll: {roll.rerollOf.reason}</p>}

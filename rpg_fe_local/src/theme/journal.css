@@ -1,17 +1,41 @@
+/*
+ * Candlelit Tome tokens. Text pairs checked against WCAG 2.2 (body >= 4.5:1, large >= 3:1,
+ * field borders >= 3:1):
+ *   text #eadfc8 on ground #17120e 14.07, surface #221a14 12.96, raised #2c2219 11.77
+ *   muted #bfae90 on ground 8.57, surface 7.89, raised 7.17, hover 6.14
+ *   gold #e3b866 on ground 10.02, surface 9.23, raised 8.38; button ink #1d150e on gold 9.70
+ *   verdigris #8fc4ad on surface 8.70, raised 7.90; ochre #d29a3a on surface 6.87
+ *   danger #f3a98f on error ground #3a221a 7.64
+ *   parchment #ecdfc2: ink #2a1f15 12.18, ink-muted #5c4b38 6.31, ink-gold #7a4a12 5.65
+ *   field border #8a7350 on ground 4.12, surface 3.79
+ */
 :root {
-  font-family: Georgia, 'Palatino Linotype', serif;
-  color: #e8dcc7;
-  background: #24271e;
+  font-family: 'EB Garamond', Georgia, 'Palatino Linotype', serif;
+  font-size: 18px;
+  color: #eadfc8;
+  background: #17120e;
   font-synthesis: none;
   line-height: 1.6;
-  --surface: #2e3227;
-  --raised: #363b2e;
-  --line: #62684e;
-  --accent: #d4b895;
-  --sage: #a9ba9f;
-  --muted: #b9b6a2;
-  --ochre: #c08e3a;
-  --danger: #efb1a1;
+  --display: 'Cinzel', 'Palatino Linotype', Georgia, serif;
+  --ground: #17120e;
+  --surface: #221a14;
+  --raised: #2c2219;
+  --hover: #3a2d20;
+  --line: #5a4630;
+  --field-line: #8a7350;
+  --accent: #e3b866;
+  --sage: #8fc4ad;
+  --muted: #bfae90;
+  --ochre: #d29a3a;
+  --danger: #f3a98f;
+  --error-ground: #3a221a;
+  --notice-ground: #3b2e1a;
+  --parchment: #ecdfc2;
+  --parchment-edge: #cdb98f;
+  --ink: #2a1f15;
+  --ink-muted: #5c4b38;
+  --ink-gold: #7a4a12;
+  --ember: #e07b4f;
   color-scheme: dark;
 }
 * {
@@ -19,6 +43,9 @@
 }
 body {
   margin: 0;
+  background:
+    radial-gradient(900px 480px at 50% -80px, rgba(227, 184, 102, 0.11), transparent 70%),
+    var(--ground);
 }
 body::before {
   content: '';
@@ -55,7 +82,7 @@ button,
 button:hover,
 .button:hover {
   border-color: var(--sage);
-  background: #414734;
+  background: var(--hover);
 }
 button:disabled {
   opacity: 0.5;
@@ -63,13 +90,18 @@ button:disabled {
 }
 .primary {
   background: var(--accent);
-  color: #292b20;
+  color: #1d150e;
   border-color: var(--accent);
   font-weight: bold;
+  font-family: var(--display);
+  letter-spacing: 0.04em;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 2px 0 #7a5a20;
 }
 .primary:hover {
-  background: #e8dcc7;
-  color: #292b20;
+  background: #f3d28e;
+  color: #1d150e;
 }
 .quiet {
   background: transparent;
@@ -87,10 +119,10 @@ select {
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  border: 1px solid var(--line);
+  border: 1px solid var(--field-line);
   border-radius: 12px;
   padding: 0.7rem 0.8rem;
-  background: #272b22;
+  background: var(--ground);
   color: inherit;
   min-height: 44px;
 }
@@ -113,19 +145,28 @@ h4,
 p {
   margin-top: 0;
 }
+h1,
+h2,
+h3 {
+  font-family: var(--display);
+}
 h1 {
-  font-size: clamp(2rem, 4vw, 3.4rem);
-  line-height: 1.12;
-  font-weight: normal;
-  letter-spacing: -0.035em;
+  font-size: clamp(1.9rem, 4vw, 3.1rem);
+  line-height: 1.15;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   margin-bottom: 0.8rem;
+  color: var(--accent);
 }
 h2 {
-  font-weight: normal;
-  font-size: 1.55rem;
+  font-weight: 400;
+  font-size: 1.4rem;
+  letter-spacing: 0.02em;
 }
 h3 {
-  font-size: 1.15rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
 }
 h4 {
   margin-bottom: 0.3rem;
@@ -154,6 +195,8 @@ small {
   gap: 1rem;
   padding: 1.2rem max(1.5rem, calc((100vw - 1400px) / 2));
   border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #211810, var(--ground));
+  box-shadow: 0 1px 0 rgba(227, 184, 102, 0.25);
 }
 .rule-evidence,
 .rule-system-selection,
@@ -166,7 +209,22 @@ small {
   align-items: center;
   gap: 0.8rem;
   text-decoration: none;
-  font-size: 1.3rem;
+  font-family: var(--display);
+  font-size: 1.25rem;
+  letter-spacing: 0.04em;
+}
+.brand-sigil {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.brand-sigil path:first-child {
+  fill: rgba(227, 184, 102, 0.12);
 }
 .brand small {
   font-size: 0.75rem;
@@ -189,6 +247,7 @@ small {
 }
 .app-header nav a.active {
   background: var(--raised);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 .page {
   max-width: 1400px;
@@ -243,8 +302,9 @@ small {
 .panel {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: 18px;
   padding: 1.5rem;
+  box-shadow: inset 0 0 0 1px rgba(227, 184, 102, 0.07);
 }
 .stack {
   display: flex;
@@ -309,14 +369,28 @@ small {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
   gap: 1.3rem;
 }
+/* Each campaign is a book; its cover colour comes from --cover-hue (set from the campaign id). */
 .campaign-card {
-  min-height: 230px;
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  padding: 1.6rem;
+  --cover: hsl(var(--cover-hue, 30) 38% 22%);
+  --cover-deep: hsl(var(--cover-hue, 30) 42% 12%);
+  position: relative;
+  min-height: 250px;
+  border: 1px solid hsl(var(--cover-hue, 30) 40% 38%);
+  border-left: 16px solid var(--cover-deep);
+  border-radius: 6px 18px 18px 6px;
+  padding: 1.7rem 1.6rem 1.2rem 1.5rem;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
+  background: linear-gradient(135deg, var(--cover), var(--cover-deep));
+  box-shadow: 5px 7px 0 rgba(0, 0, 0, 0.4);
+}
+.campaign-card::before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border: 1px solid rgba(227, 184, 102, 0.4);
+  border-radius: 3px 12px 12px 3px;
+  pointer-events: none;
 }
 .campaign-card h2 {
   font-size: 1.8rem;
@@ -353,7 +427,7 @@ small {
 .notice {
   padding: 1rem;
   border-left: 3px solid var(--ochre);
-  background: #3e3b29;
+  background: var(--notice-ground);
   border-radius: 0 12px 12px 0;
   overflow-wrap: anywhere;
 }
@@ -387,7 +461,7 @@ small {
 }
 .error {
   border-color: var(--danger);
-  background: #49352b;
+  background: var(--error-ground);
   margin-bottom: 1rem;
 }
 .back {
@@ -404,10 +478,15 @@ small {
 .tabs button {
   background: transparent;
   border-color: transparent;
+  border-radius: 6px 6px 14px 14px;
+  font-family: var(--display);
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
 }
 .tabs .selected {
   background: var(--raised);
-  border-color: var(--line);
+  border-color: var(--accent);
+  border-top-width: 3px;
   color: var(--accent);
 }
 .play-layout {
@@ -769,8 +848,54 @@ hr {
   border-top: 1px solid var(--line);
 }
 .dice-faces {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  vertical-align: middle;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+}
+.die {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+}
+.die svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.die-outline {
+  fill: #3a2c1e;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.die-inner {
+  fill: none;
+  stroke: rgba(227, 184, 102, 0.5);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+.die-face {
+  position: relative;
+  text-shadow:
+    0 0 3px #3a2c1e,
+    0 0 3px #3a2c1e;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #f4e6c4;
+}
+.die-d4 .die-face {
+  transform: translateY(0.3rem);
+}
+.gm-message .dice-roll + .dice-roll {
+  border-top-color: var(--parchment-edge);
 }
 .dice-retry {
   margin-block: 1rem;
@@ -874,30 +999,82 @@ hr {
   margin: 0;
   min-width: 0;
 }
+/* Player actions are quill notes on dark ground; GM narration is set on parchment. */
 .player-action {
+  position: relative;
   align-self: flex-end;
   background: var(--raised);
+  border-color: var(--accent);
+  border-radius: 14px 14px 2px 14px;
 }
 .gm-message {
   align-self: flex-start;
-  background: var(--surface);
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.35), transparent 45%),
+    linear-gradient(160deg, var(--parchment), #e2d1ab);
+  border-color: var(--parchment-edge);
+  border-radius: 2px 14px 14px 14px;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
 }
 .player-action > small,
 .gm-message > small {
-  font-family: system-ui, sans-serif;
-  font-weight: bold;
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: 0.06em;
   color: var(--sage);
+}
+.gm-message > small,
+.gm-message small,
+.gm-message .muted {
+  color: var(--ink-muted);
+}
+.gm-message > small {
+  color: var(--ink-gold);
 }
 .message-time {
   display: inline-block;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--muted);
   margin-left: 1rem;
 }
+.gm-message .message-time {
+  color: var(--ink-muted);
+}
 .gm-message .prose {
-  font-size: 1rem;
+  font-size: 1.08rem;
   line-height: 1.65;
   margin-top: 0.5rem;
+}
+.gm-message > div.prose:first-of-type::first-letter {
+  float: left;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 3.1em;
+  line-height: 0.85;
+  padding: 0.06em 0.1em 0 0;
+  color: var(--ink-gold);
+}
+.gm-message .spoken-sentence {
+  background: rgba(122, 74, 18, 0.22);
+  text-decoration-color: var(--ink-gold);
+}
+.gm-message .read-aloud {
+  color: var(--ink-muted);
+}
+/* Controls on parchment need ink, not the dark-ground button colours. */
+.gm-message .read-aloud button,
+.gm-message .read-aloud select {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.45);
+  border-color: var(--ink-muted);
+}
+.gm-message .read-aloud button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.75);
+  border-color: var(--ink-gold);
+}
+.gm-message .read-aloud button:disabled {
+  opacity: 0.6;
 }
 .composer {
   margin-top: 1rem;
@@ -926,5 +1103,273 @@ hr {
   .character-data > div {
     grid-template-columns: minmax(80px, 1fr) minmax(0, 2fr);
     gap: 0.5rem;
+  }
+}
+
+/* Play aside: party, scene and chronicle at a glance. */
+.aside-section + .aside-section {
+  margin-top: 1.5rem;
+}
+.aside-section h3 {
+  margin: 0 0 0.6rem;
+  color: var(--accent);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.3rem;
+}
+.aside-section h4 {
+  margin: 0.8rem 0 0.2rem;
+  color: var(--sage);
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.aside-party,
+.aside-chronicle {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.aside-party li + li {
+  margin-top: 0.8rem;
+}
+.aside-track {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.aside-chronicle li {
+  overflow-wrap: anywhere;
+  padding: 0.15rem 0;
+}
+.aside-scene {
+  margin: 0;
+}
+.aside-scene > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px dotted var(--line);
+}
+.aside-scene dt {
+  color: var(--muted);
+  text-transform: capitalize;
+}
+.aside-scene dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* Character sheets: parchment page with ink widgets chosen by the rule system's layout. */
+.sheet-nodes {
+  color: var(--ink);
+  background: linear-gradient(160deg, var(--parchment), #e2d1ab);
+  border: 1px solid var(--parchment-edge);
+  border-radius: 4px 14px 14px 14px;
+  padding: 0.4rem 1rem;
+}
+.sheet-nodes .sheet-nodes {
+  background: none;
+  border: 0;
+  border-left: 2px solid var(--parchment-edge);
+  border-radius: 0;
+  padding: 0 0 0 0.9rem;
+}
+.sheet-nodes .muted,
+.sheet-nodes small {
+  color: var(--ink-muted);
+}
+.sheet-field {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr);
+  gap: 1rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgba(92, 75, 56, 0.25);
+}
+.sheet-field:last-child {
+  border-bottom: 0;
+}
+.sheet-field.nested {
+  display: block;
+}
+.sheet-field.nested > .sheet-label {
+  display: block;
+  margin-bottom: 0.3rem;
+}
+.sheet-label {
+  font-family: var(--display);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: capitalize;
+  color: var(--ink-gold);
+  overflow-wrap: break-word;
+}
+.sheet-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.sheet-number {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+.sheet-pips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  vertical-align: middle;
+}
+.sheet-pips span {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--ink-gold);
+}
+.sheet-dots span {
+  border-radius: 50%;
+}
+.sheet-checks span {
+  border-radius: 2px;
+}
+.sheet-pips span.on {
+  background: var(--ink-gold);
+}
+.sheet-track {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+}
+.sheet-track-bar,
+.sheet-percentile-bar {
+  display: block;
+  height: 10px;
+  border: 1px solid var(--field-line);
+  border-radius: 6px;
+  background: var(--ground);
+  overflow: hidden;
+}
+.sheet-track-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--sage);
+}
+.sheet-nodes .sheet-track-bar,
+.sheet-nodes .sheet-percentile-bar {
+  border-color: var(--ink-muted);
+  background: rgba(42, 31, 21, 0.12);
+}
+.sheet-nodes .sheet-track-bar > span {
+  background: #a8431c;
+}
+.sheet-percentile {
+  display: grid;
+  grid-template-columns: 3ch minmax(60px, 1fr);
+  align-items: center;
+  gap: 0.6rem;
+}
+.sheet-percentile-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ink-gold);
+}
+.sheet-score {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.sheet-score .sheet-number {
+  font-family: var(--display);
+  font-size: 1.4rem;
+}
+.sheet-modifier {
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--parchment);
+  font-variant-numeric: tabular-nums;
+}
+.sheet-tags,
+.sheet-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.sheet-tags li {
+  padding: 0.1rem 0.7rem;
+  border: 1px solid var(--ink-gold);
+  border-radius: 999px;
+}
+.sheet-item {
+  flex: 1 1 14rem;
+  min-width: 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--parchment-edge);
+  border-left: 4px solid var(--ink-gold);
+  border-radius: 4px 10px 10px 4px;
+  background: rgba(255, 255, 255, 0.35);
+}
+.sheet-item .character-data > div {
+  border-bottom-color: rgba(92, 75, 56, 0.25);
+  padding: 0.25rem 0;
+}
+.sheet-prose {
+  margin: 0;
+  max-width: 70ch;
+}
+.sheet-note {
+  margin-top: 0.2rem;
+}
+
+/* Busy indicator: a small candle beside the status text. */
+.candle {
+  position: relative;
+  align-self: center;
+  flex-shrink: 0;
+  width: 9px;
+  height: 22px;
+  margin: 12px 0.5rem 0 0.4rem;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #cdb98f, #f3e6c6 50%, #cdb98f);
+}
+.candle::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -13px;
+  width: 9px;
+  height: 14px;
+  transform: translateX(-50%);
+  border-radius: 50% 50% 50% 50% / 65% 65% 35% 35%;
+  background: radial-gradient(circle at 50% 70%, #fff3c4, #ffb347 55%, var(--ember));
+  box-shadow: 0 0 12px 3px rgba(255, 179, 71, 0.45);
+  transform-origin: 50% 100%;
+  animation: candle-flicker 1.3s ease-in-out infinite alternate;
+}
+@keyframes candle-flicker {
+  from {
+    transform: translateX(-50%) scale(1, 1) rotate(-2deg);
+  }
+  to {
+    transform: translateX(-50%) scale(0.9, 1.08) rotate(2deg);
+  }
+}
+
+@media (max-width: 600px) {
+  .sheet-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.2rem;
+  }
+  .sheet-nodes {
+    padding: 0.3rem 0.7rem;
+  }
+  .campaign-card {
+    border-left-width: 12px;
   }
 }
