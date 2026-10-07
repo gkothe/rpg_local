@@ -8,6 +8,11 @@
  *   danger #f3a98f on error ground #3a221a 7.64
  *   parchment #ecdfc2: ink #2a1f15 12.18, ink-muted #5c4b38 6.31, ink-gold #7a4a12 5.65
  *   field border #8a7350 on ground 4.12, surface 3.79
+ *   oxblood #7d261b: drop cap on parchment 7.33; wax-seal button ink #fbeedd on oxblood 8.5,
+ *   on hover #92301f 6.9
+ *   dice card #1f1813: text #e9dcc0 13.1, gold #e3b866 9.3, muted #bfae90 8.3
+ *   book cover text on the lightest cover (hsl l22 s38, worst hue): text #eadfc8 6.6,
+ *   title #f6e5b8 7.0, gold #e3b866 4.7; party initial hsl(h 55% 62%) on raised >= 3.4 (large bold text, ring 3:1)
  */
 :root {
   font-family: 'EB Garamond', Georgia, 'Palatino Linotype', serif;
@@ -35,6 +40,7 @@
   --ink: #2a1f15;
   --ink-muted: #5c4b38;
   --ink-gold: #7a4a12;
+  --oxblood: #7d261b;
   --ember: #e07b4f;
   color-scheme: dark;
 }
@@ -88,20 +94,23 @@ button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Primary actions are a red wax seal. */
 .primary {
-  background: var(--accent);
-  color: #1d150e;
-  border-color: var(--accent);
+  background: var(--oxblood);
+  color: #fbeedd;
+  border: 2px solid #c25a40;
+  border-radius: 999px;
   font-weight: bold;
   font-family: var(--display);
   letter-spacing: 0.04em;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    0 2px 0 #7a5a20;
+    0 0 0 3px var(--ground),
+    0 0 0 4px #5a2219;
 }
 .primary:hover {
-  background: #f3d28e;
-  color: #1d150e;
+  background: #92301f;
+  border-color: #c25a40;
+  color: #fbeedd;
 }
 .quiet {
   background: transparent;
@@ -293,11 +302,36 @@ small {
   background: var(--raised);
 }
 .play-page > .page-heading h1 {
-  font-size: clamp(1.35rem, 2vw, 1.75rem);
+  font-size: clamp(1.6rem, 3vw, 2.45rem);
   margin-bottom: 0;
 }
 .play-page > .page-heading p {
   margin: 0.35rem 0 0;
+}
+.play-page > .page-heading .eyebrow {
+  margin: 0 0 0.2rem;
+}
+.play-page > .page-heading .gm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-shrink: 0;
+  max-width: 100%;
+  margin: 0 0 0 auto;
+  padding: 0.35rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.gm-chip-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--sage);
+  box-shadow: 0 0 6px 1px rgba(143, 196, 173, 0.6);
 }
 .panel {
   background: var(--surface);
@@ -369,22 +403,47 @@ small {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
   gap: 1.3rem;
 }
-/* Each campaign is a book; its cover colour comes from --cover-hue (set from the campaign id). */
+/* The library is a bookshelf: a dark wood panel with a plank under the books. */
+.campaign-grid.shelf {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 240px));
+  justify-content: start;
+  gap: 2rem 1.6rem;
+  padding: 2rem 1.5rem 3rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #1b130d, #261a10);
+  box-shadow:
+    inset 0 -14px 0 #3a2814,
+    inset 0 -16px 0 var(--line);
+}
 .campaign-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+/* Each campaign is a book; its cover colour comes from --cover-hue (set from the campaign id). */
+.book-cover {
   --cover: hsl(var(--cover-hue, 30) 38% 22%);
   --cover-deep: hsl(var(--cover-hue, 30) 42% 12%);
   position: relative;
-  min-height: 250px;
+  aspect-ratio: 3 / 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  overflow: hidden;
   border: 1px solid hsl(var(--cover-hue, 30) 40% 38%);
   border-left: 16px solid var(--cover-deep);
   border-radius: 6px 18px 18px 6px;
-  padding: 1.7rem 1.6rem 1.2rem 1.5rem;
-  display: flex;
-  flex-direction: column;
+  padding: 1.6rem 1.2rem 1.4rem 1rem;
+  text-align: center;
+  color: #eadfc8;
   background: linear-gradient(135deg, var(--cover), var(--cover-deep));
   box-shadow: 5px 7px 0 rgba(0, 0, 0, 0.4);
 }
-.campaign-card::before {
+.book-cover::before {
   content: '';
   position: absolute;
   inset: 8px;
@@ -392,24 +451,81 @@ small {
   border-radius: 3px 12px 12px 3px;
   pointer-events: none;
 }
-.campaign-card h2 {
-  font-size: 1.8rem;
+.book-cover h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+  color: #f6e5b8;
+  overflow-wrap: anywhere;
 }
-.campaign-card > p:not(.eyebrow) {
-  color: var(--muted);
+.book-system {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 0.72rem;
+  font-variant: small-caps;
+  letter-spacing: 0.16em;
+  text-transform: lowercase;
+  color: var(--accent);
+}
+.book-sigil {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  overflow: visible;
+}
+.book-sigil .die-outline {
+  fill: rgba(227, 184, 102, 0.12);
+}
+.book-blurb {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: #eadfc8;
+}
+.book-updated {
+  margin: 0;
+  font-size: 0.85rem;
 }
 .campaign-card footer {
-  margin-top: auto;
   display: flex;
   justify-content: space-between;
   align-items: center;
   border-top: 1px solid var(--line);
-  padding-top: 1rem;
+  padding-top: 0.5rem;
 }
 .campaign-card footer a {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+}
+.campaign-unwritten {
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  aspect-ratio: 3 / 4;
+  padding: 1.5rem;
+  border: 2px dashed var(--line);
+  border-radius: 6px 18px 18px 6px;
+  color: var(--muted);
+  text-align: center;
+  text-decoration: none;
+}
+.campaign-unwritten strong {
+  font-family: var(--display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+.campaign-unwritten:hover {
+  border-color: var(--accent);
+  background: rgba(227, 184, 102, 0.06);
 }
 .library-tools {
   margin: 2rem 0;
@@ -472,21 +588,23 @@ small {
 .tabs {
   display: flex;
   gap: 0.4rem;
-  padding: 1rem 0;
+  margin: 1rem 0;
   flex-wrap: wrap;
+  border-bottom: 2px solid var(--line);
 }
 .tabs button {
+  margin-bottom: -2px;
   background: transparent;
   border-color: transparent;
-  border-radius: 6px 6px 14px 14px;
+  border-radius: 6px 6px 0 0;
   font-family: var(--display);
   font-size: 0.85rem;
   letter-spacing: 0.04em;
 }
 .tabs .selected {
   background: var(--raised);
-  border-color: var(--accent);
-  border-top-width: 3px;
+  border-color: var(--line);
+  border-bottom: 2px solid var(--accent);
   color: var(--accent);
 }
 .play-layout {
@@ -859,8 +977,8 @@ hr {
   position: relative;
   display: inline-grid;
   place-items: center;
-  width: 2.6rem;
-  height: 2.6rem;
+  width: 3.2rem;
+  height: 3.2rem;
 }
 .die svg {
   position: absolute;
@@ -888,14 +1006,38 @@ hr {
     0 0 3px #3a2c1e;
   font-family: var(--display);
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 1.1rem;
   color: #f4e6c4;
 }
 .die-d4 .die-face {
   transform: translateY(0.3rem);
 }
+/* Rolls sit on a dark leather card inside the parchment. */
+.gm-message .dice-rolls {
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #1f1813;
+  color: #e9dcc0;
+}
+.gm-message .dice-rolls .muted {
+  color: var(--muted);
+}
 .gm-message .dice-roll + .dice-roll {
-  border-top-color: var(--parchment-edge);
+  border-top-color: #3d3122;
+}
+.dice-roll > p:first-child strong {
+  font-family: var(--display);
+  color: var(--accent);
+}
+.dice-interpretation {
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid #3d3122;
+}
+.dice-interpretation p:last-child,
+p.dice-interpretation {
+  margin-bottom: 0;
 }
 .dice-retry {
   margin-block: 1rem;
@@ -995,13 +1137,14 @@ hr {
   border-radius: 14px;
   padding: 1rem;
   width: fit-content;
-  max-width: 85%;
+  max-width: 100%;
   margin: 0;
   min-width: 0;
 }
 /* Player actions are quill notes on dark ground; GM narration is set on parchment. */
 .player-action {
   position: relative;
+  max-width: 78%;
   align-self: flex-end;
   background: var(--raised);
   border-color: var(--accent);
@@ -1023,6 +1166,11 @@ hr {
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--sage);
+}
+.player-action > small {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 .gm-message > small,
 .gm-message small,
@@ -1053,7 +1201,7 @@ hr {
   font-size: 3.1em;
   line-height: 0.85;
   padding: 0.06em 0.1em 0 0;
-  color: var(--ink-gold);
+  color: var(--oxblood);
 }
 .gm-message .spoken-sentence {
   background: rgba(122, 74, 18, 0.22);
@@ -1100,6 +1248,13 @@ hr {
     max-width: 96%;
     padding: 0.75rem;
   }
+  .play-page > .page-heading {
+    flex-wrap: wrap;
+  }
+  .play-page > .page-heading .gm-chip {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
   .character-data > div {
     grid-template-columns: minmax(80px, 1fr) minmax(0, 2fr);
     gap: 0.5rem;
@@ -1111,10 +1266,23 @@ hr {
   margin-top: 1.5rem;
 }
 .aside-section h3 {
-  margin: 0 0 0.6rem;
-  color: var(--accent);
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 0.3rem;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0 0 0.8rem;
+  text-align: center;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+}
+.aside-section h3::before,
+.aside-section h3::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
 }
 .aside-section h4 {
   margin: 0.8rem 0 0.2rem;
@@ -1129,8 +1297,40 @@ hr {
   margin: 0;
   padding: 0;
 }
+.aside-party li {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  column-gap: 0.8rem;
+  align-items: center;
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+}
 .aside-party li + li {
   margin-top: 0.8rem;
+}
+.aside-party .aside-track {
+  grid-column: 1 / -1;
+}
+.aside-party .aside-track:first-of-type {
+  margin-top: 0.6rem;
+}
+.party-sigil {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 2px solid hsl(var(--ring-hue, 30) 55% 62%);
+  border-radius: 50%;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: hsl(var(--ring-hue, 30) 55% 62%);
+}
+.party-name {
+  font-family: var(--display);
+  overflow-wrap: anywhere;
 }
 .aside-track {
   display: grid;
@@ -1369,7 +1569,7 @@ hr {
   .sheet-nodes {
     padding: 0.3rem 0.7rem;
   }
-  .campaign-card {
+  .book-cover {
     border-left-width: 12px;
   }
 }

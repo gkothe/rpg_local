@@ -1,6 +1,14 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Send, Undo2, Download, BookmarkPlus, LoaderCircle } from 'lucide-react';
+import {
+  ArrowLeft,
+  Send,
+  Undo2,
+  Download,
+  BookmarkPlus,
+  LoaderCircle,
+  Feather,
+} from 'lucide-react';
 import { useResource } from '../hooks/useResource';
 import type {
   CampaignDetail,
@@ -71,6 +79,8 @@ export default function PlayPage() {
     );
   const provider = providers.data?.find((provider) => provider.id === campaign.settings.provider);
   const model = provider?.models.find((model) => model.id === campaign.settings.model);
+  // The e2e mock serves a collection for this resource, so only a metadata object has a name.
+  const ruleSystemName = Array.isArray(ruleSystem.data) ? undefined : ruleSystem.data?.systemName;
   const bookSelected = !!campaign.ruleSystemId;
   const rulesBlocked = campaign.ruleResolution
     ? 'Resolve the saved rule-library reference before playing.'
@@ -107,10 +117,17 @@ export default function PlayPage() {
         <Link className="campaign-back" to="/" aria-label="Back to library" title="Back to library">
           <ArrowLeft size={22} aria-hidden="true" />
         </Link>
-        <div>
+        <div className="campaign-title">
+          {ruleSystemName && <p className="eyebrow">{ruleSystemName}</p>}
           <h1>{campaign.name}</h1>
           {campaign.description && <p className="muted">{campaign.description}</p>}
         </div>
+        {provider && model && (
+          <p className="gm-chip">
+            <span className="gm-chip-dot" aria-hidden="true" />
+            Game master: {provider.name} · {model.label}
+          </p>
+        )}
       </div>
       <ErrorNotice message={error || resource.error || providers.error} />
       {feedback && <p role="status">{feedback}</p>}
@@ -318,7 +335,10 @@ export default function PlayPage() {
                       </p>
                     )}
                     <div className="player-action">
-                      <small>You</small>
+                      <small>
+                        <Feather size={14} aria-hidden="true" />
+                        You
+                      </small>
                       <time className="message-time" dateTime={t.createdAt}>
                         {new Date(t.createdAt).toLocaleString()}
                       </time>

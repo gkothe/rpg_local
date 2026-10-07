@@ -56,14 +56,14 @@ export function DiceRolls({
             ))}
             {roll.rerollOf && <p className="muted">Reroll: {roll.rerollOf.reason}</p>}
             {interpretation ? (
-              <>
+              <div className="dice-interpretation">
                 <p>GM interpretation: {interpretation.explanation}</p>
                 {interpretation.corrections?.map((correction, index) => (
                   <p key={index}>Correction: {correction.explanation}</p>
                 ))}
-              </>
+              </div>
             ) : (
-              <p className="muted">
+              <p className="muted dice-interpretation">
                 The attempt ended before a validated interpretation. These faces remain saved.
               </p>
             )}

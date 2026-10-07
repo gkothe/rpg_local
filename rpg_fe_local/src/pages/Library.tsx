@@ -1,20 +1,25 @@
 import { useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, ArrowRight, Upload, Trash2 } from 'lucide-react';
+import { Plus, ArrowRight, Upload, Trash2, Feather } from 'lucide-react';
 import { useResource } from '../hooks/useResource';
 import { request, requestCollection, json, errorMessage } from '../services/client';
-import type { Campaign, Template } from '../services/types';
+import type { Campaign, RuleContext, Template } from '../services/types';
 import { Empty, ErrorNotice } from '../components/Controls';
-// Presentation only: each campaign keeps one cover colour derived from its id.
-const coverHue = (id: string) =>
-  [...id].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) % 360, 7);
+import { hueFromId } from '../components/hue';
+import { dieShape } from '../features/play/dieShapes';
+const sigil = dieShape(20);
 export default function LibraryPage() {
   const campaigns = useResource<Campaign[]>('/campaigns', requestCollection<Campaign>),
     templates = useResource<Template[]>('/templates', requestCollection<Template>),
+    ruleSystems = useResource<RuleContext[]>('/rule-systems', requestCollection<RuleContext>),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
     savingGuard = useRef(false);
   const navigate = useNavigate();
+  // Cover decoration only: a missing or failed rule-system list simply omits the name line.
+  const systemNames = new Map((ruleSystems.data ?? []).map((s) => [s.systemId, s.systemName]));
+  const systemName = (c: Campaign) =>
+    systemNames.get(c.ruleSystemId ?? '') ?? c.ruleReference?.systemName;
   async function importFile(file: File) {
     if (savingGuard.current) return;
     savingGuard.current = true;
@@ -49,16 +54,30 @@ export default function LibraryPage() {
       {campaigns.loading ? (
         <p role="status">Loading campaigns…</p>
       ) : campaigns.data?.length ? (
-        <div className="campaign-grid">
+        <div className="campaign-grid shelf">
           {campaigns.data.map((c) => (
             <article
               className="campaign-card"
               key={c.id}
-              style={{ '--cover-hue': coverHue(c.id) } as CSSProperties}
+              style={{ '--cover-hue': hueFromId(c.id) } as CSSProperties}
             >
-              <p className="eyebrow">Updated {new Date(c.updatedAt).toLocaleDateString()}</p>
-              <h2>{c.name}</h2>
-              <p>{c.description || 'No description yet.'}</p>
+              <div className="book-cover">
+                {systemName(c) && <p className="book-system">{systemName(c)}</p>}
+                <svg
+                  className="book-sigil"
+                  viewBox="0 0 48 48"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path className="die-outline" d={sigil.outline} />
+                  {sigil.inner && <path className="die-inner" d={sigil.inner} />}
+                </svg>
+                <h2>{c.name}</h2>
+                {c.description && <p className="book-blurb">{c.description}</p>}
+              </div>
+              <p className="muted book-updated">
+                Updated {new Date(c.updatedAt).toLocaleDateString()}
+              </p>
               <footer>
                 <Link to={`/campaigns/${c.id}`}>
                   Continue <ArrowRight size={17} />
@@ -93,6 +112,11 @@ export default function LibraryPage() {
               </footer>
             </article>
           ))}
+          <Link className="campaign-card campaign-unwritten" to="/new">
+            <Feather size={34} aria-hidden="true" />
+            <strong>An unwritten book</strong>
+            <span>Start a new campaign</span>
+          </Link>
         </div>
       ) : (
         <Empty title="Your next story starts here">

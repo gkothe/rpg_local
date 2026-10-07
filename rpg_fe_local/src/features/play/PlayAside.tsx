@@ -1,4 +1,6 @@
+import type { CSSProperties } from 'react';
 import type { Campaign, Settings, SheetLayout } from '../../services/types';
+import { hueFromId } from '../../components/hue';
 import { chronicle, humanize, partyTracks, sceneEntries } from './asideModel';
 
 export default function PlayAside({
@@ -23,8 +25,11 @@ export default function PlayAside({
           <h3 id="aside-party">Party</h3>
           <ul className="aside-party">
             {players.map((player) => (
-              <li key={player.id}>
-                <strong>{player.name}</strong>
+              <li key={player.id} style={{ '--ring-hue': hueFromId(player.id) } as CSSProperties}>
+                <span className="party-sigil" aria-hidden="true">
+                  {[...player.name.trim()][0]?.toUpperCase()}
+                </span>
+                <strong className="party-name">{player.name}</strong>
                 {partyTracks(player, campaign.state, layout).map((track) => (
                   <div key={track.key} className="aside-track">
                     <span>{track.label}</span>

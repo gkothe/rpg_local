@@ -141,7 +141,7 @@ test('terminal dice stay visible, retry preserves drafts and undo retains the au
   );
   await page.getByLabel('Show debug info').uncheck();
   await expect(result).toBeVisible();
-  await expect(result).toHaveCSS('border-top-width', '0px');
+  await expect(result).toHaveCSS('border-top-width', '1px');
   await expect(
     page.getByText('Correction: Rope bonus brings the total to 13; success')
   ).toBeVisible();
