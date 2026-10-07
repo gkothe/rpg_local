@@ -36,6 +36,7 @@ import {
 import { memoryJsonSchema, memorySchema } from '../domain/schemas.js';
 import { composeMemory } from '../domain/memory.js';
 import { HistoryReader, HistoryStore } from './historyStore.js';
+import { HistoryMaintenance } from './historyMaintenance.js';
 import { historySettingsOf } from '../domain/historyRecall.js';
 import { applyResponse, undoSnapshot } from '../domain/state.js';
 import { assertFrozenContext } from '../domain/journalCompatibility.js';
@@ -428,10 +429,13 @@ export class TurnService {
       // Each bounded batch covers a consecutive prefix; never recursively summarizes the full transcript.
       while (!t.retryOfTurnId && needs && recentGameplayHistory(c, history).older.length > 0) {
         const compactionCapacity = await this.generator.capacity(t.settings, c.budgets.compaction);
+        // With selective history the summarizer sees the short overview, not the whole archive;
+        // composeMemory below still appends to the complete stored text.
         const batch = compactionBatch(
           c,
           history,
-          Math.min(c.budgets.compaction, compactionCapacity)
+          Math.min(c.budgets.compaction, compactionCapacity),
+          historySettingsOf(c).enabled ? await this.overviewText(c) : undefined
         );
         if (!batch.turns.length) break;
         const batchIds = batch.turns.map((x) => x.id);
@@ -488,6 +492,22 @@ export class TurnService {
         c = await this.store.campaign(c.id);
         history = await this.store.activeTurns(c.id);
         needs = olderHistoryBytes(c, history) > AUTO_COMPACTION_HISTORY_THRESHOLD_BYTES;
+      }
+      // Selective history: keep the index current before the context is frozen. A failure keeps
+      // the previous index and fails this action visibly rather than silently continuing.
+      if (!t.retryOfTurnId && historySettingsOf(await this.store.campaign(t.campaignId)).enabled) {
+        const maintenance = await new HistoryMaintenance(this.store, this.generator).run({
+          campaignId: t.campaignId,
+          settings: t.settings,
+          signal: ctl.signal,
+          trace,
+          commit: (fn) =>
+            this.store.transaction(async (client) => {
+              await this.lockedOwned(t, client);
+              return fn(client);
+            }),
+        });
+        await traceEvent(trace, 'history_maintenance', maintenance);
       }
       // Uncovered older turns remain in gameplay history until a summary is committed.
       if (!t.retryOfTurnId)
@@ -982,6 +1002,12 @@ export class TurnService {
       await this.store.save(restored, client);
       return restored;
     });
+  }
+  private async overviewText(c: Campaign): Promise<string> {
+    const id = historySettingsOf(c).activeOverviewId;
+    if (!id) return '';
+    const [overview] = await new HistoryStore(this.store).byIds(c.id, [id]);
+    return overview && overview.selection === 'valid' ? overview.text : '';
   }
   /** Selective-history input for a new context; null keeps the full-memory (legacy) prompt. */
   private async compactHistory(campaign: Campaign, turns: Turn[], client: PoolClient) {

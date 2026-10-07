@@ -324,3 +324,31 @@ test('start with no completed turns is rejected explicitly', { skip: !enabled },
     (e: unknown) => e instanceof Problem && e.status === 422 && e.code === 'memory_invalid'
   );
 });
+
+test(
+  'rebuild gives the model only a bounded background while the stored draft keeps every batch',
+  { skip: !enabled },
+  async () => {
+    const { seedCampaign, fakeGenerator } = await import('./journalFixture.js');
+    const { campaign } = await seedCampaign(
+      store,
+      Array.from({ length: 12 }, (_, i) => ({ action: `act ${i}`, narrative: `${SCENE} ${i}` }))
+    );
+    await store.edit(campaign.id, 0, (c) => {
+      c.budgets = { compaction: 1500 };
+    });
+    let batch = 0;
+    const fake = fakeGenerator(() => ({ text: `- Batch ${batch++}: ${'detail '.repeat(120)}` }));
+    const service = new MemoryRebuildService(store, fake);
+    const started = await service.start(campaign.id, randomUUID());
+    const ready = await settle(service, campaign.id, started.id);
+    assert.equal(ready.status, MemoryRebuildStatus.Ready, ready.safeError ?? '');
+    const last = fake.calls.at(-1) as { earlierSummary: string };
+    const full = ready.candidate!.text;
+    assert.ok(Buffer.byteLength(full) > 8000, 'the stored draft keeps every batch');
+    for (let i = 0; i < fake.calls.length; i++) assert.ok(full.includes(`- Batch ${i}:`));
+    assert.ok(Buffer.byteLength(last.earlierSummary) < Buffer.byteLength(full) / 2);
+    assert.ok(last.earlierSummary.includes(`- Batch ${fake.calls.length - 2}:`));
+    assert.ok(!last.earlierSummary.includes('- Batch 0:'));
+  }
+);

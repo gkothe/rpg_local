@@ -347,7 +347,7 @@ Migration 0018 adds the memory rebuild tables; run `setup-database.cmd` and rest
 
 ### Selective history
 
-Migrations 0019 (history versions, fragments, receipts and the frozen session column) and 0020 (rebuild purpose) must be applied with `setup-database.cmd` before starting the updated backend. Existing campaigns keep the full-memory prompt until you prepare and activate a compact history in the Journal tab. Preparing uses your provider allowance (one call per 8 older turns, one per chapter and one overview) and can be cancelled or resumed. An optional live smoke test must use a disposable campaign, and its allowance use and result are reported separately; default checks use mocked providers.
+Migrations 0019 (history versions, fragments, receipts and the frozen session column) and 0020 (rebuild purpose) must be applied with `setup-database.cmd` before starting the updated backend. Existing campaigns keep the full-memory prompt until you prepare and activate a compact history in the Journal tab. Preparing uses your provider allowance (one call per 8 older turns, one per chapter and one overview) and can be cancelled or resumed. While selective history is on, an action that pushes a new block of 8 turns out of the recent window adds a section call, occasionally a chapter call, and one overview call to that action. An optional live smoke test must use a disposable campaign, and its allowance use and result are reported separately; default checks use mocked providers.
 
 ### Audited turns and narrative editing
 

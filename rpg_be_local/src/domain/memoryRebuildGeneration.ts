@@ -11,7 +11,7 @@ import type { CorrectionGuidance } from './journalCompatibility.js';
 import { canonicalJson, sha256 } from './journalLedger.js';
 import { publicKnowledge } from './playerProjection.js';
 import { memoryJsonSchema } from './schemas.js';
-import { historySettingsOf, type SourceLocator } from './historyRecall.js';
+import { HISTORY_DEFAULTS, historySettingsOf, type SourceLocator } from './historyRecall.js';
 
 export type RebuildTurn = ReturnType<typeof summaryTurns>[number];
 /** Private job data: public transcript pairs, public knowledge and applicable corrections only. */
@@ -128,3 +128,21 @@ export const compactTargetIdentity = (c: Campaign): string => {
     })
   );
 };
+
+/**
+ * Short continuity context for the next summary call: the newest whole lines of what was written
+ * so far, within a soft byte target (at least the last line). Composition still appends to the
+ * complete text, so this only shrinks the model's input, never the stored result.
+ */
+export function boundedBackground(text: string, maxBytes: number = HISTORY_DEFAULTS.overviewBytes) {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  const kept: string[] = [];
+  let used = 0;
+  for (const line of lines.reverse()) {
+    const size = Buffer.byteLength(line, 'utf8') + 1;
+    if (kept.length && used + size > maxBytes) break;
+    kept.unshift(line);
+    used += size;
+  }
+  return kept.join('\n');
+}

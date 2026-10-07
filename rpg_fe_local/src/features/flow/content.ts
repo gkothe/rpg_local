@@ -64,13 +64,13 @@ export const nodes: FlowItem[] = [
     'context',
     'Context builder',
     'The context builder prepares the information the model will receive: GM instructions, saved character sheets, scene facts, earlier turns, and reference text. Campaign context settings live in the Game master tab. Description is a player summary shown in the library and header; it is not sent to the GM.',
-    'Before the model responds. The app may first summarize older turns to shorten the context.',
+    'Before the model responds. The app may first summarize older turns, and with selective history on it may first extend the history summaries.',
     'The saved campaign, completed turns that have not been undone, confirmed source excerpts, and the selected rule system.',
     'Separate system instructions and a JSON user prompt. The app also keeps a ContextManifest that records what it selected, and saves a fixed copy for this attempt.',
     'The app reads PostgreSQL and copies campaign knowledge into memory for the turn. It leaves private notes out of the gameplay context it builds automatically.',
     '4.3',
     ['rpg_be_local/src/domain/context.ts', 'rpg_be_local/src/domain/knowledgeRecall.ts'],
-    'Every context includes a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene, and always includes every participant of an active encounter. It also selects relevant campaign knowledge and searches source text for matching words. Gameplay has no token target: relevant retrieved sections and matching campaign facts are included without size-based omission. History is summarized in consecutive batches independently of gameplay prompt size. Memory summaries request bullet points while preserving the same information as paragraph summaries. Summaries can lose detail, so the app keeps the original turns.'
+    'Every context includes a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene, and always includes every participant of an active encounter. It also selects relevant campaign knowledge and searches source text for matching words. Gameplay has no token target: relevant retrieved sections and matching campaign facts are included without size-based omission. History is summarized in consecutive batches independently of gameplay prompt size. Memory summaries request bullet points while preserving the same information as paragraph summaries. Summaries can lose detail, so the app keeps the original turns. With selective history switched on, the memory text is replaced by a short overview plus the most relevant older sections and any items you protected; the full memory and all originals stay stored and the model can search them with history tools. Knowledge follows a priority: open debts and objectives, relationships, protected facts and records named in the scene are always included, while a record that is merely linked to your character competes for a size target by relevance.'
   ),
   item(
     'model',
@@ -268,7 +268,7 @@ export const steps: FlowStep[] = [
     id: 'prepare',
     label: '4. Freeze context',
     node: 'context',
-    data: 'The app reads character sheets, history, and sources. It always includes the latest three player/GM text pairs, plus any older turns not yet summarized. It summarizes only older turns while keeping their originals. It saves a fixed prompt and a complete copy of campaign knowledge for this attempt.',
+    data: 'The app reads character sheets, history, and sources. It always includes the latest three player/GM text pairs, plus any older turns not yet summarized. It summarizes only older turns while keeping their originals. With selective history on, older turns leave the prompt only once a section covers them, and the model can look up the rest with history tools. It saves a fixed prompt and a complete copy of campaign knowledge for this attempt.',
   },
   {
     id: 'infer',
@@ -695,7 +695,7 @@ export const storageItems: FlowItem[] = [
     'When you prepare and activate compact history, protect an item, rebuild the memory, or the GM searches older history.',
     'Your saved conversations with their dice, public facts and accepted corrections. Never private notes or hidden GM knowledge.',
     'Hashed copies of each conversation, section/chapter/overview summaries that point to them, your protections, and a staged draft you review.',
-    'Versions and summaries are stored once and cannot be edited; only a valid/stale flag changes. Rebuild and Prepare run as resumable jobs that keep their progress and change nothing until you apply the draft. Undo or an accepted correction retires the affected summaries.',
+    'Versions and summaries are stored once and cannot be edited; only a valid/stale flag changes. Rebuild and Prepare run as resumable jobs that keep their progress and change nothing until you apply the draft. Once active, the app extends the summaries inside your next action when a new block of turns ages out. Undo or an accepted correction retires the affected summaries.',
     '5.6',
     [
       'rpg_be_local/src/services/historyStore.ts',

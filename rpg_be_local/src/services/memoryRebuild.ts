@@ -30,6 +30,7 @@ import {
   sourceIdentity,
   targetIdentity,
   compactTargetIdentity,
+  boundedBackground,
   type FrozenRebuildInput,
 } from '../domain/memoryRebuildGeneration.js';
 import { canonicalJson, sha256 } from '../domain/journalLedger.js';
@@ -414,12 +415,13 @@ export class MemoryRebuildService {
       const ceiling = Math.min(frozen.compactionBudget, capacity);
       while (cp.nextIndex < frozen.turns.length) {
         await this.alive(job, owner, ctl.signal);
-        const batch = nextRebuildBatch(frozen, draft, cp.nextIndex, ceiling);
+        const background = boundedBackground(draft);
+        const batch = nextRebuildBatch(frozen, background, cp.nextIndex, ceiling);
         const parsed = memorySchema.parse(
           await this.generate(
             generator,
             settings,
-            rebuildPrompt(frozen, draft, batch),
+            rebuildPrompt(frozen, background, batch),
             ctl.signal,
             root
           )
