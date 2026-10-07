@@ -68,6 +68,7 @@ import { TurnStatus } from '../domain/options.js';
 import type { ProviderSettings } from '../domain/types.js';
 import type { Store } from '../store.js';
 import { JournalJobStore, type JournalJobRow } from './journalJobs.js';
+import { HistoryStore } from './historyStore.js';
 
 /** Lease renewal interval; ownership upkeep only, never an AI deadline. */
 const JOURNAL_HEARTBEAT_MS = 15_000;
@@ -692,6 +693,8 @@ export class JournalService {
         [campaignId]
       );
       next.memory = null;
+      // History summaries may carry the superseded fact too; they wait for a refresh.
+      await new HistoryStore(this.store).invalidateAll(client, campaignId);
       await this.store.save(next, client);
       const { entry } = entryDetail(
         next.knowledge ?? [],

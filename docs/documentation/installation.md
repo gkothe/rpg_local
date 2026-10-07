@@ -341,6 +341,14 @@ UAC, provider sign-in/MFA and browser microphone permission may require the pers
 
 Ordinary npm tests do not install external tools or authenticate an account. These instructions were checked against project scripts and publisher documentation. A full install on a clean Windows machine remains a separate verification step.
 
+### Memory rebuild
+
+Migration 0018 adds the memory rebuild tables; run `setup-database.cmd` and restart the backend. Without it, gameplay actions that check for active work fail with a database error. The Journal tab's **Rebuild memory** button uses your provider allowance and only stages a draft; nothing changes until you apply it. Default checks use mocked providers. An optional live smoke test must use a disposable campaign, and its allowance use and result are reported separately.
+
+### Selective history
+
+Migrations 0019 (history versions, fragments, receipts and the frozen session column) and 0020 (rebuild purpose) must be applied with `setup-database.cmd` before starting the updated backend. Existing campaigns keep the full-memory prompt until you prepare and activate a compact history in the Journal tab. Preparing uses your provider allowance (one call per 8 older turns, one per chapter and one overview) and can be cancelled or resumed. An optional live smoke test must use a disposable campaign, and its allowance use and result are reported separately; default checks use mocked providers.
+
 ### Audited turns and narrative editing
 
 Run `setup-database.cmd` after updating the repository. It applies numbered migrations,

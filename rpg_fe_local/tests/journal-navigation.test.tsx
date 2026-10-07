@@ -4,6 +4,9 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PlayPage from '../src/pages/Play';
 import { fixtureCampaign, fixtureTurn, options, providers } from './fixtures';
 
+// History recall has its own tests; these cover the Journal behavior around it.
+vi.mock('../src/features/journal/HistoryMemory', () => ({ default: () => null }));
+
 afterEach(() => vi.unstubAllGlobals());
 
 const campaign = fixtureCampaign();

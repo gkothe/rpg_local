@@ -32,6 +32,17 @@ import {
   KNOWLEDGE_GET_TOOL_NAME,
   type FrozenKnowledge,
 } from '../domain/knowledgeRecall.js';
+import {
+  HISTORY_GET_TOOL_NAME,
+  HISTORY_SEARCH_TOOL_NAME,
+  historyGetSchema,
+  historySearchSchema,
+} from '../domain/historyRecall.js';
+/** Frozen-corpus reader; supplied only for attempts that captured history metadata. */
+export type HistoryToolReader = {
+  search: (input: unknown) => Promise<Record<string, unknown>>;
+  get: (input: unknown) => Promise<Record<string, unknown>>;
+};
 export type GameplayToolResult = DiceResult | Record<string, unknown>;
 export type GameplayToolDispatch = ((
   name: string,
@@ -64,7 +75,7 @@ export type GameplayToolRegistration = {
   description: string;
   schema: z.ZodType;
   purpose: 'default' | 'book';
-  capability: 'dice' | 'rules' | 'knowledge' | 'sources' | 'characters';
+  capability: 'dice' | 'rules' | 'knowledge' | 'sources' | 'characters' | 'history';
   handler: (input: unknown, requestId: string | number) => Promise<GameplayToolResult>;
   invalid?: (input: unknown, requestId: string | number) => Promise<GameplayToolResult>;
 };
@@ -197,6 +208,28 @@ function ownedRegistrations(
       capability: 'knowledge',
       handler: async (input: unknown) => recall.get(input),
     },
+    ...(options.history
+      ? ([
+          {
+            name: HISTORY_SEARCH_TOOL_NAME,
+            description:
+              'Search the frozen campaign history (older sections and chapters left out of the prompt). Empty query lists chronologically. Summaries are navigation aids; read originals with campaign_history_get before relying on a detail.',
+            schema: historySearchSchema,
+            purpose: 'default',
+            capability: 'history',
+            handler: (input: unknown) => options.history!.search(input),
+          },
+          {
+            name: HISTORY_GET_TOOL_NAME,
+            description:
+              'Read one frozen history item; includeOriginals returns the exact original player/GM pairs it summarizes (paged). Corrected facts override older transcript text.',
+            schema: historyGetSchema,
+            purpose: 'default',
+            capability: 'history',
+            handler: (input: unknown) => options.history!.get(input),
+          },
+        ] satisfies GameplayToolRegistration[])
+      : []),
   ];
 }
 export class GameplayTools {
@@ -223,6 +256,7 @@ export class GameplayTools {
         requestId: string
       ) => Promise<Record<string, unknown>>;
       prepareCombat: (input: unknown) => Promise<Record<string, unknown>>;
+      history?: HistoryToolReader;
     }
   ) {
     if (options.book && !options.read)

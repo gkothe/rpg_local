@@ -1,5 +1,6 @@
 import { frozenCampaignSourcesSchema } from './campaignSourceRecall.js';
 import { frozenKnowledgeSchema } from './knowledgeRecall.js';
+import { frozenHistorySchema } from './historyRecall.js';
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
 import { CombatRollKind, CombatRollScope } from './combat.js';
@@ -158,6 +159,7 @@ export const diceSessionSchema = z
     systemPrompt: z.string().optional(),
     frozenKnowledge: frozenKnowledgeSchema.optional(),
     frozenSources: frozenCampaignSourcesSchema.optional(),
+    frozenHistory: frozenHistorySchema.optional(),
     toolDefinitions: z
       .array(
         z

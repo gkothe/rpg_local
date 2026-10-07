@@ -51,10 +51,18 @@ function score(record: CampaignKnowledge, query: string) {
   const text = record.text.toLocaleLowerCase();
   return words.reduce((n, word) => n + (title.includes(word) ? 3 : text.includes(word) ? 1 : 0), 0);
 }
+export type KnowledgeSelectionOptions = {
+  /** Selective mode: a link to the player no longer makes a record mandatory. */
+  compact?: boolean;
+  pinnedIds?: readonly string[];
+  correctionTargetIds?: readonly string[];
+  optionalBytes?: number;
+};
 export function selectRelevantKnowledge(
   c: Campaign,
   action: string,
-  sceneTerms = ''
+  sceneTerms = '',
+  selection: KnowledgeSelectionOptions = {}
 ): CampaignKnowledge[] {
   const players = c.characters.filter((ch) => ch.type === CharacterType.Player).map((ch) => ch.id);
   const mentions = action + ' ' + sceneTerms;
@@ -86,6 +94,7 @@ export function selectRelevantKnowledge(
     ' ' +
     sceneWords.join(' ');
   const active = (c.knowledge ?? []).filter((r) => r.status === KnowledgeStatus.Active);
+  if (selection.compact) return selectCompactKnowledge(c, active, mentions, query, selection);
   const mandatory = active.filter(
     (r) =>
       [KnowledgeKind.Debt, KnowledgeKind.Objective].includes(r.kind) ||
@@ -102,6 +111,60 @@ export function selectRelevantKnowledge(
         a.id.localeCompare(b.id)
     );
   return [...mandatory, ...optional];
+}
+/**
+ * Commitments, relationships, pins, correction targets, explicit references and current-scene
+ * participants are mandatory; everything else (including historical events and merely
+ * player-linked records) competes for a soft byte target by relevance. Lifecycle is never touched.
+ */
+function selectCompactKnowledge(
+  c: Campaign,
+  active: CampaignKnowledge[],
+  mentions: string,
+  query: string,
+  selection: KnowledgeSelectionOptions
+): CampaignKnowledge[] {
+  const lower = mentions.toLocaleLowerCase();
+  const pinned = new Set(selection.pinnedIds ?? []);
+  const corrected = new Set(selection.correctionTargetIds ?? []);
+  const sceneCharacters = new Set(
+    c.characters
+      .filter(
+        (ch) =>
+          ch.type !== CharacterType.Player &&
+          (lower.includes(ch.id.toLowerCase()) || lower.includes(ch.name.toLocaleLowerCase()))
+      )
+      .map((ch) => ch.id)
+  );
+  const mandatory = active.filter(
+    (r) =>
+      pinned.has(r.id) ||
+      corrected.has(r.id) ||
+      [KnowledgeKind.Debt, KnowledgeKind.Objective, KnowledgeKind.Relationship].includes(r.kind) ||
+      lower.includes(r.id) ||
+      lower.includes(r.title.toLocaleLowerCase()) ||
+      ([KnowledgeKind.Npc, KnowledgeKind.Place].includes(r.kind) &&
+        r.characterIds.some((id) => sceneCharacters.has(id)))
+  );
+  const taken = new Set(mandatory.map((r) => r.id));
+  const optional = active
+    .filter((r) => !taken.has(r.id) && score(r, query) > 0)
+    .sort(
+      (a, b) =>
+        score(b, query) - score(a, query) ||
+        b.updatedAt.localeCompare(a.updatedAt) ||
+        a.id.localeCompare(b.id)
+    );
+  const budget = selection.optionalBytes ?? 8192;
+  let used = 0;
+  const chosen: CampaignKnowledge[] = [];
+  for (const record of optional) {
+    const size = Buffer.byteLength(JSON.stringify(record), 'utf8');
+    if (used + size > budget) continue;
+    used += size;
+    chosen.push(record);
+  }
+  return [...mandatory, ...chosen];
 }
 export function createKnowledgeRecall(raw: FrozenKnowledge) {
   const frozen = structuredClone(frozenKnowledgeSchema.parse(raw));

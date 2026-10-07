@@ -6,6 +6,8 @@ import { fixtureCampaign, fixtureTurn, options } from './fixtures';
 
 // The knowledge browser has its own tests; these cover notes, memory and context inspection.
 vi.mock('../src/features/journal/JournalKnowledge', () => ({ default: () => null }));
+vi.mock('../src/features/journal/MemoryRebuild', () => ({ default: () => null }));
+vi.mock('../src/features/journal/HistoryMemory', () => ({ default: () => null }));
 
 afterEach(() => vi.unstubAllGlobals());
 

@@ -17,6 +17,7 @@ import {
   type DiceResult,
 } from '../domain/dice.js';
 
+import type { FrozenHistory } from '../domain/historyRecall.js';
 import { diceDigest } from '../domain/diceContext.js';
 import { RuleStore } from './ruleStore.js';
 export { diceDigest, gameplayDigest } from '../domain/diceContext.js';
@@ -28,6 +29,7 @@ export class DiceService {
     characterIds: string[],
     metadata: {
       frozenSources?: FrozenCampaignSources;
+      frozenHistory?: FrozenHistory;
       systemPrompt: string;
       knowledge: FrozenKnowledge;
       toolDefinitions: GameplayToolDefinition[];
@@ -39,7 +41,7 @@ export class DiceService {
       const id = randomUUID();
       try {
         await client.query(
-          'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,system_prompt,frozen_knowledge,tool_definitions,frozen_sources) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+          'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
           [
             id,
             turn.campaignId,
@@ -52,6 +54,7 @@ export class DiceService {
             metadata.knowledge,
             JSON.stringify(metadata.toolDefinitions),
             metadata.frozenSources ?? null,
+            metadata.frozenHistory ? JSON.stringify(metadata.frozenHistory) : null,
           ]
         );
       } catch (error) {

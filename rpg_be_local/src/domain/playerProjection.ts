@@ -41,6 +41,7 @@ export function publicCampaign(campaign: Campaign): Campaign {
     createdAt: campaign.createdAt,
     updatedAt: campaign.updatedAt,
     knowledge: publicKnowledge(campaign.knowledge ?? []),
+    ...(campaign.historyRecall ? { historyRecall: structuredClone(campaign.historyRecall) } : {}),
     ...(campaign.ruleSystemId !== undefined ? { ruleSystemId: campaign.ruleSystemId } : {}),
     ...(campaign.ruleReference ? { ruleReference: structuredClone(campaign.ruleReference) } : {}),
     ...(campaign.ruleResolution

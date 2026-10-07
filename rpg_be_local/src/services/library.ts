@@ -66,6 +66,17 @@ import {
   type CampaignKnowledge,
 } from '../domain/knowledge.js';
 import { frozenKnowledgeSchema, type FrozenKnowledge } from '../domain/knowledgeRecall.js';
+import {
+  derivationDigestOf,
+  fragmentDigest,
+  frozenHistorySchema,
+  historyFragmentArchiveSchema,
+  historySettingsSchema,
+  historyVersionArchiveSchema,
+  versionHashOf,
+  type FrozenHistory,
+} from '../domain/historyRecall.js';
+import { HISTORY_INSTRUCTION_ID } from '../domain/historyGeneration.js';
 import { JournalEventKind } from '../domain/journal.js';
 import { eventDigest, journalLedgerSchema, sha256 } from '../domain/journalLedger.js';
 /** Identifies a Local RPG campaign export; any other JSON document is rejected. */
@@ -165,6 +176,8 @@ const campaign = z
     knowledge: z.array(campaignKnowledgeSchema),
     // Optional: archives exported before the Journal ledger carry none and import with an empty one.
     journal: journalLedgerSchema.optional(),
+    // Optional: older archives import with selective history disabled.
+    historyRecall: historySettingsSchema.optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -189,6 +202,7 @@ const context = z
     systemPrompt: z.string().optional(),
     diceSessionId: uuid.optional(),
     frozenKnowledge: frozenKnowledgeSchema.optional(),
+    frozenHistory: frozenHistorySchema.optional(),
     sourceSpans: z.array(sourceSpanSchema).optional(),
     frozenSources: frozenCampaignSourcesSchema.optional(),
     sourceSelection: z
@@ -276,8 +290,83 @@ const archiveSchema = z
     diceRecords: z.array(diceRecordSchema).max(MAX_ARCHIVE_TURNS * DICE_LIMITS.slots),
     combatPreparations: z.array(combatPreparationArchiveSchema),
     combatPreparedCharacters: z.array(combatPreparedCharacterArchiveSchema),
+    historyTurnVersions: z.array(historyVersionArchiveSchema).optional(),
+    historyFragments: z.array(historyFragmentArchiveSchema).optional(),
   })
   .strict();
+
+/**
+ * Selective-history references must resolve inside the archive and every stored hash must match,
+ * checked before any ID is remapped. Missing versions and altered content are rejected.
+ */
+function validateHistoryArchive(archive: z.infer<typeof archiveSchema>): void {
+  const invalid = (detail: string) => new Problem(422, 'archive_invalid', detail);
+  const versions = archive.historyTurnVersions ?? [];
+  const fragments = archive.historyFragments ?? [];
+  const settings = archive.campaign.historyRecall;
+  if (!versions.length && !fragments.length && !settings) {
+    const orphan =
+      archive.diceSessions.some((s) => s.frozenHistory) ||
+      archive.turns.some((t) => t.context?.frozenHistory);
+    if (orphan) throw invalid('Frozen history references versions missing from the archive');
+    return;
+  }
+  const turnIds = new Set(archive.turns.map((t) => t.id));
+  const versionKeys = new Set<string>();
+  for (const v of versions) {
+    const key = `${v.turnId}:${v.contentHash}`;
+    if (versionKeys.has(key)) throw invalid('Duplicate history version');
+    versionKeys.add(key);
+    if (!turnIds.has(v.turnId) || v.document.turnId !== v.turnId)
+      throw invalid('History version references an unknown conversation');
+    if (versionHashOf(v.document as never) !== v.contentHash)
+      throw invalid('History version content does not match its hash');
+  }
+  const fragmentById = new Map<string, (typeof fragments)[number]>();
+  for (const f of fragments) {
+    if (fragmentById.has(f.id)) throw invalid('Duplicate history fragment ID');
+    fragmentById.set(f.id, f);
+  }
+  const knowledge = new Set([
+    ...archive.campaign.knowledge.map((r) => r.id),
+    ...archive.snapshots.flatMap((snap) =>
+      [...(snap.beforeKnowledge ?? []), ...(snap.afterKnowledge ?? [])].map((r) => r.id)
+    ),
+  ]);
+  for (const f of fragments) {
+    if (f.sources.some((x) => !versionKeys.has(`${x.turnId}:${x.contentHash}`)))
+      throw invalid('History fragment references a missing source version');
+    if (f.parentIds.some((id) => !fragmentById.has(id)))
+      throw invalid('History fragment references a missing parent');
+    if (f.links.some((id) => !knowledge.has(id)))
+      throw invalid('History fragment links an unknown record');
+    if (fragmentDigest(f) !== f.contentDigest)
+      throw invalid('History fragment content does not match its digest');
+  }
+  if (settings) {
+    const memoryIds = new Set(archive.memories.map((m) => m.id));
+    if (
+      (settings.activeOverviewId && !fragmentById.has(settings.activeOverviewId)) ||
+      settings.protectedSectionIds.some((id) => !fragmentById.has(id)) ||
+      settings.protectedMemoryIds.some((id) => !memoryIds.has(id)) ||
+      settings.protectedKnowledgeIds.some((id) => !knowledge.has(id))
+    )
+      throw invalid('History settings reference an unknown item');
+  }
+  const frozen = [
+    ...archive.diceSessions.flatMap((s) => (s.frozenHistory ? [s.frozenHistory] : [])),
+    ...archive.turns.flatMap((t) => (t.context?.frozenHistory ? [t.context.frozenHistory] : [])),
+  ];
+  for (const h of frozen) {
+    if (h.campaignId !== archive.campaign.id)
+      throw invalid('Frozen history belongs to another campaign');
+    if (h.turnVersions.some((x) => !versionKeys.has(`${x.turnId}:${x.contentHash}`)))
+      throw invalid('Frozen history references a missing version');
+    for (const ref of h.fragments)
+      if (fragmentById.get(ref.id)?.contentDigest !== ref.contentDigest)
+        throw invalid('Frozen history fragment is missing or altered');
+  }
+}
 
 /** Journal evidence must still match the archived final transcript; undone turns remain audit-only. */
 function validateJournalArchive(archive: z.infer<typeof archiveSchema>): void {
@@ -331,6 +420,7 @@ export function remapArchive(raw: unknown): Archive {
     );
   const parsed = archiveSchema.parse(raw);
   validateJournalArchive(parsed);
+  validateHistoryArchive(parsed);
   const metadata = ['systemPrompt', 'frozenKnowledge', 'toolDefinitions'] as const;
   for (const session of parsed.diceSessions) {
     const count = metadata.filter((key) => session[key] !== undefined).length;
@@ -361,6 +451,7 @@ export function remapArchive(raw: unknown): Archive {
   old.sources.forEach((s) => register(s.id));
   archive.turns.forEach((t) => register(t.id));
   archive.memories.forEach((m) => register(m.id));
+  (archive.historyFragments ?? []).forEach((f) => register(f.id));
   archive.diceSessions.forEach((session) => register(session.id));
   archive.diceRecords.forEach((record) => register(record.id));
   archive.combatPreparations.forEach((prep) => register(prep.id));
@@ -376,6 +467,7 @@ export function remapArchive(raw: unknown): Archive {
     ...sids,
     ...tids,
     ...mids,
+    ...(archive.historyFragments ?? []).map((f) => f.id),
     ...archive.diceSessions.map((session) => session.id),
     ...archive.diceRecords.map((record) => record.id),
     ...archive.combatPreparations.map((prep) => prep.id),
@@ -970,7 +1062,71 @@ export function remapArchive(raw: unknown): Archive {
       event.digest = eventDigest(event as unknown as Record<string, unknown>);
     }
   }
+  // History: ids and hashes are recomputed after the remap and every locator is rewired.
+  const deepMap = <T>(value: T): T => {
+    if (typeof value === 'string') return (ids.get(value) ?? value) as T;
+    if (Array.isArray(value)) return value.map(deepMap) as T;
+    if (value && typeof value === 'object')
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, deepMap(v)])
+      ) as T;
+    return value;
+  };
+  const versionMap = new Map<string, { turnId: string; contentHash: string }>();
+  for (const v of out.historyTurnVersions ?? []) {
+    const key = `${v.turnId}:${v.contentHash}`;
+    const document = {
+      ...v.document,
+      turnId: mapped(v.document.turnId),
+      ...(v.document.dice ? { dice: deepMap(v.document.dice) } : {}),
+      ...(v.document.interpretations
+        ? { interpretations: deepMap(v.document.interpretations) }
+        : {}),
+    };
+    v.turnId = mapped(v.turnId);
+    v.document = document;
+    v.contentHash = versionHashOf(document as never);
+    versionMap.set(key, { turnId: v.turnId, contentHash: v.contentHash });
+  }
+  const digestMap = new Map<string, string>();
+  for (const f of out.historyFragments ?? []) {
+    const oldId = f.id;
+    f.id = mapped(f.id);
+    f.sources = f.sources.map((x) => versionMap.get(`${x.turnId}:${x.contentHash}`)!);
+    f.parentIds = f.parentIds.map(mapped);
+    f.links = f.links.map(mapped);
+    f.derivationDigest = derivationDigestOf(
+      f.kind,
+      f.sources,
+      f.correctionDigest,
+      HISTORY_INSTRUCTION_ID
+    );
+    f.contentDigest = fragmentDigest(f);
+    digestMap.set(oldId, f.contentDigest);
+  }
+  const remapFrozenHistory = (h: FrozenHistory) => {
+    h.campaignId = mapped(h.campaignId);
+    h.turnVersions = h.turnVersions.map((x) => versionMap.get(`${x.turnId}:${x.contentHash}`)!);
+    h.fragments = h.fragments.map((f) => ({
+      id: mapped(f.id),
+      contentDigest: digestMap.get(f.id)!,
+    }));
+    h.correctionGuidance = deepMap(h.correctionGuidance);
+    h.protectedLocators = h.protectedLocators.map((l) => ({ ...l, id: deepMap(l.id) }));
+    h.selectionDiagnostics.included = h.selectionDiagnostics.included.map((i) => ({
+      ...i,
+      id: deepMap(i.id),
+    }));
+  };
+  if (out.campaign.historyRecall) {
+    const h = out.campaign.historyRecall;
+    h.activeOverviewId = h.activeOverviewId ? mapped(h.activeOverviewId) : null;
+    h.protectedKnowledgeIds = h.protectedKnowledgeIds.map(mapped);
+    h.protectedSectionIds = h.protectedSectionIds.map(mapped);
+    h.protectedMemoryIds = h.protectedMemoryIds.map(mapped);
+  }
   for (const session of out.diceSessions) {
+    if (session.frozenHistory) remapFrozenHistory(session.frozenHistory);
     session.id = mapped(session.id);
     session.campaignId = mapped(session.campaignId);
     session.rootTurnId = mapped(session.rootTurnId);
@@ -1072,6 +1228,7 @@ export function remapArchive(raw: unknown): Archive {
     if (t.context) {
       if (t.context.diceSessionId) t.context.diceSessionId = mapped(t.context.diceSessionId);
       if (t.context.frozenKnowledge) remapFrozen(t.context.frozenKnowledge);
+      if (t.context.frozenHistory) remapFrozenHistory(t.context.frozenHistory);
       for (const span of t.context.sourceSpans ?? []) span.id = mapped(span.id);
       t.context.sourceVersions = t.context.sourceVersions.map((source) => ({
         ...source,
@@ -1201,6 +1358,14 @@ export class LibraryService {
         'SELECT * FROM dice_records WHERE campaign_id=$1 ORDER BY session_id,slot',
         [id]
       );
+      const historyVersions = await client.query(
+        'SELECT turn_id,content_hash,document FROM history_turn_versions WHERE campaign_id=$1 ORDER BY created_at,turn_id,content_hash',
+        [id]
+      );
+      const historyFragments = await client.query(
+        'SELECT * FROM history_fragments WHERE campaign_id=$1 ORDER BY created_at,id',
+        [id]
+      );
       const combat = {
         combatPreparations: (
           await client.query(
@@ -1252,6 +1417,7 @@ export class LibraryService {
                 systemPrompt: row.system_prompt,
                 frozenKnowledge: row.frozen_knowledge,
                 ...(row.frozen_sources != null ? { frozenSources: row.frozen_sources } : {}),
+                ...(row.frozen_history != null ? { frozenHistory: row.frozen_history } : {}),
                 toolDefinitions: row.tool_definitions,
               }
             : {}),
@@ -1273,6 +1439,33 @@ export class LibraryService {
         turns,
         snapshots: snaps.rows.map((r) => r.document as Snapshot),
         memories: memories.rows.map((r) => r.document as Memory),
+        ...(historyVersions.rows.length
+          ? {
+              historyTurnVersions: historyVersions.rows.map((row) => ({
+                turnId: row.turn_id,
+                contentHash: row.content_hash,
+                document: row.document,
+              })),
+            }
+          : {}),
+        ...(historyFragments.rows.length
+          ? {
+              historyFragments: historyFragments.rows.map((row) => ({
+                id: row.id,
+                kind: row.kind,
+                title: row.title,
+                text: row.body,
+                sources: row.sources,
+                parentIds: row.parent_ids,
+                links: row.links,
+                derivationDigest: row.derivation_digest,
+                correctionDigest: row.correction_digest,
+                contentDigest: row.content_digest,
+                selection: row.selection_status,
+                createdAt: new Date(row.created_at).toISOString(),
+              })),
+            }
+          : {}),
         ...combat,
       };
     });
@@ -1318,10 +1511,34 @@ export class LibraryService {
           archive.campaign.id,
           m,
         ]);
+      for (const v of archive.historyTurnVersions ?? [])
+        await client.query(
+          'INSERT INTO history_turn_versions(campaign_id,turn_id,content_hash,document) VALUES($1,$2,$3,$4)',
+          [archive.campaign.id, v.turnId, v.contentHash, v.document]
+        );
+      for (const f of archive.historyFragments ?? [])
+        await client.query(
+          'INSERT INTO history_fragments(id,campaign_id,kind,title,body,sources,parent_ids,links,derivation_digest,correction_digest,content_digest,selection_status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
+          [
+            f.id,
+            archive.campaign.id,
+            f.kind,
+            f.title,
+            f.text,
+            JSON.stringify(f.sources),
+            JSON.stringify(f.parentIds),
+            JSON.stringify(f.links),
+            f.derivationDigest,
+            f.correctionDigest,
+            f.contentDigest,
+            f.selection,
+            f.createdAt,
+          ]
+        );
       for (const session of archive.diceSessions)
         await client.query(
           session.systemPrompt !== undefined
-            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,system_prompt,frozen_knowledge,tool_definitions,frozen_sources) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13)'
+            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13,$14)'
             : 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9)',
           [
             session.id,
@@ -1339,6 +1556,7 @@ export class LibraryService {
                   JSON.stringify(session.frozenKnowledge),
                   JSON.stringify(session.toolDefinitions),
                   session.frozenSources ? JSON.stringify(session.frozenSources) : null,
+                  session.frozenHistory ? JSON.stringify(session.frozenHistory) : null,
                 ]
               : []),
           ]

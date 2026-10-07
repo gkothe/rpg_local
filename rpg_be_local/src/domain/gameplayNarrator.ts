@@ -59,6 +59,7 @@ export function gameplayInstructionEnvelope(
 - Consult preparation: source catalog, bootstrap sections, campaign_sources_search and campaign_sources_get. Navigate section titles/indices. Empty keyword search never means no sources.
 - supplied sections/alreadySupplied results contain complete originals this execution; reuse unless reason to reread. Uncertain section: search, then get original before relying on snippet. Rereads allowed.
 - Campaign sources: setting/character references, never replacements for published mechanics.
+- When campaign_history_search/get exist, older history left out of the prompt is still recallable: search, then get with includeOriginals before relying on a summary detail. Originals stay exact; corrected facts and canonical state override older transcript text.
 - Save public facts/unrevealed GM plans in knowledgeChanges. Set visibility player/gm_only independently of origin, certainty, status.
 - Never expose gm_only facts in narration, public memory/change reasons or visible NPC fields before reveal. Undisclosed NPC identities belong in gm_only knowledge, never character creation.
 - Reveal disclosed portion only: expectedRevision, revealReason, explicit public title/text/characterIds/holderId. Keep remaining secrets in separate gm_only records.

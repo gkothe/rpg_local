@@ -5,6 +5,9 @@ import { Field, ErrorNotice } from '../../components/Controls';
 import { request, json, errorMessage } from '../../services/client';
 import { useResource } from '../../hooks/useResource';
 import JournalKnowledge from './JournalKnowledge';
+import MemoryRebuild from './MemoryRebuild';
+import { MemoryText } from './MemoryText';
+import HistoryMemory from './HistoryMemory';
 export default function Journal({
   campaign,
   onSaved,
@@ -100,6 +103,12 @@ export default function Journal({
           Memory is a compact record; character state is saved separately. Full turns remain in your
           transcript.
         </small>
+        <MemoryRebuild
+          campaignId={campaign.id}
+          options={options}
+          active={active}
+          onApplied={onSaved}
+        />
       </div>
 
       <details className="panel" hidden>
@@ -163,6 +172,7 @@ export default function Journal({
           </button>
         </div>
       </details>
+      <HistoryMemory campaign={campaign} options={options} active={active} onChanged={onSaved} />
       <details
         className="panel"
         hidden
@@ -185,22 +195,6 @@ export default function Journal({
       </details>
     </section>
   );
-}
-
-function MemoryText({ text }: { text: string }) {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length && lines.every((line) => /^[-*•]\s+\S/.test(line)))
-    return (
-      <ul className="prose">
-        {lines.map((line, index) => (
-          <li key={index}>{line.replace(/^[-*•]\s+/, '')}</li>
-        ))}
-      </ul>
-    );
-  return <p className="prose">{text}</p>;
 }
 
 function TurnContext({ campaignId, turnId }: { campaignId: string; turnId: string }) {

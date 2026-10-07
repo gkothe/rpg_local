@@ -207,6 +207,7 @@ export class Store {
       systemPrompt: root.system_prompt,
       frozenKnowledge: root.frozen_knowledge,
       ...(root.frozen_sources ? { frozenSources: root.frozen_sources } : {}),
+      ...(root.frozen_history ? { frozenHistory: root.frozen_history } : {}),
       toolDefinitions: root.tool_definitions,
     };
   }
@@ -219,6 +220,7 @@ export class Store {
       delete document.context.systemPrompt;
       delete document.context.frozenKnowledge;
       delete document.context.frozenSources;
+      delete document.context.frozenHistory;
     }
     await client.query('UPDATE turns SET document=$2,status=$3 WHERE id=$1', [
       t.id,
@@ -226,8 +228,16 @@ export class Store {
       t.status,
     ]);
   }
-  /** A running Journal job owns the campaign; `exemptJournalJobId` lets that job's own commit through. */
-  async assertIdle(id: string, client: PoolClient, exemptJournalJobId?: string): Promise<void> {
+  /**
+   * A running Journal job or memory rebuild owns the campaign; the exempt IDs let that job's own
+   * commit through.
+   */
+  async assertIdle(
+    id: string,
+    client: PoolClient,
+    exemptJournalJobId?: string,
+    exemptRebuildJobId?: string
+  ): Promise<void> {
     const r = await client.query(
       "SELECT id FROM turns WHERE campaign_id=$1 AND (status IN ($2,$3) OR document->>'editingPending'='true')",
       [id, TurnStatus.Pending, TurnStatus.Running]
@@ -242,6 +252,16 @@ export class Store {
         409,
         'journal_busy',
         'Wait for or cancel the Journal task first (Journal tab)'
+      );
+    const rebuild = await client.query(
+      "SELECT id FROM memory_rebuild_jobs WHERE campaign_id=$1 AND status IN ('pending','running') AND ($2::uuid IS NULL OR id<>$2::uuid)",
+      [id, exemptRebuildJobId ?? null]
+    );
+    if (rebuild.rowCount)
+      throw new Problem(
+        409,
+        'memory_busy',
+        'Wait for or cancel the memory rebuild first (Journal tab)'
       );
   }
   /** Stored before/after versions of one record from non-undone turns, oldest first. */
@@ -301,7 +321,11 @@ export class Store {
     const journal = await this.pool.query(
       "UPDATE journal_jobs SET status='interrupted',owner=NULL,lease_until=NULL,updated_at=now(),safe_error='The app restarted during this Journal task; retry it.',error_code='journal_interrupted' WHERE status IN ('pending','running') AND (lease_until IS NULL OR lease_until < now())"
     );
-    return (r.rowCount ?? 0) + (journal.rowCount ?? 0);
+    // Rebuild attempts whose lease expired lost ownership; their persisted batches survive for an explicit retry.
+    const rebuild = await this.pool.query(
+      "UPDATE memory_rebuild_jobs SET status='interrupted',owner=NULL,lease_until=NULL,updated_at=now(),safe_error='The app restarted during this memory rebuild; retry it.',error_code='memory_interrupted' WHERE status IN ('pending','running') AND (lease_until IS NULL OR lease_until < now())"
+    );
+    return (r.rowCount ?? 0) + (journal.rowCount ?? 0) + (rebuild.rowCount ?? 0);
   }
   async reindex(c: Campaign, client: PoolClient): Promise<void> {
     await client.query('DELETE FROM source_chunks WHERE campaign_id=$1', [c.id]);

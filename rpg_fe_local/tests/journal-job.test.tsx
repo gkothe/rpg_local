@@ -6,6 +6,9 @@ import Journal from '../src/features/journal/Journal';
 import type { JournalJobView, JournalPage } from '../src/services/types';
 import { fixtureCampaign, options } from './fixtures';
 
+// History recall has its own tests; these cover the Journal behavior around it.
+vi.mock('../src/features/journal/HistoryMemory', () => ({ default: () => null }));
+
 beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
 afterEach(() => {
   vi.useRealTimers();

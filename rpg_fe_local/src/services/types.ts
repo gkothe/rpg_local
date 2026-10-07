@@ -376,7 +376,87 @@ export interface JournalJobView {
 export type JournalEvidenceDetail =
   | { kind: 'turn'; label: string; turnId: string; available: boolean }
   | { kind: 'campaign_source' | 'book'; label: string; quote: string; available: true };
+export interface MemoryRebuildJobView {
+  id: string;
+  campaignId: string;
+  purpose?: string;
+  status: string;
+  statusLabel: string;
+  active: boolean;
+  processedTurns: number;
+  totalTurns: number;
+  createdAt: string;
+  updatedAt: string;
+  errorCode: string | null;
+  safeError: string | null;
+  allowedActions: string[];
+  baseline: { id: string; text: string; coveredTurnIds: string[]; valid: boolean } | null;
+  candidate: { text: string; coveredTurnIds: string[]; proposalDigest: string } | null;
+  compact?: { sections: number; chapters: number } | null;
+  decision: { action: string; requestId: string; memoryId: string | null } | null;
+}
+export interface MemoryRebuildPage {
+  jobs: MemoryRebuildJobView[];
+  current: MemoryRebuildJobView | null;
+  nextCursor: string | null;
+}
+export interface MemoryRebuildApplyResult {
+  campaign: CampaignDetail;
+  job: MemoryRebuildJobView;
+}
+export interface HistoryDiagnostics {
+  targetBytes: number;
+  suppliedBytes: number;
+  mandatoryBytes: number;
+  overflowBytes: number;
+  included: { id: string; reason: string }[];
+  omitted: { count: number; reasonCounts: Record<string, number> };
+}
+export interface HistoryStatus {
+  enabled: boolean;
+  activeOverviewId: string | null;
+  protectedKnowledgeIds: string[];
+  protectedSectionIds: string[];
+  protectedMemoryIds: string[];
+  coveredTurns: number;
+  totalTurns: number;
+  searchableSections: number;
+  pendingRefresh: boolean;
+  unavailableProtectedIds: string[];
+  diagnostics: HistoryDiagnostics;
+}
+export interface HistoryItem {
+  id: string;
+  title: string;
+  kind: string;
+  sourceTurnIds: string[];
+  startAt: string | null;
+  endAt: string | null;
+  excerpt: string;
+  protected: boolean;
+  available: boolean;
+}
+export interface HistoryPage {
+  items: HistoryItem[];
+  nextCursor: string | null;
+  status: HistoryStatus;
+}
+export interface HistoryDetail {
+  item: { id: string; title: string; kind: string; text: string; protected: boolean };
+  originals: { turnId: string; player: string; gm: string; createdAt: string }[];
+  nextCursor: string | null;
+  correctionGuidance: { instruction: string; items: unknown[] };
+}
 export interface Settings {
+  history?: {
+    kindOptions: { id: string; label: string }[];
+    reasonOptions: { id: string; label: string }[];
+    limits: { pageSizeDefault: number; originalsPageSize: number; queryMaxChars: number };
+  } | null;
+  memoryRebuild?: {
+    actionOptions: { id: string; label: string }[];
+    purposeOptions?: { id: string; label: string }[];
+  };
   journal?: {
     limits: { queryMaxChars: number; pageSizeDefault: number; explanationMaxChars: number };
   };

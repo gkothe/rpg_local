@@ -17,6 +17,24 @@ import { ProviderService } from './providers/service.js';
 import { TurnService } from './services/turns.js';
 import { LibraryService } from './services/library.js';
 import { JournalService } from './services/journal.js';
+import { MemoryRebuildService } from './services/memoryRebuild.js';
+import { HistoryRecallService } from './services/historyProtection.js';
+import {
+  historyDetailQuerySchema,
+  historyDisableSchema,
+  historyListQuerySchema,
+  historyProtectionSchema,
+} from './domain/historyRecall.js';
+import {
+  MEMORY_REBUILD_ACTION_OPTIONS,
+  MEMORY_REBUILD_LIMITS,
+  MEMORY_REBUILD_STATUS_OPTIONS,
+  memoryRebuildApplySchema,
+  memoryRebuildListQuerySchema,
+  memoryRebuildRequestSchema,
+  memoryRebuildStartSchema,
+  MEMORY_REBUILD_PURPOSE_OPTIONS,
+} from './domain/memoryRebuild.js';
 import {
   JOURNAL_CHECK_OUTCOME_OPTIONS,
   JOURNAL_GROUP_OPTIONS,
@@ -113,6 +131,8 @@ export function createApp(options: AppOptions) {
   const library = store ? new LibraryService(store) : null;
   const campaigns = store ? new CampaignService(store, providers) : null;
   const journal = store ? new JournalService(store, providers) : null;
+  const memoryRebuild = store ? new MemoryRebuildService(store, providers) : null;
+  const historyRecall = store ? new HistoryRecallService(store) : null;
   const sources = store ? new SourceLibrary(store) : null;
   const rules = store ? new RuleStore(store) : null;
   const ruleLookup = new RuleLookup();
@@ -201,6 +221,13 @@ export function createApp(options: AppOptions) {
             jobStatusOptions: JOURNAL_JOB_STATUS_OPTIONS,
             checkOutcomeOptions: JOURNAL_CHECK_OUTCOME_OPTIONS,
             limits: JOURNAL_LIMITS,
+          },
+          history: historyRecall?.options() ?? null,
+          memoryRebuild: {
+            statusOptions: MEMORY_REBUILD_STATUS_OPTIONS,
+            actionOptions: MEMORY_REBUILD_ACTION_OPTIONS,
+            purposeOptions: MEMORY_REBUILD_PURPOSE_OPTIONS,
+            limits: MEMORY_REBUILD_LIMITS,
           },
           sourceStatusOptions: SOURCE_STATUS_OPTIONS,
           ocrLanguageOptions: OCR_LANGUAGE_OPTIONS,
@@ -944,6 +971,127 @@ export function createApp(options: AppOptions) {
         .strict()
         .parse(req.body);
       res.json({ data: publicCampaign(await turns!.manualMemory(param(req, 'id'), input)) });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/memory/rebuilds',
+    wrap(async (req, res) => {
+      const { requestId, purpose } = memoryRebuildStartSchema.parse(req.body);
+      res
+        .status(202)
+        .json({ data: await memoryRebuild!.start(param(req, 'id'), requestId, purpose) });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/memory/rebuilds',
+    wrap(async (req, res) => {
+      const { limit, cursor } = memoryRebuildListQuerySchema.parse(req.query);
+      res.json({ data: await memoryRebuild!.list(param(req, 'id'), limit, cursor) });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/memory/rebuilds/:jobId',
+    wrap(async (req, res) => {
+      res.json({ data: await memoryRebuild!.status(param(req, 'id'), param(req, 'jobId')) });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/memory/rebuilds/:jobId/cancel',
+    wrap(async (req, res) => {
+      memoryRebuildRequestSchema.parse(req.body);
+      res.json({ data: await memoryRebuild!.cancel(param(req, 'id'), param(req, 'jobId')) });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/memory/rebuilds/:jobId/resume',
+    wrap(async (req, res) => {
+      const { requestId } = memoryRebuildRequestSchema.parse(req.body);
+      res.status(202).json({
+        data: await memoryRebuild!.resume(param(req, 'id'), param(req, 'jobId'), requestId),
+      });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/memory/rebuilds/:jobId/apply',
+    wrap(async (req, res) => {
+      const { requestId, proposalDigest, preserveMemory } = memoryRebuildApplySchema.parse(
+        req.body
+      );
+      res.json({
+        data: await memoryRebuild!.apply(
+          param(req, 'id'),
+          param(req, 'jobId'),
+          requestId,
+          proposalDigest,
+          preserveMemory
+        ),
+      });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/memory/rebuilds/:jobId/discard',
+    wrap(async (req, res) => {
+      const { requestId } = memoryRebuildRequestSchema.parse(req.body);
+      res.json({
+        data: await memoryRebuild!.discard(param(req, 'id'), param(req, 'jobId'), requestId),
+      });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/history',
+    wrap(async (req, res) => {
+      const query = historyListQuerySchema.parse(req.query);
+      const id = param(req, 'id');
+      const page = await historyRecall!.list(id, query);
+      const status = await historyRecall!.status(id);
+      res.json({ data: { ...page, status } });
+    })
+  );
+  app.patch(
+    '/api/campaigns/:id/history/settings',
+    wrap(async (req, res) => {
+      const input = historyDisableSchema.parse(req.body);
+      res.json({ data: await historyRecall!.disable(param(req, 'id'), input) });
+    })
+  );
+  app.patch(
+    '/api/campaigns/:id/history/protection/knowledge/:targetId',
+    wrap(async (req, res) => {
+      const input = historyProtectionSchema.parse(req.body);
+      res.json({
+        data: await historyRecall!.protectKnowledge(
+          param(req, 'id'),
+          param(req, 'targetId'),
+          input
+        ),
+      });
+    })
+  );
+  app.patch(
+    '/api/campaigns/:id/history/protection/sections/:targetId',
+    wrap(async (req, res) => {
+      const input = historyProtectionSchema.parse(req.body);
+      res.json({
+        data: await historyRecall!.protectSection(param(req, 'id'), param(req, 'targetId'), input),
+      });
+    })
+  );
+  app.patch(
+    '/api/campaigns/:id/history/protection/memories/:targetId',
+    wrap(async (req, res) => {
+      const input = historyProtectionSchema.parse(req.body);
+      res.json({
+        data: await historyRecall!.protectMemory(param(req, 'id'), param(req, 'targetId'), input),
+      });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/history/:fragmentId',
+    wrap(async (req, res) => {
+      const query = historyDetailQuerySchema.parse(req.query);
+      res.json({
+        data: await historyRecall!.detail(param(req, 'id'), param(req, 'fragmentId'), query),
+      });
     })
   );
   app.get(

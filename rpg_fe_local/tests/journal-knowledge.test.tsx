@@ -6,6 +6,9 @@ import Journal from '../src/features/journal/Journal';
 import type { JournalEntry, JournalPage } from '../src/services/types';
 import { fixtureCampaign, options } from './fixtures';
 
+// History recall has its own tests; these cover the Journal behavior around it.
+vi.mock('../src/features/journal/HistoryMemory', () => ({ default: () => null }));
+
 afterEach(() => vi.unstubAllGlobals());
 
 const entry = (over: Partial<JournalEntry>): JournalEntry => ({

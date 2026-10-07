@@ -34,6 +34,9 @@ import {
   olderHistoryBytes,
 } from '../domain/context.js';
 import { memoryJsonSchema, memorySchema } from '../domain/schemas.js';
+import { composeMemory } from '../domain/memory.js';
+import { HistoryReader, HistoryStore } from './historyStore.js';
+import { historySettingsOf } from '../domain/historyRecall.js';
 import { applyResponse, undoSnapshot } from '../domain/state.js';
 import { assertFrozenContext } from '../domain/journalCompatibility.js';
 import {
@@ -286,6 +289,7 @@ export class TurnService {
           systemPrompt: saved.system_prompt,
           frozenKnowledge: saved.frozen_knowledge,
           ...(saved.frozen_sources ? { frozenSources: saved.frozen_sources } : {}),
+          ...(saved.frozen_history ? { frozenHistory: saved.frozen_history } : {}),
         },
         createdAt: new Date().toISOString(),
         completedAt: null,
@@ -351,6 +355,7 @@ export class TurnService {
         systemPrompt: session.system_prompt,
         frozenKnowledge: session.frozen_knowledge,
         frozenSources: session.frozen_sources,
+        ...(session.frozen_history ? { frozenHistory: session.frozen_history } : {}),
       };
       await client.query(
         "UPDATE turns SET owner=$2,lease_until=now()+($3*interval '1 second') WHERE id=$1",
@@ -429,23 +434,56 @@ export class TurnService {
           Math.min(c.budgets.compaction, compactionCapacity)
         );
         if (!batch.turns.length) break;
+        const batchIds = batch.turns.map((x) => x.id);
+        const childTrace: PromptTraceContext | undefined = trace && {
+          ...trace,
+          executionId: randomUUID(),
+          purpose: 'memory_compaction',
+        };
+        await traceEvent(childTrace, 'compaction_request', {
+          campaignId: c.id,
+          initiatingTurnId: t.id,
+          batchTurnIds: batchIds,
+          priorMemoryId: c.memory?.valid ? c.memory.id : null,
+          prompt: batch.prompt,
+        });
         const parsed = memorySchema.parse(
-          await this.generator.generate(t.settings, batch.prompt, memoryJsonSchema, ctl.signal)
+          await this.generator.generate(
+            t.settings,
+            batch.prompt,
+            memoryJsonSchema,
+            ctl.signal,
+            childTrace
+          )
         );
+        // The previous valid memory is preserved byte-for-byte; the model only supplies the new batch.
+        const composed = composeMemory(c.memory, parsed.text, batchIds);
         const memory: Memory = {
           id: randomUUID(),
-          text: parsed.text,
-          coveredTurnIds: [
-            ...(c.memory?.valid ? c.memory.coveredTurnIds : []),
-            ...batch.turns.map((x) => x.id),
-          ],
+          text: composed.text,
+          coveredTurnIds: composed.coveredTurnIds,
           valid: true,
           createdAt: new Date().toISOString(),
         };
+        await traceEvent(childTrace, 'compaction_composed', {
+          campaignId: c.id,
+          initiatingTurnId: t.id,
+          batchTurnIds: batchIds,
+          priorMemoryId: c.memory?.valid ? c.memory.id : null,
+          resultMemoryId: memory.id,
+          priorBytes: composed.priorBytes,
+          additionBytes: composed.additionBytes,
+          resultBytes: composed.resultBytes,
+        });
         await this.store.transaction(async (client) => {
           const { campaign } = await this.lockedOwned(t, client);
           await this.store.memory(campaign, memory, client);
           await this.store.save(campaign, client);
+        });
+        await traceEvent(childTrace, 'compaction_committed', {
+          campaignId: c.id,
+          resultMemoryId: memory.id,
+          coveredTurns: memory.coveredTurnIds.length,
         });
         c = await this.store.campaign(c.id);
         history = await this.store.activeTurns(c.id);
@@ -464,7 +502,8 @@ export class TurnService {
             rules,
             t.ruleContext
               ? this.rulePrompt(await new RuleStore(this.store).guard(t.ruleContext, client))
-              : undefined
+              : undefined,
+            await this.compactHistory(campaign, h, client)
           );
           t.context = turn.context;
           await this.store.saveTurn(turn, client);
@@ -491,6 +530,7 @@ export class TurnService {
             t.context!.systemPrompt = root.system_prompt;
             t.context!.frozenKnowledge = root.frozen_knowledge;
             t.context!.frozenSources = root.frozen_sources ?? undefined;
+            t.context!.frozenHistory = root.frozen_history ?? undefined;
             frozenDefinitions = root.tool_definitions;
           }
           if (!this.generator.generateOwnedGameplay)
@@ -527,6 +567,9 @@ export class TurnService {
               });
             },
             prepareCombat: (input) => combat.prepare(t, input),
+            ...(t.context!.frozenHistory
+              ? { history: new HistoryReader(this.store, t.context!.frozenHistory) }
+              : {}),
           });
           if (!t.diceSessionId) {
             c = await this.store.campaign(t.campaignId);
@@ -545,6 +588,7 @@ export class TurnService {
               ],
               {
                 frozenSources: t.context!.frozenSources,
+                frozenHistory: t.context!.frozenHistory,
                 systemPrompt: t.context!.systemPrompt!,
                 knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c, true),
                 toolDefinitions: registry.definitions,
@@ -913,6 +957,8 @@ export class TurnService {
       );
       last.undone = true;
       await this.store.saveTurn(last, client);
+      // Summaries derived from the undone turn, and anything built on them, must not be selected again.
+      await new HistoryStore(this.store).invalidateTurns(client, c.id, [last.id]);
       const rows = await client.query(
         'SELECT id,document FROM memories WHERE campaign_id=$1 ORDER BY created_at DESC',
         [c.id]
@@ -936,6 +982,28 @@ export class TurnService {
       await this.store.save(restored, client);
       return restored;
     });
+  }
+  /** Selective-history input for a new context; null keeps the full-memory (legacy) prompt. */
+  private async compactHistory(campaign: Campaign, turns: Turn[], client: PoolClient) {
+    const settings = historySettingsOf(campaign);
+    if (!settings.enabled) return undefined;
+    const history = new HistoryStore(this.store);
+    const versions = await history.captureVersions(client, campaign.id, turns);
+    const fragments = await history.list(campaign.id, client, true);
+    const memories = settings.protectedMemoryIds.length
+      ? await client.query(
+          'SELECT document FROM memories WHERE campaign_id=$1 AND id=ANY($2::uuid[])',
+          [campaign.id, settings.protectedMemoryIds]
+        )
+      : { rows: [] };
+    return {
+      fragments,
+      turnVersions: versions.map(({ turnId, contentHash }) => ({ turnId, contentHash })),
+      protectedMemories: memories.rows
+        .map((row) => row.document as Memory)
+        .filter((m) => m.valid)
+        .map((m) => ({ id: m.id, text: m.text })),
+    };
   }
   async manualMemory(
     id: string,

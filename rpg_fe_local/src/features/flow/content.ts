@@ -483,6 +483,79 @@ export const tools: FlowTool[] = [
   },
   {
     ...item(
+      'campaign_history_search',
+      'campaign_history_search',
+      'Search older history that selective history left out of the prompt. An empty query lists it in order.',
+      'Only when selective history is on: when the model needs a detail from an earlier part of the story.',
+      'Search text, an optional kind (section or chapter) and a next-page cursor.',
+      'Matching summaries with their title, date range, source turn IDs and a short excerpt. These are navigation aids, not the original text.',
+      "The tool reads the attempt's frozen list of summaries from PostgreSQL (the stored text never changes). Turns started without selective history do not get this tool.",
+      '5.6',
+      ['rpg_be_local/src/domain/historyRecall.ts', 'rpg_be_local/src/services/historyStore.ts']
+    ),
+    bookOnly: false,
+    args: { query: 'arena' },
+    result: {
+      campaignId: '11111111-1111-4111-8111-111111111111',
+      items: [
+        {
+          id: '77777777-7777-4777-8777-777777777777',
+          title: 'The arena fight',
+          kind: 'section',
+          sourceTurnIds: ['88888888-8888-4888-8888-888888888888'],
+          startAt: '2026-01-01T10:00:00.000Z',
+          endAt: '2026-01-01T10:20:00.000Z',
+          excerpt: 'A fight in the arena ended with the Embrace.',
+          contentDigest: 'a'.repeat(64),
+        },
+      ],
+      corpusFragments: 12,
+      corpusTurns: 96,
+      nextCursor: null,
+    },
+  },
+  {
+    ...item(
+      'campaign_history_get',
+      'campaign_history_get',
+      'Read one older history item and, if asked, the exact original conversations behind it.',
+      'After a history search, before relying on a detail from a summary.',
+      'The item ID, optional includeOriginals, a page size and a cursor.',
+      'The summary, its source locators and up to a few whole original player/GM pairs per page, plus any corrected facts that override older text.',
+      'The originals come from stored versions that are checked against their hash, so a changed or missing original is an error, never a substitute.',
+      '5.6',
+      ['rpg_be_local/src/domain/historyRecall.ts', 'rpg_be_local/src/services/historyStore.ts']
+    ),
+    bookOnly: false,
+    args: { id: '77777777-7777-4777-8777-777777777777', includeOriginals: true },
+    result: {
+      item: {
+        id: '77777777-7777-4777-8777-777777777777',
+        title: 'The arena fight',
+        kind: 'section',
+        text: 'A fight in the arena ended with the Embrace.',
+      },
+      sourceLocators: [
+        { turnId: '88888888-8888-4888-8888-888888888888', contentHash: 'b'.repeat(64) },
+      ],
+      originals: [
+        {
+          turnId: '88888888-8888-4888-8888-888888888888',
+          player: 'I enter the arena',
+          gm: 'The crowd roars as the Embrace takes hold.',
+          createdAt: '2026-01-01T10:00:00.000Z',
+        },
+      ],
+      nextCursor: null,
+      correctionGuidance: {
+        instruction: 'Corrected facts are authoritative.',
+        items: [],
+        sourceSuperseded: false,
+      },
+    },
+  },
+  {
+    ...item(
       'rules_find',
       'rules_find',
       'Find relevant book rules and read original text in one request.',
@@ -607,9 +680,28 @@ export const storageItems: FlowItem[] = [
     'When the app needs to shorten older context before resolving an action.',
     'Completed turns that the current summary does not already cover.',
     'Summary text and the IDs of the turns it covers.',
-    'The app may save summaries before gameplay finishes, so they can survive a later failure. Undo invalidates summaries that cover the undone turn and restores an earlier valid summary.',
+    'The app may save summaries before gameplay finishes, so they can survive a later failure. New batches are added after the existing summary text, which is never rewritten. Rebuild memory in the Journal tab can regenerate the whole summary from the original turns as a draft you review; only Apply replaces the memory. With selective history switched on, the model gets a short overview and the most relevant older sections instead of the full memory; the full memory and every conversation stay stored and the model can search and read the originals with history tools. Undo invalidates summaries that cover the undone turn and restores an earlier valid summary.',
     '5.6',
-    ['rpg_be_local/src/services/turns.ts']
+    [
+      'rpg_be_local/src/services/turns.ts',
+      'rpg_be_local/src/domain/memory.ts',
+      'rpg_be_local/src/services/memoryRebuild.ts',
+    ]
+  ),
+  item(
+    'history',
+    'Selective history & rebuild jobs',
+    'Older conversations can stay out of the prompt and still be found. Summaries are stored beside the originals, never instead of them.',
+    'When you prepare and activate compact history, protect an item, rebuild the memory, or the GM searches older history.',
+    'Your saved conversations with their dice, public facts and accepted corrections. Never private notes or hidden GM knowledge.',
+    'Hashed copies of each conversation, section/chapter/overview summaries that point to them, your protections, and a staged draft you review.',
+    'Versions and summaries are stored once and cannot be edited; only a valid/stale flag changes. Rebuild and Prepare run as resumable jobs that keep their progress and change nothing until you apply the draft. Undo or an accepted correction retires the affected summaries.',
+    '5.6',
+    [
+      'rpg_be_local/src/services/historyStore.ts',
+      'rpg_be_local/src/services/historyProtection.ts',
+      'rpg_be_local/src/services/memoryRebuild.ts',
+    ]
   ),
   item(
     'audit',

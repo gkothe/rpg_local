@@ -22,6 +22,12 @@ import type {
   CombatPreparationArchive,
   CombatPreparedCharacterArchive,
 } from '../services/combatArchive.js';
+import type {
+  FrozenHistory,
+  HistoryFragmentArchive,
+  HistorySettings,
+  HistoryVersionArchive,
+} from './historyRecall.js';
 import type { DiceRecord, DiceSession } from './dice.js';
 import type { PlacedRollInterpretation } from './diceResponse.js';
 import type { RuleContext, RuleReference, RuleRead, RuleCitation } from './rules.js';
@@ -64,6 +70,8 @@ export type Memory = {
   createdAt: string;
 };
 export type Campaign = {
+  /** Optional selective-history settings; absent means disabled (full memory in prompts). */
+  historyRecall?: HistorySettings;
   knowledge?: CampaignKnowledge[];
   /** Private audit ledger of Journal backfills and accepted corrections; never in player DTOs. */
   journal?: JournalLedger;
@@ -125,6 +133,7 @@ export type ContextManifest = {
   frozenSources?: FrozenCampaignSources;
   sourceSelection?: SourceSelectionDiagnostics;
   frozenKnowledge?: FrozenKnowledge;
+  frozenHistory?: FrozenHistory;
   sourceSpans?: SourceSpan[];
   ruleContext?: RuleContext;
   revision: number;
@@ -178,4 +187,7 @@ export type Archive = {
   diceRecords: DiceRecord[];
   combatPreparations: CombatPreparationArchive[];
   combatPreparedCharacters: CombatPreparedCharacterArchive[];
+  /** Optional: older archives carry no selective history and import with it disabled. */
+  historyTurnVersions?: HistoryVersionArchive[];
+  historyFragments?: HistoryFragmentArchive[];
 };

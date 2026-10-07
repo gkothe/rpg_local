@@ -23,6 +23,10 @@ import {
   citation,
 } from '../../rpg_fe_local/src/features/flow/examples.ts';
 import { createKnowledgeRecall } from '../../rpg_be_local/src/domain/knowledgeRecall.ts';
+import {
+  historyGetSchema,
+  historySearchSchema,
+} from '../../rpg_be_local/src/domain/historyRecall.ts';
 import { diceInputSchema } from '../../rpg_be_local/src/domain/dice.ts';
 import { ruleToolSchemas } from '../../rpg_be_local/src/services/ruleLookup.ts';
 import { ruleReadSchema, ruleCitationSchema } from '../../rpg_be_local/src/domain/rules.ts';
@@ -232,6 +236,11 @@ test('tool arguments, frozen recall results and exact book citation match backen
       ),
     /Citations must/
   );
+});
+
+test('history tool examples match the real history tool schemas', () => {
+  historySearchSchema.parse(tools.find((tool) => tool.id === 'campaign_history_search').args);
+  historyGetSchema.parse(tools.find((tool) => tool.id === 'campaign_history_get').args);
 });
 
 test('combat teaching example matches the real preparation, dice and turn validation', () => {
