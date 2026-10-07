@@ -17,7 +17,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const MCP_SERVER = 'local_rpg';
 const MCP_GATEWAY = 'call_mcp_tool';
-const MCP_INVOCATION_GUIDANCE = `Invoke every owned tool through ${MCP_GATEWAY} with ServerName="${MCP_SERVER}", ToolName set to its registered name, and Arguments set to its argument object. Never invoke a registered tool name directly as a native function.`;
+const MCP_RESOURCE_DISCOVERY = ['list_resources', 'list_resource_templates'] as const;
+const MCP_INVOCATION_GUIDANCE = `Invoke every owned tool through ${MCP_GATEWAY} with ServerName="${MCP_SERVER}", ToolName set to its registered name, and Arguments set to its argument object. Never invoke a registered tool name directly as a native function. ${MCP_SERVER} exposes gameplay tools only, with no resources or resource templates. Do not discover or read resources; use the supplied tool registry.`;
 const PROFILE_PREFIX = 'rpg-agy-private-';
 const NATIVE_ACCESS_DENIED = [
   'command(*)',
@@ -80,6 +81,7 @@ export async function generateAntigravityMcpBook(
   const definitions = book.definitions;
   const tools = definitions.map((definition) => definition.name);
   const pending: PendingCall[] = [];
+  const discoverySteps = new Map<number, string>();
   const waiters = new Set<() => void>();
   const notify = () => {
     for (const waiter of waiters) waiter();
@@ -233,6 +235,33 @@ export async function generateAntigravityMcpBook(
               } else if (step.step_type === 'tool') {
                 const parameters = step.tool_info?.parameters;
                 const gateway = step.tool_name ?? step.tool_info?.name;
+                if (MCP_RESOURCE_DISCOVERY.some((name) => name === gateway)) {
+                  const validEnvelope =
+                    parameters?.ServerName === MCP_SERVER &&
+                    Object.keys(parameters).every((key) => key === 'ServerName');
+                  const validIndex =
+                    Number.isInteger(step.step_index) && step.step_index! >= 0;
+                  const started = discoverySteps.get(step.step_index!);
+                  if (
+                    validIndex &&
+                    step.state === 'ACTIVE' &&
+                    validEnvelope &&
+                    started === undefined &&
+                    !pending.some((entry) => entry.index === step.step_index)
+                  ) {
+                    discoverySteps.set(step.step_index!, gateway!);
+                    return;
+                  }
+                  if (
+                    validIndex &&
+                    step.state === 'DONE' &&
+                    started === gateway &&
+                    (parameters === undefined || validEnvelope)
+                  ) {
+                    // Only private empty discovery may finish without repeating its envelope.
+                    return;
+                  }
+                }
                 if (
                   step.state === 'DONE' &&
                   gateway === MCP_GATEWAY &&
@@ -327,6 +356,7 @@ export async function generateAntigravityMcpBook(
                   if (
                     !Number.isInteger(step.step_index) ||
                     step.step_index! < 0 ||
+                    discoverySteps.has(step.step_index!) ||
                     pending.some((entry) => entry.index === step.step_index)
                   )
                     throw new Problem(

@@ -2,7 +2,12 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import {
   GAMEPLAY_ENVELOPE_BYTES,
   gameplayToolRequestBytes,
@@ -80,10 +85,15 @@ export async function startGameplayMcp(
       if (typeof message.id === 'string' || typeof message.id === 'number') rpcId = message.id;
       const mcp = new Server(
         { name: 'local-rpg-dice', version: '1' },
-        { capabilities: { tools: {} } }
+        { capabilities: { tools: {}, resources: {} } }
       );
       mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools: definitions,
+      }));
+      // Discovery is harmless; this server exposes no resource data or read capability.
+      mcp.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }));
+      mcp.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+        resourceTemplates: [],
       }));
       mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
         const work = queue.then(async () => {

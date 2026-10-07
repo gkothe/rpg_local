@@ -61,7 +61,10 @@ test('private MCP exposes only owned tools, serializes calls and closes its list
       (await client.listTools()).tools.map((tool) => tool.name),
       definitions.map((definition) => definition.name)
     );
-    await assert.rejects(client.listResources(), /support|method/i);
+    assert.deepEqual((await client.listResources()).resources, []);
+    assert.deepEqual((await client.listResourceTemplates()).resourceTemplates, []);
+    assert.equal(calls, 0);
+    await assert.rejects(client.readResource({ uri: 'file:///private' }), /support|method/i);
     await assert.rejects(client.listPrompts(), /support|method/i);
     const bad = await client.callTool({ name: 'shell', arguments: { command: 'whoami' } });
     assert.equal(bad.isError, true);
