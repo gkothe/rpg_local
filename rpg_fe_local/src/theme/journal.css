@@ -693,9 +693,9 @@ small {
   overflow-wrap: anywhere;
 }
 .gm-message > small {
+  display: inline-block;
   font-family: system-ui, sans-serif;
   color: var(--sage);
-  margin-bottom: 0.7rem;
 }
 .prose {
   font-size: 1.14rem;
@@ -704,7 +704,7 @@ small {
   overflow-wrap: anywhere;
 }
 .gm-message .prose {
-  max-width: 75ch;
+  max-width: none;
 }
 .composer {
   margin-top: 2rem;
@@ -965,6 +965,33 @@ hr {
 .dice-roll + .dice-roll {
   border-top: 1px solid var(--line);
 }
+.dice-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.7rem 1.6rem 0 0;
+}
+.dice-roll > .dice-group {
+  display: inline-flex;
+  vertical-align: top;
+}
+.dice-group-title {
+  font-family: var(--display);
+  font-size: 0.8rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #c9bb9c;
+}
+.dice-group-alt .die-outline {
+  fill: #3a1712;
+  stroke: #c25a40;
+}
+.dice-group-alt .die-face {
+  color: #f4b4a2;
+  text-shadow:
+    0 0 3px #3a1712,
+    0 0 3px #3a1712;
+}
 .dice-faces {
   display: inline-flex;
   flex-wrap: wrap;
@@ -1014,7 +1041,8 @@ hr {
 }
 /* Rolls sit on a dark leather card inside the parchment. */
 .gm-message .dice-rolls {
-  padding: 1rem 1.2rem;
+  margin-block: 1.4rem 1.8rem;
+  padding: 1.1rem 1.4rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #1f1813;
@@ -1028,7 +1056,12 @@ hr {
 }
 .dice-roll > p:first-child strong {
   font-family: var(--display);
-  color: var(--accent);
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+  color: #f0d48a;
+}
+.gm-message .dice-interpretation {
+  color: #d9c9a6;
 }
 .dice-interpretation {
   margin-top: 0.7rem;
@@ -1109,15 +1142,13 @@ p.dice-interpretation {
 }
 .transcript,
 .campaign-aside {
-  height: 60vh;
-  min-height: 20rem;
+  height: max(34rem, calc(100vh - 19rem));
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+/* The pages sit directly on the dark ground; no frame around the scroll area. */
 .transcript {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 1rem;
+  padding: 0.25rem 0.6rem 0.25rem 0;
 }
 .turn {
   display: block;
@@ -1151,21 +1182,27 @@ p.dice-interpretation {
   border-radius: 14px 14px 2px 14px;
 }
 .gm-message {
-  align-self: flex-start;
+  align-self: stretch;
+  width: auto;
+  padding: 1.9rem 2.25rem;
   color: var(--ink);
   background:
     radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.35), transparent 45%),
     linear-gradient(160deg, var(--parchment), #e2d1ab);
   border-color: var(--parchment-edge);
-  border-radius: 2px 14px 14px 14px;
-  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 60px #c9b48a,
+    0 10px 30px rgba(0, 0, 0, 0.5);
 }
 .player-action > small,
 .gm-message > small {
   font-family: var(--display);
+  font-size: 0.78rem;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--sage);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 .player-action > small {
   display: flex;
@@ -1178,7 +1215,7 @@ p.dice-interpretation {
   color: var(--ink-muted);
 }
 .gm-message > small {
-  color: var(--ink-gold);
+  color: var(--ink-muted);
 }
 .message-time {
   display: inline-block;
@@ -1190,15 +1227,15 @@ p.dice-interpretation {
   color: var(--ink-muted);
 }
 .gm-message .prose {
-  font-size: 1.08rem;
-  line-height: 1.65;
-  margin-top: 0.5rem;
+  font-size: 1.2rem;
+  line-height: 1.7;
+  margin-top: 0.9rem;
 }
 .gm-message > div.prose:first-of-type::first-letter {
   float: left;
   font-family: var(--display);
-  font-weight: 600;
-  font-size: 3.1em;
+  font-weight: 700;
+  font-size: 3.6em;
   line-height: 0.85;
   padding: 0.06em 0.1em 0 0;
   color: var(--oxblood);
@@ -1285,11 +1322,21 @@ p.dice-interpretation {
   background: var(--line);
 }
 .aside-section h4 {
-  margin: 0.8rem 0 0.2rem;
-  color: var(--sage);
-  font-size: 0.8rem;
-  letter-spacing: 0.1em;
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  font-family: var(--display);
+  font-size: 0.75rem;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
+}
+.aside-card {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+}
+.aside-card + .aside-card {
+  margin-top: 0.8rem;
 }
 .aside-party,
 .aside-chronicle {
@@ -1347,20 +1394,21 @@ p.dice-interpretation {
 .aside-scene {
   margin: 0;
 }
-.aside-scene > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.2rem 0;
-  border-bottom: 1px dotted var(--line);
+.aside-scene > div + div {
+  margin-top: 0.8rem;
 }
 .aside-scene dt {
+  font-family: var(--display);
+  font-size: 0.75rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
   color: var(--muted);
-  text-transform: capitalize;
 }
 .aside-scene dd {
-  margin: 0;
-  text-align: right;
+  margin: 0.1rem 0 0;
+  font-family: var(--display);
+  font-size: 1.05rem;
+  color: #eadfc8;
   overflow-wrap: anywhere;
 }
 

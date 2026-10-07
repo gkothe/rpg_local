@@ -40,9 +40,14 @@ export function DiceRolls({
               {target && ` → ${target}`}
             </p>
             <p className="muted">Declared before rolling: {roll.declaration}</p>
-            {roll.groups.map((group) => (
-              <p key={group.label}>
-                <strong>{group.label}</strong> · {group.faces.length}d{group.sides}:{' '}
+            {roll.groups.map((group, groupIndex) => (
+              <p
+                key={group.label}
+                className={groupIndex > 0 ? 'dice-group dice-group-alt' : 'dice-group'}
+              >
+                <span className="dice-group-title">
+                  <strong>{group.label}</strong> · {group.faces.length}d{group.sides}:
+                </span>{' '}
                 <span
                   className="dice-faces"
                   role="img"

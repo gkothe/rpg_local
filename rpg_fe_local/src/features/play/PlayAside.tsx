@@ -66,7 +66,7 @@ export default function PlayAside({
       {scene.length > 0 && (
         <section aria-labelledby="aside-scene" className="aside-section">
           <h3 id="aside-scene">Scene</h3>
-          <dl className="aside-scene">
+          <dl className="aside-scene aside-card">
             {scene.map(([key, value]) => (
               <div key={key}>
                 <dt>{humanize(key)}</dt>
@@ -80,7 +80,7 @@ export default function PlayAside({
         <section aria-labelledby="aside-chronicle" className="aside-section">
           <h3 id="aside-chronicle">Chronicle</h3>
           {kinds.map((kind) => (
-            <div key={kind.id}>
+            <div key={kind.id} className="aside-card">
               <h4>{kind.label}</h4>
               <ul className="aside-chronicle">
                 {kind.records.map((record) => (
