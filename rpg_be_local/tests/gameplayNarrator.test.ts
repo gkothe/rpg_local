@@ -22,6 +22,7 @@ test('every envelope carries NPC retrieval and the combat contract without versi
     assert.match(result, /campaign_npcs_get/);
     assert.match(result, /before creating/);
     assert.match(result, /combat_prepare/);
+    assert.match(result, /Ordinary character create: omit characterId and preparationReceiptId/);
     assert.match(result, /state\.combatNotes/);
     assert.doesNotMatch(result, /trackingVersion|[Vv]ersion [0-9]/);
   }
@@ -64,7 +65,7 @@ test('book and model-knowledge prompts include one prose block before exact GM i
     assert.equal(result.split(GAMEPLAY_WRITING_GUIDANCE).length, 2);
     assert.match(result, /Prefer familiar words and active voice/);
     assert.match(result, /Most sentences under 20 words/);
-    assert.match(result, /Usually 80-150 words per turn/);
+    assert.match(result, /Usually stay under 300 words per turn/);
     assert.match(result, /One or two concrete sensory details per scene/);
     assert.ok(
       result.indexOf('Application integration contract:') <

@@ -9,7 +9,7 @@ import {
 import { RESPONSE_RETRY_COUNT, responseRetryFeedback } from '../domain/responseRetry.js';
 import type { Generator } from '../providers/service.js';
 import type { ProviderSettings } from '../domain/types.js';
-import { traceEvent, type PromptTraceContext } from '../providers/promptLog.js';
+import { traceEvent, safeTraceFailure, type PromptTraceContext } from '../providers/promptLog.js';
 import { selectRepairEvidence } from './responseRepairContext.js';
 import { KNOWLEDGE_PROVENANCE_GUIDANCE } from '../domain/gameplayNarrator.js';
 import { participantReferenceSchema } from '../domain/combat.js';
@@ -24,18 +24,33 @@ const editableFields = new Set([
   'participantReferences',
 ]);
 /** Reserved identities and receipts come from combat_prepare; corrections may not alter them. */
-function preparedIdentities(response: unknown): string {
+function preparedIdentities(response: unknown, corrected?: unknown): string {
   const operations = (response as { operations?: unknown })?.operations;
+  const correctedOperations = (corrected as { operations?: unknown })?.operations;
   return JSON.stringify(
     Array.isArray(operations)
-      ? operations.flatMap((op, index) =>
-          op &&
-          typeof op === 'object' &&
-          ('characterId' in op || 'preparationReceiptId' in op) &&
-          (op as { op?: unknown }).op === 'create'
+      ? operations.flatMap((op, index) => {
+          const replacement = Array.isArray(correctedOperations)
+            ? correctedOperations[index]
+            : undefined;
+          // Ordinary creates receive server IDs. Dropping an unreceipted proposal
+          // is repairable; changing a prepared identity or assigning another ID is not.
+          if (
+            op?.op === 'create' &&
+            op.characterId !== undefined &&
+            op.preparationReceiptId === undefined &&
+            replacement?.op === 'create' &&
+            replacement.characterId === undefined &&
+            replacement.preparationReceiptId === undefined
+          )
+            return [];
+          return op &&
+            typeof op === 'object' &&
+            ('characterId' in op || 'preparationReceiptId' in op) &&
+            (op as { op?: unknown }).op === 'create'
             ? [[index, op.characterId, op.preparationReceiptId]]
-            : []
-        )
+            : [];
+        })
       : []
   );
 }
@@ -122,7 +137,7 @@ export function applyResponseCorrections<T>(original: T, paths: ResponsePath[], 
       correction.value
     );
   }
-  if (preparedIdentities(copy) !== preparedIdentities(original))
+  if (preparedIdentities(copy) !== preparedIdentities(original, copy))
     throw new Problem(
       502,
       'response_repair_failed',
@@ -233,6 +248,14 @@ export async function validateWithFieldRepair<T>(
         candidate = applyResponseCorrections(candidate, paths, raw);
         await traceEvent(child, 'field_repair_received', { paths });
       } catch (repairError) {
+        await traceEvent(child, 'field_repair_failed', {
+          ...safeTraceFailure(repairError),
+          paths,
+          reason:
+            repairError instanceof Problem && repairError.code === 'response_repair_failed'
+              ? repairError.message
+              : null,
+        });
         if (
           repairError instanceof Problem &&
           ![

@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { PromptTrace } from '../src/providers/promptLog.js';
 import { bindResponseCitations } from '../src/domain/citationBinding.js';
 import {
   gameplayResponseInputSchema,
@@ -193,6 +197,73 @@ test('book citations bind newer current-rule receipts without requiring the turn
 });
 
 const settings = { provider: 'codex', model: 'test', effort: 'high' };
+test('an ordinary NPC create can drop an unreceipted ID and pass state validation', async () => {
+  const campaign = newCampaign({ name: 'Ordinary create repair' });
+  const characterId = randomUUID();
+  const create = {
+    op: 'create',
+    character: {
+      name: 'Keeper',
+      type: 'npc',
+      attributes: {},
+      inventory: {},
+      description: {},
+    },
+    introduction: { origin: 'gm', evidence: [], visibility: 'player' },
+  };
+  const original = {
+    ...response(sourceEvidence()),
+    knowledgeChanges: [],
+    operations: [{ ...create, characterId }],
+    operationExplanations: [
+      {
+        operationIndex: 0,
+        reason: 'The keeper introduces himself.',
+        basis: 'established_state',
+        rollIds: [],
+        evidence: [],
+        visibility: 'player',
+      },
+    ],
+    rollInterpretations: [{ rollId: randomUUID(), explanation: 'Saved 64: No.' }],
+  };
+  const validate = async (candidate: unknown) => {
+    applyResponse(campaign, gameplayResponseInputSchema.parse(candidate), turnId);
+  };
+  await assert.rejects(() => validate(original), /combat_prepare receipt/);
+  let calls = 0;
+  const generator: Generator = {
+    capacity: async () => 10000,
+    generate: async (_settings, prompt) => {
+      calls++;
+      assert.deepEqual(JSON.parse(prompt).allowedPaths, [['operations', 0]]);
+      return { corrections: [{ path: ['operations', 0], value: create }] };
+    },
+  };
+  const result = await validateWithFieldRepair(original, validate, generator, settings);
+  assert.equal(calls, 1);
+  assert.deepEqual(result.operations, [create]);
+  assert.equal(result.narrative, original.narrative);
+  assert.deepEqual(result.rollInterpretations, original.rollInterpretations);
+  assert.equal(original.operations[0]!.characterId, characterId);
+  assert.equal(campaign.characters.length, 0);
+  const after = applyResponse(campaign, gameplayResponseInputSchema.parse(result), turnId).campaign;
+  assert.equal(after.characters[0]!.name, 'Keeper');
+  assert.notEqual(after.characters[0]!.id, characterId);
+  for (const value of [
+    { ...create, characterId: randomUUID() },
+    { ...create, preparationReceiptId: randomUUID() },
+    { op: 'delete', characterId },
+  ])
+    assert.throws(
+      () =>
+        applyResponseCorrections(original, [['operations', 0]], {
+          corrections: [{ path: ['operations', 0], value }],
+        }),
+      /prepared character identity/
+    );
+});
+
 test('inventory and noncombat references repair within two calls while preserving the saved roll', async () => {
   const campaign = newCampaign({ name: 'Noncombat repair' });
   const id = randomUUID();
@@ -601,4 +672,55 @@ test('combat links are correctable but prepared identities and receipts are not'
         }),
       /prepared character identity/
     );
+});
+
+test('rejected field correction logs its paths and application reason', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'rpg-repair-trace-'));
+  try {
+    const file = path.join(directory, 'trace.jsonl');
+    const trace = new PromptTrace(file, { executionId: randomUUID() });
+    const original = { operations: [{ op: 'create', characterId: randomUUID() }] };
+    const generator: Generator = {
+      capacity: async () => 10000,
+      generate: async () => ({
+        corrections: [
+          {
+            path: ['operations', 0],
+            value: {
+              op: 'create',
+              characterId: randomUUID(),
+            },
+          },
+        ],
+      }),
+    };
+    await assert.rejects(
+      () =>
+        validateWithFieldRepair(
+          original,
+          async () => {
+            throw new ResponseFieldProblem(
+              ['operations', 0],
+              new Problem(422, 'combat_identity', 'Missing receipt')
+            );
+          },
+          generator,
+          settings,
+          undefined,
+          { ...trace.context, trace }
+        ),
+      /Field correction failed/
+    );
+    const rows = (await readFile(file, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const failure = rows.find((row) => row.kind === 'field_repair_failed');
+    assert.equal(failure.payload.code, 'response_repair_failed');
+    assert.deepEqual(failure.payload.paths, [['operations', 0]]);
+    assert.match(failure.payload.reason, /prepared character identity or receipt/);
+    assert.equal(failure.correctionAttempt, 0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
