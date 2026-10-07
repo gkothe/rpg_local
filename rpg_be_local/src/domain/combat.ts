@@ -413,6 +413,14 @@ export function validateCombatTurn(input: {
   });
 
   const seenParagraphs = new Set<number>();
+  // No entry can satisfy the nonempty-ID schema without an encounter binding.
+  // Authorize removing the collection, rather than an impossible item correction.
+  if (!bindings.size && response.participantReferences.length)
+    fail(
+      ['participantReferences'],
+      CombatProblem.Reference,
+      'No encounter participants are registered; participantReferences must be []'
+    );
   response.participantReferences.forEach((reference, index) => {
     const path: ResponsePath = ['participantReferences', index];
     if (reference.afterParagraph > paragraphs || seenParagraphs.has(reference.afterParagraph))

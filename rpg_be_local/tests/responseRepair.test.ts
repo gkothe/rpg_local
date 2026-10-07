@@ -24,6 +24,7 @@ import type { Generator } from '../src/providers/service.js';
 import { nativeGameplaySchema } from '../src/providers/gameplayContract.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import { applyResponse } from '../src/domain/state.js';
+import { validateCombatTurn } from '../src/domain/combat.js';
 
 const campaignId = randomUUID(),
   turnId = randomUUID(),
@@ -192,6 +193,93 @@ test('book citations bind newer current-rule receipts without requiring the turn
 });
 
 const settings = { provider: 'codex', model: 'test', effort: 'high' };
+test('inventory and noncombat references repair within two calls while preserving the saved roll', async () => {
+  const campaign = newCampaign({ name: 'Noncombat repair' });
+  const id = randomUUID();
+  campaign.characters = [
+    {
+      id,
+      name: 'Keeper',
+      type: 'npc',
+      attributes: {},
+      inventory: { key: { description: 'Iron key' } },
+      description: {},
+      notes: '',
+      revision: 0,
+    },
+  ];
+  const original = {
+    ...response(sourceEvidence()),
+    knowledgeChanges: [],
+    operations: [{ op: 'set', characterId: id, field: 'inventory', expected: {}, value: {} }],
+    operationExplanations: [
+      {
+        operationIndex: 0,
+        reason: 'The keeper gives away the key.',
+        basis: 'established_state',
+        rollIds: [],
+        evidence: [],
+        visibility: 'player',
+      },
+    ],
+    participantReferences: [1, 2, 3].map((afterParagraph) => ({
+      afterParagraph,
+      characterIds: [id],
+    })),
+    rollInterpretations: [{ rollId: randomUUID(), explanation: 'Saved 16: Yes.' }],
+  };
+  let calls = 0;
+  const generator: Generator = {
+    capacity: async () => 10000,
+    generate: async (_settings, prompt, schema) => {
+      calls++;
+      const input = JSON.parse(prompt);
+      const path = calls === 1 ? ['operations', 0, 'expected'] : ['participantReferences'];
+      assert.deepEqual(input.allowedPaths, [path]);
+      if (calls === 2) {
+        const correction = (
+          schema as {
+            properties: { corrections: { items: { oneOf: { properties: { value: unknown } }[] } } };
+          }
+        ).properties.corrections.items.oneOf[0]!;
+        const valueSchema = correction.properties.value as {
+          type: string;
+          items: { properties: { characterIds: { items: { type: string; format: string } } } };
+        };
+        assert.equal(valueSchema.type, 'array');
+        assert.equal(valueSchema.items.properties.characterIds.items.type, 'string');
+        assert.equal(valueSchema.items.properties.characterIds.items.format, 'uuid');
+        assert.match(input.participantReferenceGuidance, /never ordinary narrative mentions/);
+      }
+      return {
+        corrections: [{ path, value: calls === 1 ? campaign.characters[0]!.inventory : [] }],
+      };
+    },
+  };
+  const result = await validateWithFieldRepair(
+    original,
+    async (candidate) => {
+      const parsed = gameplayResponseInputSchema.parse(candidate);
+      const after = applyResponse(campaign, parsed, turnId).campaign;
+      validateCombatTurn({
+        before: campaign,
+        after,
+        response: parsed,
+        authorization: { encounterId: null, participants: [], drafts: [] },
+        rolls: [],
+        narrative: parsed.narrative,
+      });
+    },
+    generator,
+    settings
+  );
+  assert.equal(calls, 2);
+  assert.deepEqual(result.participantReferences, []);
+  assert.deepEqual(result.rollInterpretations, original.rollInterpretations);
+  assert.equal(result.narrative, original.narrative);
+  assert.deepEqual(result.operations[0]!.value, original.operations[0]!.value);
+  assert.equal(original.participantReferences.length, 3);
+});
 test('mutation repair changes only invalid expected value and retains proposed value and another valid operation', async () => {
   const campaign = newCampaign({ name: 'NPC repair' });
   const id = randomUUID();
@@ -421,7 +509,13 @@ test('batched citation repair retains the two-call limit when corrections remain
         generator,
         settings
       ),
-    (error: unknown) => error instanceof Problem && error.code === 'response_repair_failed'
+    (error: unknown) => {
+      assert.ok(error instanceof Problem);
+      assert.equal(error.code, 'response_repair_failed');
+      assert.match(error.message, /knowledgeChanges\.0\.evidence\.0/);
+      assert.match(error.message, /scene and saved dice were preserved/);
+      return true;
+    }
   );
   assert.equal(calls, 2);
 });

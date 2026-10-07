@@ -12,6 +12,7 @@ import type { ProviderSettings } from '../domain/types.js';
 import { traceEvent, type PromptTraceContext } from '../providers/promptLog.js';
 import { selectRepairEvidence } from './responseRepairContext.js';
 import { KNOWLEDGE_PROVENANCE_GUIDANCE } from '../domain/gameplayNarrator.js';
+import { participantReferenceSchema } from '../domain/combat.js';
 
 const editableFields = new Set([
   'operations',
@@ -152,7 +153,11 @@ export async function validateWithFieldRepair<T>(
           throw new Problem(
             502,
             'response_repair_failed',
-            'The saved response could not be corrected without changing valid content'
+            `The saved response could not be corrected: ${
+              error instanceof ResponseFieldProblem
+                ? `${error.path.join('.')}: ${error.message}`
+                : responseRetryFeedback(error)
+            }. The scene and saved dice were preserved.`
           );
         throw error;
       }
@@ -182,6 +187,19 @@ export async function validateWithFieldRepair<T>(
               additionalProperties: false,
               required: ['path', 'value'],
               properties: { path: { enum: paths }, value: {} },
+              oneOf: paths.map((path) => ({
+                properties: {
+                  path: { const: path },
+                  value:
+                    path[0] === 'participantReferences' && path.length <= 2
+                      ? z.toJSONSchema(
+                          path.length === 1
+                            ? z.array(participantReferenceSchema)
+                            : participantReferenceSchema
+                        )
+                      : {},
+                },
+              })),
             },
           },
         },
@@ -198,6 +216,12 @@ export async function validateWithFieldRepair<T>(
         task: 'Correct only the listed invalid fields of this saved GM response. Return corrections in exactly the allowed path order. Preserve the narrative, scenario, valid operations, facts and authoritative dice. No tools, new events, invented receipts or rerolls. Use exact quotes from the supplied evidence; the app calculates citation offsets and pages. Do not remove valid material to evade validation.',
         invalid: error instanceof Error ? error.message : 'Invalid response',
         allowedPaths: paths,
+        ...(paths.some((path) => path[0] === 'participantReferences')
+          ? {
+              participantReferenceGuidance:
+                'References contain only UUID strings of participants in the prior or proposed structured encounter, never ordinary narrative mentions or operationIndex aliases. With no encounter participants, replace the permitted participantReferences collection with []. Preserve references required by valid combat effects and combat rolls.',
+            }
+          : {}),
         ...(paths.some((path) => path[0] === 'knowledgeChanges' || path[0] === 'operations')
           ? { knowledgeProvenance: KNOWLEDGE_PROVENANCE_GUIDANCE }
           : {}),

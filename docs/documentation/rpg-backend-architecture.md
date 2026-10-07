@@ -408,6 +408,12 @@ Validation runs in application code, without a tool call or an AI call. Response
 
 Citation binding gathers all independently invalid citation paths before requesting correction, so multiple malformed quotes can be repaired together without authorizing edits to valid citations or unrelated fields. Field validation permits up to two correction calls. If restricted repair fails, the turn fails with saved dice available; it does not automatically generate another scenario. Account quota, authentication, cancellation, isolation and ownership/revision failures stop immediately. Failed candidates remain in private diagnostic logs; only fully validated candidates receive an editing-resume record.
 
+Field repair for a turn without prior or proposed encounter participants authorizes clearing
+the invalid participantReferences collection to []. Individual entries require nonempty UUID
+lists, so item-only repair cannot resolve this case. Reference correction schemas and prompts
+exclude operationIndex aliases and ordinary narrative mentions. Exhausted repair reports the
+invalid field and validation reason while preserving the scene and saved dice.
+
 Prompts distinguish directly documented knowledge (`origin: source` with exact evidence) from events and details created during play (`origin: gm` with empty evidence). Mixed claims should be separated; a background quote does not substantiate an invented detail. Origin is never automatically rewritten to satisfy validation.
 
 Initial source retrieval uses the player action and current scene instead of all character names and the full previous narration. Up to four whole relevant sections are ranked by action coverage, then scene coverage; scene matches are used when no action matches. Pinned sources, opening bootstrap and complete player sheets remain supplied independently. All omitted originals stay available through campaign source tools. In the current tool registry, rule search results identify already delivered original spans by receipt, revision/hash and path. `rules_find` skips automatic full rereads of complete originals while returning their receipt locators; partial passages and intentional `rules_get` rereads remain available. Every actual search/read still runs ownership and current-library checks and persists its normal audit. Search metadata stays stable on transport replay and is not itself rule authority.
