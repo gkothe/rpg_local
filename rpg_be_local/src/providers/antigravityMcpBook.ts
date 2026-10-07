@@ -238,9 +238,9 @@ export async function generateAntigravityMcpBook(
                 if (MCP_RESOURCE_DISCOVERY.some((name) => name === gateway)) {
                   const validEnvelope =
                     parameters?.ServerName === MCP_SERVER &&
-                    Object.keys(parameters).every((key) => key === 'ServerName');
-                  const validIndex =
-                    Number.isInteger(step.step_index) && step.step_index! >= 0;
+                    Object.keys(parameters).every((key) => key === 'ServerName') &&
+                    (step.tool_info?.name === undefined || step.tool_info.name === gateway);
+                  const validIndex = Number.isInteger(step.step_index) && step.step_index! >= 0;
                   const started = discoverySteps.get(step.step_index!);
                   if (
                     validIndex &&

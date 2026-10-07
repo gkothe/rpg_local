@@ -14,6 +14,7 @@ export const CAMPAIGN_SOURCE_SELECTION = {
   initialSections: 4,
   bootstrapChars: 12000,
   searchPageSections: 8,
+  maxBatchQueries: 6,
   excerptChars: 240,
   excerptLeadChars: 60,
 } as const;
@@ -89,13 +90,36 @@ export function selectInitialSourceSections<T extends { text: string }>(
     .slice(0, CAMPAIGN_SOURCE_SELECTION.initialSections)
     .map((entry) => entry.item);
 }
+const searchQuerySchema = z.string().trim().min(1);
 export const campaignSourceSearchSchema = z
   .object({
-    query: z.string().trim().min(1),
+    query: searchQuerySchema
+      .describe('One search term. Provide exactly one of query or queries.')
+      .optional(),
+    queries: z
+      .array(searchQuerySchema)
+      .min(1)
+      .max(CAMPAIGN_SOURCE_SELECTION.maxBatchQueries)
+      .describe(
+        `Distinct search terms (up to ${CAMPAIGN_SOURCE_SELECTION.maxBatchQueries}) answered in one call, one result group each. Provide exactly one of query or queries; cursor is not allowed with queries.`
+      )
+      .optional(),
     sourceId: z.uuid().optional(),
     cursor: z.string().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((input, context) => {
+    if ((input.query === undefined) === (input.queries === undefined))
+      context.addIssue({ code: 'custom', message: 'Provide exactly one of query or queries' });
+    if (input.queries && input.cursor !== undefined)
+      context.addIssue({
+        code: 'custom',
+        path: ['cursor'],
+        message: 'cursor continues a single query',
+      });
+    if (input.queries && new Set(input.queries).size !== input.queries.length)
+      context.addIssue({ code: 'custom', path: ['queries'], message: 'Queries must be distinct' });
+  });
 export const campaignSourceGetSchema = z
   .object({
     sourceId: z.uuid(),
@@ -243,6 +267,62 @@ export function createCampaignSourceRecall(
   const fingerprint = createHash('sha256').update(JSON.stringify(frozen)).digest('hex');
   const cursors = new Map<string, { query: string; sourceId?: string; offset: number }>();
   let nextCursor = 0;
+  /** One query's ranked, cursor-paged page; a batch is exactly N of these. */
+  function searchOne(input: { query: string; sourceId?: string; cursor?: string }) {
+    const hits = frozen.sources
+      .filter((s) => !input.sourceId || s.id === input.sourceId)
+      .flatMap((source) =>
+        navigation.get(source.id)!.map((section) => {
+          const { rank, match } = searchMatch(section.text, input.query);
+          let start =
+            section.start + Math.max(0, match - CAMPAIGN_SOURCE_SELECTION.excerptLeadChars);
+          if (start > section.start && /[\uDC00-\uDFFF]/.test(source.text[start]!)) start--;
+          let end = Math.min(section.end, start + CAMPAIGN_SOURCE_SELECTION.excerptChars);
+          if (end < source.text.length && /[\uD800-\uDBFF]/.test(source.text[end - 1]!)) end--;
+          return {
+            sourceId: source.id,
+            version: source.version,
+            name: source.name,
+            sectionIndex: section.index,
+            title: section.title,
+            alreadySupplied: suppliedSection(source, section, supplied),
+            start,
+            end,
+            text: source.text.slice(start, end),
+            rank,
+          };
+        })
+      )
+      .filter((hit) => hit.rank > 0)
+      .sort(
+        (a, b) =>
+          b.rank - a.rank || a.sourceId.localeCompare(b.sourceId) || a.sectionIndex - b.sectionIndex
+      );
+    let offset = 0;
+    if (input.cursor) {
+      const saved = cursors.get(input.cursor);
+      if (!saved || saved.query !== input.query || saved.sourceId !== input.sourceId)
+        throw new Problem(
+          422,
+          'campaign_source_cursor_invalid',
+          'Cursor does not match this frozen lookup'
+        );
+      offset = saved.offset;
+    }
+    const entries = hits
+      .slice(offset, offset + CAMPAIGN_SOURCE_SELECTION.searchPageSections)
+      .map(({ rank: _rank, ...hit }) => hit);
+    let cursor: string | null = null;
+    if (offset + entries.length < hits.length) {
+      cursor = `${fingerprint}:${nextCursor++}`;
+      cursors.set(cursor, {
+        query: input.query,
+        sourceId: input.sourceId,
+        offset: offset + entries.length,
+      });
+    }
+    return { entries, nextCursor: cursor, reason: entries.length ? null : 'no_match' };
+  }
   return {
     markSupplied(raw: unknown) {
       // Only successful, delivered get payloads call this after receipt persistence.
@@ -279,61 +359,14 @@ export function createCampaignSourceRecall(
       const input = campaignSourceSearchSchema.parse(raw);
       if (input.sourceId && !frozen.sources.some((s) => s.id === input.sourceId))
         throw new Problem(404, 'campaign_source_missing', 'Source is outside this frozen campaign');
-      const hits = frozen.sources
-        .filter((s) => !input.sourceId || s.id === input.sourceId)
-        .flatMap((source) =>
-          navigation.get(source.id)!.map((section) => {
-            const { rank, match } = searchMatch(section.text, input.query);
-            let start =
-              section.start + Math.max(0, match - CAMPAIGN_SOURCE_SELECTION.excerptLeadChars);
-            if (start > section.start && /[\uDC00-\uDFFF]/.test(source.text[start]!)) start--;
-            let end = Math.min(section.end, start + CAMPAIGN_SOURCE_SELECTION.excerptChars);
-            if (end < source.text.length && /[\uD800-\uDBFF]/.test(source.text[end - 1]!)) end--;
-            return {
-              sourceId: source.id,
-              version: source.version,
-              name: source.name,
-              sectionIndex: section.index,
-              title: section.title,
-              alreadySupplied: suppliedSection(source, section, supplied),
-              start,
-              end,
-              text: source.text.slice(start, end),
-              rank,
-            };
-          })
-        )
-        .filter((hit) => hit.rank > 0)
-        .sort(
-          (a, b) =>
-            b.rank - a.rank ||
-            a.sourceId.localeCompare(b.sourceId) ||
-            a.sectionIndex - b.sectionIndex
-        );
-      let offset = 0;
-      if (input.cursor) {
-        const saved = cursors.get(input.cursor);
-        if (!saved || saved.query !== input.query || saved.sourceId !== input.sourceId)
-          throw new Problem(
-            422,
-            'campaign_source_cursor_invalid',
-            'Cursor does not match this frozen lookup'
-          );
-        offset = saved.offset;
-      }
-      const entries = hits
-        .slice(offset, offset + CAMPAIGN_SOURCE_SELECTION.searchPageSections)
-        .map(({ rank: _rank, ...hit }) => hit);
-      let cursor: string | null = null;
-      if (offset + entries.length < hits.length) {
-        cursor = `${fingerprint}:${nextCursor++}`;
-        cursors.set(cursor, {
-          query: input.query,
-          sourceId: input.sourceId,
-          offset: offset + entries.length,
-        });
-      }
-      return { entries, nextCursor: cursor, reason: entries.length ? null : 'no_match' };
+      if (input.queries)
+        return {
+          results: input.queries.map((query) => ({
+            query,
+            ...searchOne({ query, sourceId: input.sourceId }),
+          })),
+        };
+      return searchOne({ query: input.query!, sourceId: input.sourceId, cursor: input.cursor });
     },
     get(raw: unknown, receiptId: string): Record<string, unknown> {
       const input = campaignSourceGetSchema.parse(raw);

@@ -249,8 +249,13 @@ type CombatResponse = {
   participantReferences: readonly ParticipantReference[];
 };
 export const paragraphCount = (narrative: string) => narrative.trim().split(/\r?\n\s*\r?\n/).length;
-const fail = (path: ResponsePath, code: string, message: string): never => {
-  throw new ResponseFieldProblem(path, new Problem(422, code, message));
+const fail = (
+  path: ResponsePath,
+  code: string,
+  message: string,
+  forced?: { value: unknown }
+): never => {
+  throw new ResponseFieldProblem(path, new Problem(422, code, message), forced);
 };
 
 /**
@@ -419,7 +424,8 @@ export function validateCombatTurn(input: {
     fail(
       ['participantReferences'],
       CombatProblem.Reference,
-      'No encounter participants are registered; participantReferences must be []'
+      'No encounter participants are registered; participantReferences must be []',
+      { value: [] }
     );
   response.participantReferences.forEach((reference, index) => {
     const path: ResponsePath = ['participantReferences', index];

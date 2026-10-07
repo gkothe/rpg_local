@@ -1022,13 +1022,19 @@ export function remapArchive(raw: unknown): Archive {
         span.id = mapped(span.id);
       }
       // Payloads contain frozen catalog/search results with historical source IDs.
-      for (const field of ['sources', 'sections', 'entries'])
-        if (Array.isArray(read.payload[field]))
-          for (const value of read.payload[field])
-            if (value && typeof value === 'object') {
-              if (typeof value.sourceId === 'string') value.sourceId = mapped(value.sourceId);
-              if (typeof value.id === 'string' && ids.has(value.id)) value.id = mapped(value.id);
-            }
+      // A batched search nests one single-query payload per group under `results`.
+      const pages: Record<string, unknown>[] = [read.payload];
+      if (Array.isArray(read.payload.results))
+        for (const group of read.payload.results)
+          if (group && typeof group === 'object') pages.push(group);
+      for (const page of pages)
+        for (const field of ['sources', 'sections', 'entries'])
+          if (Array.isArray(page[field]))
+            for (const value of page[field])
+              if (value && typeof value === 'object') {
+                if (typeof value.sourceId === 'string') value.sourceId = mapped(value.sourceId);
+                if (typeof value.id === 'string' && ids.has(value.id)) value.id = mapped(value.id);
+              }
     }
     for (const e of t.operationExplanations ?? []) {
       e.rollIds = e.rollIds.map(mapped);

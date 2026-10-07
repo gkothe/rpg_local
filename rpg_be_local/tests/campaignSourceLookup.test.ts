@@ -6,6 +6,7 @@ import { TurnStatus } from '../src/domain/options.js';
 import {
   freezeCampaignSources,
   CAMPAIGN_SOURCE_GET_TOOL_NAME,
+  CAMPAIGN_SOURCE_SEARCH_TOOL_NAME,
 } from '../src/domain/campaignSourceRecall.js';
 import { CampaignSourceLookup } from '../src/services/campaignSourceLookup.js';
 import { textSource } from '../src/services/sources.js';
@@ -171,4 +172,20 @@ test('cancelled, expired and foreign-owner reads cannot persist or reveal source
     );
     assert.equal(f.reads.size, 0);
   }
+});
+test('a batched search persists one read, replays by transport identity and conflicts when changed', async () => {
+  const f = fixture();
+  const queries = ['gate', 'locked'];
+  const first = await f.lookup.read(f.turn, CAMPAIGN_SOURCE_SEARCH_TOOL_NAME, { queries }, 'batch');
+  assert.equal(f.reads.size, 1);
+  assert.equal((first.results as unknown[]).length, 2);
+  assert.deepEqual(
+    await f.freshLookup().read(f.turn, CAMPAIGN_SOURCE_SEARCH_TOOL_NAME, { queries }, 'batch'),
+    first
+  );
+  assert.equal(f.reads.size, 1);
+  await assert.rejects(
+    () => f.lookup.read(f.turn, CAMPAIGN_SOURCE_SEARCH_TOOL_NAME, { queries: ['gate'] }, 'batch'),
+    /identity/
+  );
 });

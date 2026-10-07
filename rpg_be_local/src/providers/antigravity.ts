@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile, unlink, rmdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,6 +13,62 @@ import { logPrompt, traceEvent, safeTraceFailure, type PromptTraceContext } from
 export const ANTIGRAVITY_ISOLATED_VERSION = '1.2.14';
 const ANTIGRAVITY_PROCESS_OUTPUT_BYTES = Infinity;
 const ANTIGRAVITY_PROCESS_TIMEOUT_MS = 0;
+/** How long a successful empty-hooks check is reused for the same launch environment. */
+export const ANTIGRAVITY_HOOKS_VERIFIED_TTL_MS = 10 * 60 * 1000;
+const OWNED_PROFILE_SENTINEL = '<owned-profile>';
+/** Clock seam; tests override `now` to exercise expiry. */
+export const antigravityHooksClock = { now: () => Date.now() };
+// Keyed by a digest of the launch environment; raw env values are never retained.
+const verifiedHooks = new Map<string, number>();
+const failedHooks = new Map<string, number>();
+
+export function resetAntigravityHooksCacheForTests() {
+  verifiedHooks.clear();
+  failedHooks.clear();
+}
+
+/** A success is cached only if its check started after the last recorded failure for the key. */
+export function recordHooksCheck(key: string, startedAtMs: number, ok: boolean) {
+  if (!ok) {
+    verifiedHooks.delete(key);
+    failedHooks.set(key, Math.max(startedAtMs, failedHooks.get(key) ?? startedAtMs));
+    return;
+  }
+  const failedAt = failedHooks.get(key);
+  if (failedAt !== undefined && startedAtMs <= failedAt) return;
+  verifiedHooks.set(key, startedAtMs);
+}
+
+export function hooksVerified(key: string): boolean {
+  const verifiedAt = verifiedHooks.get(key);
+  return (
+    verifiedAt !== undefined &&
+    antigravityHooksClock.now() - verifiedAt < ANTIGRAVITY_HOOKS_VERIFIED_TTL_MS
+  );
+}
+
+function hooksFingerprint(
+  executable: { binary: string; prefix: string[] },
+  env: NodeJS.ProcessEnv,
+  ownedProfile?: string
+): string {
+  const canonical = Object.fromEntries(
+    Object.entries(env)
+      .map(([name, value]) => [
+        name,
+        ownedProfile && name === 'USERPROFILE' && value === ownedProfile
+          ? OWNED_PROFILE_SENTINEL
+          : value,
+      ])
+      .sort(([left], [right]) => (left! < right! ? -1 : left! > right! ? 1 : 0))
+  );
+  return createHash('sha256')
+    .update(
+      JSON.stringify({ binary: executable.binary, prefix: executable.prefix, env: canonical })
+    )
+    .digest('hex');
+}
+
 const ANTIGRAVITY_MODEL_EFFORTS = ['low', 'medium', 'high', 'max'] as const;
 const effortPattern = ANTIGRAVITY_MODEL_EFFORTS.join('|');
 const effortLabelPattern = ANTIGRAVITY_MODEL_EFFORTS.map(
@@ -92,7 +148,8 @@ export async function generateAntigravity(
   const launchStarted = performance.now();
   async function measured<T>(
     stage: 'hooks' | 'agent_setup' | 'prompt_logging' | 'generation_process' | 'agent_cleanup',
-    work: () => Promise<T>
+    work: () => Promise<T>,
+    endExtra?: () => Record<string, unknown>
   ): Promise<T> {
     await traceEvent(options.trace, 'provider_stage_start', {
       provider: 'agy',
@@ -108,6 +165,7 @@ export async function generateAntigravity(
         status: 'success',
         durationMs: performance.now() - started,
         elapsedMs: performance.now() - launchStarted,
+        ...endExtra?.(),
       });
       return result;
     } catch (error) {
@@ -122,27 +180,44 @@ export async function generateAntigravity(
       throw error;
     }
   }
-  await measured('hooks', async () => {
-    const hooks = JSON.parse(
-      await runProcess(
-        executable.binary,
-        [...executable.prefix, '-p', '/hooks', '--output-format', 'json'],
-        '',
-        {
-          env,
-          signal,
-          timeoutMs: 0,
-          maxOutputBytes: 100000,
-        }
-      )
-    );
-    if (!Array.isArray(hooks.command?.data?.hooks) || hooks.command.data.hooks.length !== 0)
-      throw new Problem(
-        503,
-        'provider_isolation',
-        'Antigravity hooks must be absent for isolated gameplay'
-      );
-  });
+  const hooksKey = hooksFingerprint(executable, env, options.ownedProfile);
+  let hooksCached = false;
+  await measured(
+    'hooks',
+    async () => {
+      if (hooksVerified(hooksKey)) {
+        hooksCached = true;
+        return;
+      }
+      const checkStarted = antigravityHooksClock.now();
+      try {
+        const hooks = JSON.parse(
+          await runProcess(
+            executable.binary,
+            [...executable.prefix, '-p', '/hooks', '--output-format', 'json'],
+            '',
+            {
+              env,
+              signal,
+              timeoutMs: 0,
+              maxOutputBytes: 100000,
+            }
+          )
+        );
+        if (!Array.isArray(hooks.command?.data?.hooks) || hooks.command.data.hooks.length !== 0)
+          throw new Problem(
+            503,
+            'provider_isolation',
+            'Antigravity hooks must be absent for isolated gameplay'
+          );
+      } catch (error) {
+        recordHooksCheck(hooksKey, checkStarted, false);
+        throw error;
+      }
+      recordHooksCheck(hooksKey, checkStarted, true);
+    },
+    () => ({ cached: hooksCached })
+  );
   // The verified runtime discovers global agents in an untrusted fresh directory.
   // A unique global definition is effective without changing trust or subscription settings.
   const name =

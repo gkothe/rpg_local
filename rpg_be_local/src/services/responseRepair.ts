@@ -145,6 +145,27 @@ export function applyResponseCorrections<T>(original: T, paths: ResponsePath[], 
     );
   return copy;
 }
+/** Corrections whose only valid value is known, when every problem carries one. */
+function forcedCorrections(error: unknown, paths: ResponsePath[]) {
+  const problems =
+    error instanceof ResponseFieldProblems
+      ? error.problems
+      : error instanceof ResponseFieldProblem
+        ? [error]
+        : [];
+  if (
+    !problems.length ||
+    problems.length !== paths.length ||
+    problems.some(
+      (problem, index) =>
+        !problem.forced || JSON.stringify(problem.path) !== JSON.stringify(paths[index])
+    )
+  )
+    return null;
+  return {
+    corrections: problems.map((problem) => ({ path: problem.path, value: problem.forced!.value })),
+  };
+}
 /** No tools or new scene generation; validation and commit remain owned by the caller. */
 export async function validateWithFieldRepair<T>(
   original: T,
@@ -156,14 +177,27 @@ export async function validateWithFieldRepair<T>(
   evidence?: () => Promise<unknown>
 ): Promise<T> {
   let candidate = structuredClone(original);
-  for (let attempt = 0; ; attempt++) {
+  // Deterministic fixes do not consume model attempts; each forced path is applied once.
+  let modelAttempts = 0;
+  const forcedApplied = new Set<string>();
+  for (;;) {
     if (signal?.aborted) throw new Problem(409, 'cancelled', 'Request cancelled');
     try {
       await validate(candidate);
       return candidate;
     } catch (error) {
       const paths = repairPaths(error);
-      if (!paths.length || attempt >= RESPONSE_RETRY_COUNT) {
+      const forced = forcedCorrections(error, paths);
+      if (
+        forced &&
+        forced.corrections.every(({ path }) => !forcedApplied.has(JSON.stringify(path)))
+      ) {
+        candidate = applyResponseCorrections(candidate, paths, forced);
+        for (const { path } of forced.corrections) forcedApplied.add(JSON.stringify(path));
+        await traceEvent(trace, 'field_repair_deterministic', { paths });
+        continue;
+      }
+      if (!paths.length || modelAttempts >= RESPONSE_RETRY_COUNT) {
         if (error instanceof ResponseFieldProblem || responseRetryFeedback(error) !== null)
           throw new Problem(
             502,
@@ -181,7 +215,7 @@ export async function validateWithFieldRepair<T>(
             ...trace,
             executionId: randomUUID(),
             purpose: 'response_repair',
-            correctionAttempt: attempt,
+            correctionAttempt: modelAttempts,
           }
         : undefined;
       await traceEvent(child, 'field_repair_requested', {
@@ -272,6 +306,7 @@ export async function validateWithFieldRepair<T>(
           'Field correction failed; the scene and saved dice were preserved'
         );
       }
+      modelAttempts++;
     }
   }
 }

@@ -195,6 +195,11 @@ export default function ToolExplorer({
           the app already accepted. External tool names, changed request identities, and lost
           ownership still stop the attempt.
         </p>
+        <p>
+          The private server has no resources or resource templates. Antigravity is instructed to
+          use the supplied tools; resource discovery on local_rpg returns empty lists and lets the
+          turn continue. Resource reads and discovery on other servers remain blocked.
+        </p>
       </details>
       <details>
         <summary>Tool access and request limits</summary>

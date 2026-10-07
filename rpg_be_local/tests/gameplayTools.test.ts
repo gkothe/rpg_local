@@ -315,3 +315,21 @@ test('combat_prepare validates before dispatch and replays by transport identity
   assert.equal(gameplayToolRequestBytes('roll_dice'), 1024);
   assert.equal(GAMEPLAY_ENVELOPE_BYTES, 1_048_576 + 65_536);
 });
+
+test('the advertised source search schema offers a single query or a bounded batch', () => {
+  const registry = ownedTools({
+    book: false,
+    roll: async () => ({ rollId: randomUUID(), slot: 0, groups: [], reused: false }),
+    read: async () => ({}),
+    assertActive: async () => {},
+    knowledge: freezeKnowledge(newCampaign({ name: 'Schema' }), true),
+  });
+  const search = registry.definitions.find((d) => d.name === 'campaign_sources_search')!;
+  const schema = search.inputSchema as unknown as {
+    properties: Record<string, { maxItems?: number; description?: string }>;
+  };
+  assert.ok(schema.properties.query && schema.properties.queries && schema.properties.cursor);
+  assert.equal(schema.properties.queries.maxItems, 6);
+  assert.match(schema.properties.queries.description ?? '', /exactly one of query or queries/);
+  assert.match(search.description, /queries/);
+});

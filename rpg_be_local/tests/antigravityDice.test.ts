@@ -72,6 +72,25 @@ else if(args.includes('/hooks')) {
       const completion={step_type:'tool',step_index:slot*2+1,state:'DONE',tool_name:'call_mcp_tool'};
       if(mode==='matching-envelope'||mode==='changed-envelope') completion.tool_info={parameters:{ServerName:'local_rpg',ToolName:'roll_dice',Arguments:mode==='changed-envelope'?{...input,slot:99}:input}};
       console.log(JSON.stringify({event:'step_update',step_update:completion}));
+      if(slot===0 && mode.startsWith('discovery-')) {
+        if(!agent.includes('with no resources or resource templates')) throw new Error('Missing resource guidance');
+        for(const [offset,name,method,resultKey] of [[0,'list_resources','resources/list','resources'],[1,'list_resource_templates','resources/templates/list','resourceTemplates']]) {
+          const parameters={ServerName:mode==='discovery-foreign'?'outside':'local_rpg'};
+          if(mode==='discovery-extra') parameters.Uri='file:///private';
+          if(mode==='discovery-missing-server') delete parameters.ServerName;
+          const index=mode==='discovery-reused-index'?1:10+offset;
+          const discovery={step_type:'tool',step_index:index,state:mode==='discovery-orphan'?'DONE':'ACTIVE',tool_name:mode==='discovery-read'?'read_resource':name,tool_info:{name,parameters}};
+          if(mode==='discovery-conflicting-name') discovery.tool_info.name='read_resource';
+          console.log(JSON.stringify({event:'step_update',step_update:discovery}));
+          if(mode!=='discovery-success' && mode!=='discovery-envelope') return;
+          const reply=await fetch(server.serverUrl,{method:'POST',headers:{...server.headers,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:10+offset,method,params:{}})});
+          const payload=await reply.json();
+          if(payload.error || JSON.stringify(payload.result[resultKey])!=='[]') throw new Error('Discovery must return empty lists');
+          const done={step_type:'tool',step_index:index,state:'DONE',tool_name:name};
+          if(mode==='discovery-envelope') done.tool_info={name,parameters};
+          console.log(JSON.stringify({event:'step_update',step_update:done}));
+        }
+      }
     }
     console.log(JSON.stringify({event:'step_update',step_update:{step_type:'agent_response',step_index:4,state:'DONE',usage:{input_tokens:10000,output_tokens:12417}}}));
     const response={narrative:history.map(r=>r.result.groups[0].faces[0]).join(','),operations:[],rollInterpretations:history.map(r=>({rollId:r.result.rollId,explanation:'Recorded face '+r.result.groups[0].faces[0]}))};
@@ -314,7 +333,13 @@ test('a genuinely external direct tool remains non-retryable and never dispatche
   }
 });
 
-for (const usageMode of ['valid', 'partial-usage', 'invalid-usage'])
+for (const usageMode of [
+  'valid',
+  'partial-usage',
+  'invalid-usage',
+  'discovery-success',
+  'discovery-envelope',
+])
   test(`Antigravity accepts successful native MCP despite ${usageMode} telemetry`, async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-dice-test-'));
     try {
@@ -350,6 +375,47 @@ for (const usageMode of ['valid', 'partial-usage', 'invalid-usage'])
       await rm(root, { recursive: true, force: true });
     }
   });
+
+for (const mode of [
+  'discovery-foreign',
+  'discovery-extra',
+  'discovery-missing-server',
+  'discovery-orphan',
+  'discovery-reused-index',
+  'discovery-read',
+  'discovery-conflicting-name',
+]) {
+  test(`Antigravity rejects ${mode} after an owned gameplay call`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-discovery-isolation-'));
+    try {
+      const filename = path.join(root, 'cli.mjs');
+      await writeFile(filename, fixture);
+      let calls = 0;
+      await assert.rejects(
+        generateAntigravityDice(
+          { binary: process.execPath, prefix: [filename] },
+          settings,
+          'Synthetic context',
+          root,
+          { ...process.env, RPG_TEST_AGY_MODE: mode },
+          adapter(async () => {
+            calls++;
+            return {
+              rollId: randomUUID(),
+              slot: 0,
+              groups: [{ label: 'check', sides: 6, faces: [3] }],
+              reused: false,
+            };
+          })
+        ),
+        (error: unknown) => (error as { code: string }).code === 'dice_isolation'
+      );
+      assert.equal(calls, 1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
 
 test('Antigravity rejects native capabilities before executing application dice', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-dice-isolation-'));

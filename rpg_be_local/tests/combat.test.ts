@@ -23,6 +23,7 @@ import { CharacterType } from '../src/domain/options.js';
 import { ExplanationBasis } from '../src/domain/operationExplanations.js';
 import { KnowledgeOrigin, KnowledgeVisibility } from '../src/domain/knowledge.js';
 import type { Campaign } from '../src/domain/types.js';
+import { ResponseFieldProblem } from '../src/domain/responseFields.js';
 
 const health = [{ path: ['health', 'damage'], kind: CombatFieldKind.Damage, label: 'Damage' }];
 const soldier = (name: string) => ({
@@ -599,4 +600,47 @@ test('manual edits keep the structured encounter and tracked paths but may chang
   assert.doesNotThrow(() => assertManualAttributesEdit(ended, a.characterId, { hp: 3 }));
   assert.throws(() => assertCharacterRemovable(active, a.characterId), /end the encounter first/);
   assert.doesNotThrow(() => assertCharacterRemovable(ended, a.characterId));
+});
+
+test('stray participant references without an encounter force an empty collection; other reference faults do not', () => {
+  const c = newCampaign({ name: 'No encounter' });
+  const options = {
+    campaignId: c.id,
+    turnId: randomUUID(),
+    combat: { authorization: { encounterId: null, participants: [], drafts: [] } },
+  };
+  assert.throws(
+    () =>
+      applyResponse(
+        c,
+        response({ participantReferences: [{ afterParagraph: 1, characterIds: [randomUUID()] }] }),
+        randomUUID(),
+        options
+      ),
+    (error: unknown) => {
+      const problem = error as ResponseFieldProblem;
+      assert.ok(problem instanceof ResponseFieldProblem);
+      assert.deepEqual(problem.path, ['participantReferences']);
+      assert.deepEqual(problem.forced, { value: [] });
+      return true;
+    }
+  );
+  const a = draft('Aldric');
+  const b = draft('Brun');
+  const encounterId = randomUUID();
+  const started = startEncounter(newCampaign({ name: 'Encounter' }), a, b, encounterId);
+  assert.throws(
+    () =>
+      applyResponse(
+        started.campaign,
+        response({ participantReferences: [{ afterParagraph: 9, characterIds: [a.characterId] }] }),
+        randomUUID(),
+        {
+          campaignId: started.campaign.id,
+          turnId: randomUUID(),
+          combat: { authorization: authorize(encounterId, [a, b]) },
+        }
+      ),
+    (error: unknown) => error instanceof ResponseFieldProblem && error.forced === undefined
+  );
 });

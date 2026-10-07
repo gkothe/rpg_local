@@ -485,6 +485,24 @@ test('archive retains secret metadata, source purpose and remaps frozen source r
       createdAt: data.campaign.createdAt,
     },
   ];
+  const searchReceipt = randomUUID();
+  const searchEntry = () => ({ sourceId: source.id, version: source.version, sectionIndex: 0 });
+  data.turns[0]!.sourceReads.push({
+    id: searchReceipt,
+    campaignId: data.campaign.id,
+    turnId: data.turns[0]!.id,
+    sessionId: session.id,
+    tool: 'campaign_sources_search',
+    transportRequestId: 'search-batch',
+    argumentDigest: 'b'.repeat(64),
+    payload: {
+      results: [
+        { query: 'a', entries: [searchEntry()], nextCursor: null, reason: null },
+        { query: 'b', entries: [searchEntry()], nextCursor: null, reason: null },
+      ],
+    },
+    createdAt: data.campaign.createdAt,
+  });
   const out = remapArchive(data);
   assert.equal(out.campaign.knowledge![0]!.visibility, 'gm_only');
   assert.equal(out.campaign.sources[0]!.purpose, 'campaign');
@@ -495,6 +513,12 @@ test('archive retains secret metadata, source purpose and remaps frozen source r
   );
   assert.equal(out.turns[0]!.sourceReads![0]!.payload.receiptId, out.turns[0]!.sourceReads![0]!.id);
   assert.notEqual(out.turns[0]!.sourceReads![0]!.id, receiptId);
+  const batchedGroups = out.turns[0]!.sourceReads![1]!.payload.results as {
+    entries: { sourceId: string }[];
+  }[];
+  for (const group of batchedGroups)
+    assert.equal(group.entries[0]!.sourceId, out.campaign.sources[0]!.id);
+  assert.notEqual(batchedGroups[0]!.entries[0]!.sourceId, source.id);
 });
 
 test('rolls recorded before combat tracking stay valid without a scope and survive a round-trip', () => {

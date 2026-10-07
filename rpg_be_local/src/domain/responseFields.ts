@@ -4,7 +4,9 @@ export type ResponsePath = (string | number)[];
 export class ResponseFieldProblem extends Problem {
   constructor(
     public path: ResponsePath,
-    public cause: Problem
+    public cause: Problem,
+    /** The only valid value for this path, so the repair loop can apply it without a model call. */
+    public forced?: { value: unknown }
   ) {
     super(cause.status, cause.code, cause.message);
   }

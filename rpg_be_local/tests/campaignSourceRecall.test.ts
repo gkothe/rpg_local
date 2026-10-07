@@ -303,3 +303,63 @@ test('source tools work for both default and library gameplay', async () => {
     await assert.rejects(() => tools.call('read_file', {}, 3), /outside/);
   }
 });
+
+test('batched search returns one single-query-equivalent group per query, in input order', () => {
+  const c = newCampaign({ name: 'Batched sources' });
+  c.sources = [
+    ...Array.from({ length: 10 }, (_, index) =>
+      textSource(`Gate ${index}`, 'The gate beside the wall. ' + 'filler '.repeat(20))
+    ),
+    textSource('Arena', 'The arena opens at noon.'),
+  ];
+  const frozen = freezeCampaignSources(c);
+  const withoutCursor = (page: Record<string, unknown>) => ({ ...page, nextCursor: null });
+  const batched = createCampaignSourceRecall(frozen).search({ queries: ['arena', 'gate'] });
+  const groups = batched.results as ({ query: string; nextCursor: string | null } & Record<
+    string,
+    unknown
+  >)[];
+  assert.deepEqual(
+    groups.map((group) => group.query),
+    ['arena', 'gate']
+  );
+  for (const group of groups) {
+    const { query, ...page } = group;
+    const single = createCampaignSourceRecall(frozen).search({ query });
+    assert.deepEqual(withoutCursor(page), withoutCursor(single));
+    assert.equal(Boolean(page.nextCursor), Boolean(single.nextCursor));
+  }
+  const gate = groups[1]!;
+  assert.ok(gate.nextCursor);
+  assert.equal(groups[0]!.nextCursor, null);
+  const lookup = createCampaignSourceRecall(frozen);
+  const second = (lookup.search({ queries: ['arena', 'gate'] }).results as typeof groups)[1]!;
+  assert.equal(
+    (lookup.search({ query: 'gate', cursor: second.nextCursor! }).entries as unknown[]).length,
+    2
+  );
+  const scoped = createCampaignSourceRecall(frozen).search({
+    queries: ['gate', 'arena'],
+    sourceId: c.sources[10]!.id,
+  }).results as typeof groups;
+  assert.equal((scoped[0]!.entries as unknown[]).length, 0);
+  assert.equal((scoped[1]!.entries as unknown[]).length, 1);
+});
+
+test('search arguments accept exactly one of query or up to six distinct queries', () => {
+  const c = newCampaign({ name: 'Argument shapes' });
+  c.sources = [textSource('Doc', 'The gate.')];
+  const lookup = createCampaignSourceRecall(freezeCampaignSources(c));
+  const rejected = [
+    { query: 'a', queries: ['b'] },
+    {},
+    { queries: [] },
+    { queries: ['1', '2', '3', '4', '5', '6', '7'] },
+    { queries: ['gate', ' gate '] },
+    { queries: ['gate'], cursor: 'x' },
+    { queries: [' '] },
+  ];
+  for (const input of rejected)
+    assert.throws(() => lookup.search(input), `${JSON.stringify(input)}`);
+  assert.doesNotThrow(() => lookup.search({ queries: ['1', '2', '3', '4', '5', '6'] }));
+});

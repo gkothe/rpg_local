@@ -20,6 +20,7 @@ import { ruleCitationSchema, RuleSystemKind, type RuleRead } from '../src/domain
 import { validateRuleCitations } from '../src/domain/ruleCitationValidation.js';
 import { ResponseFieldProblem, ResponseFieldProblems } from '../src/domain/responseFields.js';
 import { Problem } from '../src/errors.js';
+import { RESPONSE_RETRY_COUNT } from '../src/domain/responseRetry.js';
 import {
   validateWithFieldRepair,
   applyResponseCorrections,
@@ -264,7 +265,7 @@ test('an ordinary NPC create can drop an unreceipted ID and pass state validatio
     );
 });
 
-test('inventory and noncombat references repair within two calls while preserving the saved roll', async () => {
+test('inventory repair uses one call and noncombat references are corrected in code, preserving the saved roll', async () => {
   const campaign = newCampaign({ name: 'Noncombat repair' });
   const id = randomUUID();
   campaign.characters = [
@@ -302,49 +303,52 @@ test('inventory and noncombat references repair within two calls while preservin
   let calls = 0;
   const generator: Generator = {
     capacity: async () => 10000,
-    generate: async (_settings, prompt, schema) => {
+    generate: async (_settings, prompt) => {
       calls++;
-      const input = JSON.parse(prompt);
-      const path = calls === 1 ? ['operations', 0, 'expected'] : ['participantReferences'];
-      assert.deepEqual(input.allowedPaths, [path]);
-      if (calls === 2) {
-        const correction = (
-          schema as {
-            properties: { corrections: { items: { oneOf: { properties: { value: unknown } }[] } } };
-          }
-        ).properties.corrections.items.oneOf[0]!;
-        const valueSchema = correction.properties.value as {
-          type: string;
-          items: { properties: { characterIds: { items: { type: string; format: string } } } };
-        };
-        assert.equal(valueSchema.type, 'array');
-        assert.equal(valueSchema.items.properties.characterIds.items.type, 'string');
-        assert.equal(valueSchema.items.properties.characterIds.items.format, 'uuid');
-        assert.match(input.participantReferenceGuidance, /never ordinary narrative mentions/);
-      }
+      assert.deepEqual(JSON.parse(prompt).allowedPaths, [['operations', 0, 'expected']]);
       return {
-        corrections: [{ path, value: calls === 1 ? campaign.characters[0]!.inventory : [] }],
+        corrections: [
+          { path: ['operations', 0, 'expected'], value: campaign.characters[0]!.inventory },
+        ],
       };
     },
   };
-  const result = await validateWithFieldRepair(
-    original,
-    async (candidate) => {
-      const parsed = gameplayResponseInputSchema.parse(candidate);
-      const after = applyResponse(campaign, parsed, turnId).campaign;
-      validateCombatTurn({
-        before: campaign,
-        after,
-        response: parsed,
-        authorization: { encounterId: null, participants: [], drafts: [] },
-        rolls: [],
-        narrative: parsed.narrative,
-      });
-    },
-    generator,
-    settings
-  );
-  assert.equal(calls, 2);
+  const directory = await mkdtemp(path.join(tmpdir(), 'rpg-repair-deterministic-'));
+  const file = path.join(directory, 'trace.jsonl');
+  const trace = new PromptTrace(file, { executionId: randomUUID() });
+  let result: typeof original;
+  try {
+    result = await validateWithFieldRepair(
+      original,
+      async (candidate) => {
+        const parsed = gameplayResponseInputSchema.parse(candidate);
+        const after = applyResponse(campaign, parsed, turnId).campaign;
+        validateCombatTurn({
+          before: campaign,
+          after,
+          response: parsed,
+          authorization: { encounterId: null, participants: [], drafts: [] },
+          rolls: [],
+          narrative: parsed.narrative,
+        });
+      },
+      generator,
+      settings,
+      undefined,
+      { ...trace.context, purpose: 'gameplay', trace }
+    );
+    const rows = (await readFile(file, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const deterministic = rows.filter((row) => row.kind === 'field_repair_deterministic');
+    assert.equal(deterministic.length, 1);
+    assert.equal(deterministic[0].purpose, 'gameplay');
+    assert.deepEqual(deterministic[0].payload.paths, [['participantReferences']]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+  assert.equal(calls, 1);
   assert.deepEqual(result.participantReferences, []);
   assert.deepEqual(result.rollInterpretations, original.rollInterpretations);
   assert.equal(result.narrative, original.narrative);
@@ -723,4 +727,105 @@ test('rejected field correction logs its paths and application reason', async ()
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+function forcedProblem() {
+  return new ResponseFieldProblem(
+    ['participantReferences'],
+    new Problem(422, 'combat_reference', 'No encounter participants are registered'),
+    { value: [] }
+  );
+}
+function countingGenerator() {
+  const state = { calls: 0 };
+  const generator: Generator = {
+    capacity: async () => 10000,
+    generate: async () => {
+      state.calls++;
+      return { corrections: [{ path: ['participantReferences'], value: [] }] };
+    },
+  };
+  return { state, generator };
+}
+const strayReferences = () => ({
+  narrative: 'The keeper nods.',
+  participantReferences: [{ afterParagraph: 1, characterIds: [randomUUID()] }],
+});
+
+test('a forced-value problem is corrected in code without a repair call', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'rpg-repair-forced-'));
+  try {
+    const file = path.join(directory, 'trace.jsonl');
+    const trace = new PromptTrace(file, { executionId: randomUUID() });
+    const { state, generator } = countingGenerator();
+    const result = await validateWithFieldRepair(
+      strayReferences(),
+      async (candidate) => {
+        if (candidate.participantReferences.length) throw forcedProblem();
+      },
+      generator,
+      settings,
+      undefined,
+      { ...trace.context, purpose: 'gameplay', trace }
+    );
+    assert.equal(state.calls, 0);
+    assert.deepEqual(result.participantReferences, []);
+    assert.equal(result.narrative, 'The keeper nods.');
+    const rows = (await readFile(file, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const events = rows.filter((row) => row.kind === 'field_repair_deterministic');
+    assert.equal(events.length, 1);
+    assert.deepEqual(events[0].payload.paths, [['participantReferences']]);
+    assert.equal(
+      rows.some((row) => row.kind === 'field_repair_requested'),
+      false
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a deterministic fix does not use up a model correction attempt', async () => {
+  const { state, generator } = countingGenerator();
+  const original = { ...strayReferences(), operations: [{ op: 'create' }] };
+  const result = await validateWithFieldRepair(
+    original,
+    async (candidate) => {
+      if (candidate.participantReferences.length) throw forcedProblem();
+      if (state.calls === 0)
+        throw new ResponseFieldProblem(
+          ['operations', 0],
+          new Problem(422, 'combat_identity', 'Missing receipt')
+        );
+    },
+    {
+      capacity: generator.capacity,
+      generate: async () => {
+        state.calls++;
+        return { corrections: [{ path: ['operations', 0], value: { op: 'create' } }] };
+      },
+    },
+    settings
+  );
+  assert.equal(state.calls, 1);
+  assert.deepEqual(result.participantReferences, []);
+});
+
+test('a forced problem that persists after the deterministic fix falls back to bounded model repair', async () => {
+  const { state, generator } = countingGenerator();
+  await assert.rejects(
+    () =>
+      validateWithFieldRepair(
+        strayReferences(),
+        async () => {
+          throw forcedProblem();
+        },
+        generator,
+        settings
+      ),
+    (error: unknown) => (error as { code: string }).code === 'response_repair_failed'
+  );
+  assert.equal(state.calls, RESPONSE_RETRY_COUNT);
 });

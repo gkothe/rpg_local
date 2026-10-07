@@ -111,7 +111,7 @@ export const nodes: FlowItem[] = [
     'After the model responds and before the app saves the gameplay result.',
     'The response: story text, proposed changes, explanations of dice rolls, rule citations, campaign knowledge changes, and combat effects and paragraph references for each combatant.',
     'Validated changes, their explanations and a prose-only edited narrative. An editing failure preserves the private candidate for editing-only resume.',
-    'A rejected proposal leaves the saved gameplay state unchanged. The app can request up to two corrections, sending evidence linked to the invalid fields. Unresolved references or collection errors retain the complete evidence bundle.',
+    'A rejected proposal leaves the saved gameplay state unchanged. The app can request up to two corrections, sending evidence linked to the invalid fields. A collection whose only valid value is empty (no encounter participants) is corrected in code without a correction call. Unresolved references or collection errors retain the complete evidence bundle.',
     '5.1',
     [
       'rpg_be_local/src/domain/gameplayResponse.ts',
@@ -344,8 +344,8 @@ export const tools: FlowTool[] = [
       'campaign_sources_search',
       'Find relevant original campaign document sections.',
       'During the GM action.',
-      'A query, optional source ID and cursor.',
-      'Ranked original section matches with titles, source version, exact offsets and alreadySupplied status.',
+      'One query or up to 6 queries, optional source ID; cursor only with a single query.',
+      'Ranked original section matches with titles, source version, exact offsets and alreadySupplied status; a batch returns one result group per query.',
       'Searches meaningful whole tokens and phrases in the frozen confirmed-source snapshot. Snippets point at matching terms. The catalog and lookup agree on complete sections supplied through seeds, pins or retrieval; partial sections remain unread in full. Reuse supplied sections; repeated reads remain available. Every accepted request has a persisted read receipt.',
       '2.3',
       [

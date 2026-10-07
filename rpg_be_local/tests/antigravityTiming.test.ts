@@ -1,14 +1,22 @@
-import { test } from 'node:test';
+import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { generateAntigravity } from '../src/providers/antigravity.js';
+import {
+  ANTIGRAVITY_HOOKS_VERIFIED_TTL_MS,
+  antigravityHooksClock,
+  generateAntigravity,
+  hooksVerified,
+  recordHooksCheck,
+  resetAntigravityHooksCacheForTests,
+} from '../src/providers/antigravity.js';
 import { PromptTrace } from '../src/providers/promptLog.js';
 
 const fixture = `
 const hooks = process.argv.includes('/hooks');
 if (hooks) {
+  if (process.env.RPG_HOOKS_COUNTER) require('node:fs').appendFileSync(process.env.RPG_HOOKS_COUNTER, 'x\\n');
   console.log(JSON.stringify({ command: { data: { hooks: process.env.RPG_TIMING_MODE === 'hooks_failure' ? ['fixture'] : [] } } }));
 } else {
   process.stdin.resume();
@@ -20,6 +28,8 @@ if (hooks) {
   });
 }
 `;
+
+beforeEach(() => resetAntigravityHooksCacheForTests());
 
 for (const mode of ['success', 'hooks_failure', 'generation_failure']) {
   test(`Antigravity stage timing correlates ${mode} without logging process diagnostics`, async () => {
@@ -101,3 +111,121 @@ for (const mode of ['success', 'hooks_failure', 'generation_failure']) {
     }
   });
 }
+
+async function hooksHarness(extraEnv: Record<string, string> = {}) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-hooks-'));
+  const script = path.join(root, 'cli.cjs');
+  const counter = path.join(root, 'hooks.count');
+  await writeFile(script, fixture);
+  await appendFile(counter, '');
+  const traceFile = path.join(root, 'trace.jsonl');
+  const context = {
+    executionId: 'hooks-execution',
+    turnId: 'hooks-turn',
+    purpose: 'gameplay',
+    trace: new PromptTrace(traceFile, { executionId: 'hooks-execution' }),
+  };
+  const run = (profile: string, env: Record<string, string> = {}) =>
+    generateAntigravity(
+      { binary: process.execPath, prefix: [script] },
+      { provider: 'agy', model: 'fixture', effort: null },
+      'Synthetic prompt',
+      { type: 'object' },
+      root,
+      { ...process.env, ...extraEnv, ...env, RPG_HOOKS_COUNTER: counter, USERPROFILE: profile },
+      undefined,
+      { ownedProfile: profile, trace: context }
+    );
+  const spawns = async () => (await readFile(counter, 'utf8')).split('\n').filter(Boolean).length;
+  const hookEnds = async () =>
+    (await readFile(traceFile, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((row) => row.kind === 'provider_stage_end' && row.payload.stage === 'hooks');
+  return { root, run, spawns, hookEnds };
+}
+
+test('verified hooks are reused for the same launch environment and traced as cached', async () => {
+  const h = await hooksHarness();
+  try {
+    await h.run(path.join(h.root, 'p1'));
+    await h.run(path.join(h.root, 'p1'));
+    assert.equal(await h.spawns(), 1);
+    assert.deepEqual(
+      (await h.hookEnds()).map((row) => row.payload.cached),
+      [false, true]
+    );
+  } finally {
+    await rm(h.root, { recursive: true, force: true });
+  }
+});
+
+test('different owned profiles share one hooks verification', async () => {
+  const h = await hooksHarness();
+  try {
+    await h.run(path.join(h.root, 'p1'));
+    await h.run(path.join(h.root, 'p2'));
+    assert.equal(await h.spawns(), 1);
+  } finally {
+    await rm(h.root, { recursive: true, force: true });
+  }
+});
+
+test('a different launch environment is verified separately', async () => {
+  const h = await hooksHarness();
+  try {
+    await h.run(path.join(h.root, 'p1'), { RPG_TIMING_MODE: 'success' });
+    await h.run(path.join(h.root, 'p1'), { RPG_TIMING_MODE: 'other' });
+    assert.equal(await h.spawns(), 2);
+  } finally {
+    await rm(h.root, { recursive: true, force: true });
+  }
+});
+
+test('hook isolation failures are never cached', async () => {
+  const h = await hooksHarness({ RPG_TIMING_MODE: 'hooks_failure' });
+  try {
+    for (let attempt = 0; attempt < 2; attempt++)
+      await assert.rejects(
+        h.run(path.join(h.root, 'p1')),
+        (error: unknown) => (error as { code: string }).code === 'provider_isolation'
+      );
+    assert.equal(await h.spawns(), 2);
+  } finally {
+    await rm(h.root, { recursive: true, force: true });
+  }
+});
+
+test('hooks verification expires after the TTL', async () => {
+  const h = await hooksHarness();
+  const realNow = antigravityHooksClock.now;
+  let now = 1_000_000;
+  antigravityHooksClock.now = () => now;
+  try {
+    await h.run(path.join(h.root, 'p1'));
+    now += ANTIGRAVITY_HOOKS_VERIFIED_TTL_MS - 1;
+    await h.run(path.join(h.root, 'p1'));
+    assert.equal(await h.spawns(), 1);
+    now += 1;
+    await h.run(path.join(h.root, 'p1'));
+    assert.equal(await h.spawns(), 2);
+  } finally {
+    antigravityHooksClock.now = realNow;
+    await rm(h.root, { recursive: true, force: true });
+  }
+});
+
+test('an older overlapping success cannot overwrite a newer failure', () => {
+  const realNow = antigravityHooksClock.now;
+  antigravityHooksClock.now = () => 10;
+  try {
+    recordHooksCheck('key', 2, false);
+    recordHooksCheck('key', 1, true);
+    assert.equal(hooksVerified('key'), false);
+    recordHooksCheck('key', 3, true);
+    assert.equal(hooksVerified('key'), true);
+  } finally {
+    antigravityHooksClock.now = realNow;
+  }
+});
