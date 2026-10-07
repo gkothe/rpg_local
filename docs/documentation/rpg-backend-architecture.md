@@ -418,6 +418,8 @@ Prompts distinguish directly documented knowledge (`origin: source` with exact e
 
 Initial source retrieval uses the player action and current scene instead of all character names and the full previous narration. Up to four whole relevant sections are ranked by action coverage, then scene coverage; scene matches are used when no action matches. Pinned sources, opening bootstrap and complete player sheets remain supplied independently. All omitted originals stay available through campaign source tools. In the current tool registry, rule search results identify already delivered original spans by receipt, revision/hash and path. `rules_find` skips automatic full rereads of complete originals while returning their receipt locators; partial passages and intentional `rules_get` rereads remain available. Every actual search/read still runs ownership and current-library checks and persists its normal audit. Search metadata stays stable on transport replay and is not itself rule authority.
 
+Antigravity rejected-step traces record the step type/state/index, bounded field names and JSON value types, initialization/completion flags and pending/unclaimed dispatch counts. They omit field values, nested arguments, response text and invalid identifier names. The trace failure code matches the non-retryable isolation error; these diagnostics do not authorize new activity.
+
 Unreadable JSON or failures occurring before a final response exists use the generation-retry loop, with up to two additional attempts and enforced replay of saved dice. Neither receipt checks nor narrative anchor checks prove semantic fidelity or correct rule interpretation.
 
 ```mermaid

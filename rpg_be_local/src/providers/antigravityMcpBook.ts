@@ -28,6 +28,33 @@ const NATIVE_ACCESS_DENIED = [
   'execute_url(*)',
 ];
 type PendingCall = { index: number; key: string; claimed: boolean };
+const REJECTED_STEP_FIELD_LIMIT = 32;
+const TRACE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]{0,79}$/;
+
+/** Keep the stream shape for diagnosis, never arguments, text or arbitrary values. */
+function rejectedStepMetadata(step: Record<string, unknown>) {
+  const keys = Object.keys(step);
+  return {
+    stepType:
+      typeof step.step_type === 'string' && TRACE_IDENTIFIER_PATTERN.test(step.step_type)
+        ? step.step_type
+        : 'unrecognized',
+    state: ['ACTIVE', 'DONE', 'ERROR', 'CANCELLED', 'PENDING'].includes(String(step.state))
+      ? step.state
+      : 'unrecognized',
+    stepIndex:
+      typeof step.step_index === 'number' &&
+      Number.isSafeInteger(step.step_index) &&
+      step.step_index >= 0
+        ? step.step_index
+        : null,
+    fields: keys.slice(0, REJECTED_STEP_FIELD_LIMIT).map((key) => ({
+      name: TRACE_IDENTIFIER_PATTERN.test(key) ? key : 'unrecognized',
+      type: step[key] === null ? 'null' : Array.isArray(step[key]) ? 'array' : typeof step[key],
+    })),
+    omittedFields: Math.max(0, keys.length - REJECTED_STEP_FIELD_LIMIT),
+  };
+}
 
 /** One bounded native tool loop per logical turn; canonical state always belongs to the app. */
 export async function generateAntigravityMcpBook(
@@ -301,7 +328,14 @@ export async function generateAntigravityMcpBook(
                 // The CLI emits an empty completion marker after tool continuation.
                 // It grants no capability and carries no tool or response content.
               } else if (step.step_type !== 'user_input') {
-                await traceEvent(trace, 'rejected_step', { code: 'provider_protocol' });
+                await traceEvent(trace, 'rejected_step', {
+                  code: 'dice_isolation',
+                  ...rejectedStepMetadata(step),
+                  initialized,
+                  completed,
+                  pendingCalls: pending.length,
+                  unclaimedCalls: pending.filter((entry) => !entry.claimed).length,
+                });
                 throw new Problem(
                   502,
                   'dice_isolation',

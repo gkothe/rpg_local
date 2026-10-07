@@ -42,6 +42,10 @@ else if(args.includes('/hooks')) {
     const server=JSON.parse(/^mcpServers: (.+)$/m.exec(agent)[1])[0];
     console.log(JSON.stringify({event:'init',init:{agent:args[args.indexOf('--agent')+1]}}));
     if(process.env.RPG_TEST_AGY_MODE==='native') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'run_command'}}));
+    if(process.env.RPG_TEST_AGY_MODE==='unknown-extra') {
+      console.log(JSON.stringify({event:'step_update',step_update:{step_type:'unknown',step_index:7,state:'DONE',duration_seconds:0.1,tool_info:{parameters:{command:'PRIVATE_COMMAND'}},response:'PRIVATE_RESPONSE','PRIVATE/path':'PRIVATE_VALUE'}}));
+      return;
+    }
     if(process.env.RPG_TEST_AGY_MODE==='foreign-server') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:1,state:'ACTIVE',tool_name:'call_mcp_tool',tool_info:{parameters:{ServerName:'outside',ToolName:'roll_dice',Arguments:{}}}}}));
     if(process.env.RPG_TEST_AGY_MODE==='foreign-tool') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:1,state:'ACTIVE',tool_name:'call_mcp_tool',tool_info:{parameters:{ServerName:'local_rpg',ToolName:'shell',Arguments:{}}}}}));
     if(process.env.RPG_TEST_AGY_MODE==='orphan-completion') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:99,state:'DONE',tool_name:'call_mcp_tool'}}));
@@ -74,6 +78,53 @@ else if(args.includes('/hooks')) {
     console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:mode==='partial-usage'?undefined:mode==='invalid-usage'?{input_tokens:'unknown'}:{input_tokens:30000},response:JSON.stringify(response)}}));
   });
 }`;
+
+test('rejected unknown activity logs structural diagnostics without values or dispatch', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-rejected-step-'));
+  try {
+    const filename = path.join(root, 'cli.mjs');
+    const traceFile = path.join(root, 'trace.jsonl');
+    const executionId = randomUUID();
+    const trace = new PromptTrace(traceFile, { executionId });
+    await writeFile(filename, fixture);
+    await assert.rejects(
+      generateAntigravityMcpBook(
+        { binary: process.execPath, prefix: [filename] },
+        settings,
+        'Synthetic',
+        root,
+        { ...process.env, RPG_TEST_AGY_MODE: 'unknown-extra' },
+        adapter(async () => assert.fail('Rejected activity must never dispatch')),
+        undefined,
+        { executionId, trace }
+      ),
+      (error: unknown) => (error as { code: string }).code === 'dice_isolation'
+    );
+    const raw = await readFile(traceFile, 'utf8');
+    const entry = raw
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .find((row) => row.kind === 'rejected_step');
+    assert.equal(entry.executionId, executionId);
+    assert.equal(entry.payload.code, 'dice_isolation');
+    assert.equal(entry.payload.stepType, 'unknown');
+    assert.equal(entry.payload.state, 'DONE');
+    assert.equal(entry.payload.stepIndex, 7);
+    assert.equal(entry.payload.pendingCalls, 0);
+    assert.deepEqual(
+      entry.payload.fields.find((field: { name: string }) => field.name === 'tool_info'),
+      { name: 'tool_info', type: 'object' }
+    );
+    assert.deepEqual(
+      entry.payload.fields.find((field: { name: string }) => field.name === 'response'),
+      { name: 'response', type: 'string' }
+    );
+    assert.doesNotMatch(raw, /PRIVATE_COMMAND|PRIVATE_RESPONSE|PRIVATE_VALUE|PRIVATE\/path/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 for (const mode of ['zero-turns', 'missing-turns']) {
   test(`Antigravity ${mode} completion records diagnostics without accepting or exposing its response`, async () => {
