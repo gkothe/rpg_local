@@ -119,11 +119,7 @@ test('player and NPC sections swap between reading and JSON editing and save ind
     ['NPCs', 'Marta'],
   ]) {
     await page.getByRole('button', { name: tab, exact: true }).click();
-    if (tab === 'NPCs')
-      await page
-        .locator('summary')
-        .filter({ hasText: /^Marta$/ })
-        .click();
+    if (tab === 'NPCs') await page.getByRole('button', { name: 'Marta', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Delete character', exact: true })).toHaveCount(
       tab === 'NPCs' ? 1 : 0
     );
@@ -430,10 +426,7 @@ test('journal layout has no horizontal overflow across standard widths', async (
   await page.screenshot({ path: 'test-results/journal-mobile.png', fullPage: true });
   await page.getByRole('button', { name: 'NPCs', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Marta npc' })).toBeHidden();
-  await page
-    .locator('summary')
-    .filter({ hasText: /^Marta$/ })
-    .click();
+  await page.getByRole('button', { name: 'Marta', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Marta npc' })).toBeVisible();
   await expect(page.getByText('health', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Inventory', exact: true }).click();

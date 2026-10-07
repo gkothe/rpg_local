@@ -1,7 +1,15 @@
+import { Package, Shield, Sword, Wrench, type LucideIcon } from 'lucide-react';
 import type { SheetLayout } from '../../services/types';
 import CharacterData from './CharacterData';
 import { buildSheetModel, type SheetNode } from './sheetModel';
 
+// Decorative medallion per item kind; unknown kinds get the generic pack.
+const ITEM_ICONS: Record<string, LucideIcon> = {
+  weapon: Sword,
+  shield: Shield,
+  armor: Shield,
+  tool: Wrench,
+};
 const clamp = (value: number, max: number) => Math.max(0, Math.min(value, max));
 const signed = (value: number) => (value > 0 ? `+${value}` : String(value));
 
@@ -100,10 +108,16 @@ function Value({ node }: { node: SheetNode }) {
         <ul className="sheet-items">
           {node.items.map((item, index) => {
             const { name, ...rest } = item;
+            const Icon = ITEM_ICONS[String(rest.type).toLowerCase()] ?? Package;
             return (
               <li key={index} className="sheet-item">
-                <strong>{String(name)}</strong>
-                {Object.keys(rest).length > 0 && <CharacterData value={rest} />}
+                <span className="sheet-item-icon" aria-hidden="true">
+                  <Icon size={22} strokeWidth={1.8} />
+                </span>
+                <div className="sheet-item-body">
+                  <strong>{String(name)}</strong>
+                  {Object.keys(rest).length > 0 && <CharacterData value={rest} />}
+                </div>
               </li>
             );
           })}

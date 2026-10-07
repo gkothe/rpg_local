@@ -55,6 +55,15 @@ export function buildSheetModel(
   const root = sections[section];
   if (!isObject(root))
     return [{ key: section, label: humanize(section), kind: 'raw', value: root }];
+  const rootValues = Object.values(root);
+  // A section that is only keyed named objects (an inventory) reads as one set of item cards.
+  const hinted = (layout?.fields ?? []).some(
+    (hint) => hint.path[0] === section && hint.path.length > 1
+  );
+  if (rootValues.length && !hinted && rootValues.every(isNamedObject))
+    return [
+      { key: section, label: '', kind: 'items', items: rootValues as Record<string, unknown>[] },
+    ];
   return children(root, [section], undefined);
 
   function children(

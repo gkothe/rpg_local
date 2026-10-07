@@ -26,10 +26,15 @@ function Editor({
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
   return (
-    <article className="panel stack">
-      <h3>
-        {character.name} <small>{character.type}</small>
-      </h3>
+    <article className="panel stack character-page">
+      <header className="character-header">
+        <span className="character-medallion" aria-hidden="true">
+          {[...character.name.trim()][0]?.toUpperCase()}
+        </span>
+        <h3>
+          {character.name} <small>{character.type}</small>
+        </h3>
+      </header>
       <ErrorNotice message={error} />
       <Field label="Name">
         <input value={name} onChange={(e) => setName(e.target.value)} />
@@ -152,6 +157,9 @@ function Editor({
     </article>
   );
 }
+/** Longest notes preview shown in the NPC table. */
+const NPC_NOTES_PREVIEW_CHARS = 90;
+
 export default function CharacterSheet({
   campaign,
   onSaved,
@@ -165,40 +173,94 @@ export default function CharacterSheet({
   category?: 'players' | 'npcs';
   layout?: SheetLayout;
 }) {
+  const [query, setQuery] = useState('');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const isPlayer = (c: Character) =>
+    options?.characterTypeOptions.find((role) => role.id === c.type)?.default;
+  const npcs = campaign.characters.filter((c) => isPlayer(c) === false);
+  const needle = query.trim().toLowerCase();
+  const matches = npcs
+    .filter((c) => !needle || `${c.name} ${c.notes}`.toLowerCase().includes(needle))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const typeLabel = (c: Character) =>
+    options?.characterTypeOptions.find((role) => role.id === c.type)?.label ?? c.type;
+  const viewing = category === 'npcs' && npcs.some((c) => c.id === openId);
   return (
     <section className="stack">
       <h2>{category === 'npcs' ? 'NPCs' : 'Player characters'}</h2>
+      {category === 'npcs' && npcs.length > 0 && !viewing && (
+        <div className="npc-list stack">
+          <Field label="Search NPCs" hint={`${matches.length} of ${npcs.length} shown`}>
+            <input
+              type="search"
+              value={query}
+              placeholder="Name or notes"
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </Field>
+          {matches.length > 0 ? (
+            <table className="npc-table">
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matches.map((c) => (
+                  <tr key={c.id} onClick={() => setOpenId(c.id)}>
+                    <th scope="row">
+                      <button
+                        type="button"
+                        className="npc-open"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setOpenId(c.id);
+                        }}
+                      >
+                        {c.name}
+                      </button>
+                    </th>
+                    <td>{typeLabel(c)}</td>
+                    <td className="npc-notes">
+                      {c.notes.length > NPC_NOTES_PREVIEW_CHARS
+                        ? `${c.notes.slice(0, NPC_NOTES_PREVIEW_CHARS)}…`
+                        : c.notes || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="muted">No NPC matches “{query.trim()}”.</p>
+          )}
+        </div>
+      )}
+      {viewing && (
+        <button type="button" className="npc-back" onClick={() => setOpenId(null)}>
+          ← All NPCs
+        </button>
+      )}
       {campaign.characters.map((c) => {
-        const player = options?.characterTypeOptions.find((role) => role.id === c.type)?.default;
+        const player = isPlayer(c);
+        const shown =
+          category === 'npcs' ? player === false && viewing && openId === c.id : player !== false;
         return (
-          <div key={c.id} hidden={category === 'npcs' ? player !== false : player === false}>
-            {player === false ? (
-              <details className="npc-entry panel">
-                <summary>{c.name}</summary>
-                <Editor
-                  campaign={campaign}
-                  character={c}
-                  onSaved={onSaved}
-                  canDelete
-                  layout={layout}
-                />
-              </details>
-            ) : (
-              <Editor
-                key={c.id}
-                campaign={campaign}
-                character={c}
-                onSaved={onSaved}
-                canDelete={false}
-                layout={layout}
-              />
-            )}
+          <div key={c.id} hidden={!shown} className={player === false ? 'npc-entry' : undefined}>
+            <Editor
+              campaign={campaign}
+              character={c}
+              onSaved={onSaved}
+              canDelete={player === false}
+              layout={layout}
+            />
           </div>
         );
       })}
       {options &&
         !campaign.characters.some((c) => {
-          const player = options.characterTypeOptions.find((role) => role.id === c.type)?.default;
+          const player = isPlayer(c);
           return category === 'npcs' ? player === false : player === true;
         }) && (
           <p className="muted">

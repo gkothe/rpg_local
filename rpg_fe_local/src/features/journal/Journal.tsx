@@ -60,18 +60,6 @@ export default function Journal({
         Reload current journal
       </button>
       <div className="panel stack">
-        <h3>Campaign memory</h3>
-        <MemoryText
-          text={
-            campaign.memory?.valid ? campaign.memory.text : 'No campaign memory checkpoint yet.'
-          }
-        />
-        <small className="muted">
-          Memory is a compact record; character state is saved separately. Full turns remain in your
-          transcript.
-        </small>
-      </div>
-      <div className="panel stack">
         <Field label="Personal notes" hint="Private notes are not sent to the GM.">
           <textarea rows={6} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
@@ -85,6 +73,18 @@ export default function Journal({
         >
           Save notes
         </button>
+      </div>
+      <div className="panel stack">
+        <h3>Campaign memory</h3>
+        <MemoryText
+          text={
+            campaign.memory?.valid ? campaign.memory.text : 'No campaign memory checkpoint yet.'
+          }
+        />
+        <small className="muted">
+          Memory is a compact record; character state is saved separately. Full turns remain in your
+          transcript.
+        </small>
       </div>
 
       <details className="panel" hidden>

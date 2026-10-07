@@ -112,7 +112,7 @@ describe('draft protection', () => {
     view.rerender(
       <CharacterSheet campaign={campaign} options={options} onSaved={onSaved} category="npcs" />
     );
-    fireEvent.click(screen.getByText('Marta', { selector: 'summary' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Marta' }));
     const editor = within(screen.getByRole('heading', { name: 'Marta npc' }).closest('article')!);
     expect(editor.queryByText('Edit character')).not.toBeInTheDocument();
     expect(editor.getByLabelText('Name')).toBeVisible();
@@ -156,6 +156,31 @@ describe('draft protection', () => {
   });
 });
 
+describe('NPC table', () => {
+  it('filters by name or notes, opens a sheet from a row and returns to the list', () => {
+    const campaign = fixtureCampaign();
+    campaign.characters = [
+      { ...campaign.characters[0], id: 'a', name: 'Marta', type: 'npc', notes: 'road warden' },
+      { ...campaign.characters[0], id: 'b', name: 'Orsin', type: 'npc', notes: 'ferryman' },
+    ];
+    render(
+      <CharacterSheet campaign={campaign} options={options} onSaved={vi.fn()} category="npcs" />
+    );
+    expect(screen.getByText('2 of 2 shown')).toBeVisible();
+    fireEvent.change(screen.getByLabelText(/Search NPCs/), { target: { value: 'ferry' } });
+    expect(screen.getByText('1 of 2 shown')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Marta' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Search NPCs/), { target: { value: 'nobody' } });
+    expect(screen.getByText(/No NPC matches/)).toBeVisible();
+    fireEvent.change(screen.getByLabelText(/Search NPCs/), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Orsin' }));
+    expect(screen.getByRole('heading', { name: 'Orsin npc' })).toBeVisible();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '← All NPCs' }));
+    expect(screen.getByRole('table')).toBeVisible();
+  });
+});
+
 describe('sheet layout wiring', () => {
   it('passes the layout to every character section', () => {
     const campaign = fixtureCampaign();
@@ -169,6 +194,7 @@ describe('sheet layout wiring', () => {
         layout={{ fields: [{ path: ['attributes', 'skills'], widget: 'dots', max: 5 }] }}
       />
     );
+    fireEvent.click(screen.getByRole('button', { name: 'Marta' }));
     expect(screen.getByRole('img', { name: 'Brawl 2 of 5' })).toBeInTheDocument();
   });
 });
