@@ -32,6 +32,13 @@ test('editor prompt has only final prose, instructions and narrative schema', ()
   assert.ok(prompt.includes(JSON.stringify(narrativeHumanizerJsonSchema)));
   assert.ok(prompt.includes('No tools are available'));
   assert.ok(!prompt.includes('knowledgeChanges'));
+  assert.match(prompt, /Prefer familiar words and active voice/);
+  assert.match(prompt, /Most sentences under 20 words/);
+  assert.match(prompt, /one topic, usually 2-3 sentences/);
+  assert.match(prompt, /Simplify wording within existing paragraphs/);
+  assert.match(prompt, /never add new explanations or sensory details/);
+  assert.match(prompt, /Preserve the language and atmosphere/);
+  assert.doesNotMatch(prompt, /80-150 words/);
 });
 
 test('conservative anchors reject changed numbers, names, dialogue and player question', () => {

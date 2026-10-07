@@ -35,6 +35,11 @@ test('instruction envelope preserves complete selected and campaign columns once
     assert.equal(result.split(selected).length, 2);
     assert.equal(result.split(campaign).length, 2);
     assert.equal(result.split('Application integration contract:').length, 2);
+    const builtIn = result.slice(0, result.indexOf('Selected system instructions:'));
+    assert.ok(builtIn.split('\n').filter((line) => line.startsWith('- ')).length > 30);
+    assert.ok(
+      builtIn.split('\n').every((line) => !line || line.startsWith('- ') || line.endsWith(':'))
+    );
     assert.doesNotMatch(
       result,
       /flexible tabletop|complete narration|tone\/language|difficulty|pacing/
@@ -57,6 +62,10 @@ test('book and model-knowledge prompts include one prose block before exact GM i
       book
     );
     assert.equal(result.split(GAMEPLAY_WRITING_GUIDANCE).length, 2);
+    assert.match(result, /Prefer familiar words and active voice/);
+    assert.match(result, /Most sentences under 20 words/);
+    assert.match(result, /Usually 80-150 words per turn/);
+    assert.match(result, /One or two concrete sensory details per scene/);
     assert.ok(
       result.indexOf('Application integration contract:') <
         result.indexOf(GAMEPLAY_WRITING_GUIDANCE)
@@ -67,7 +76,7 @@ test('book and model-knowledge prompts include one prose block before exact GM i
     assert.match(result, /instructions for language, tone and narrative style when they differ/);
     assert.match(
       result,
-      /Style never changes rules, established facts, dice faces, citations, exact source quotes, identifiers or the required JSON structure/
+      /Style never changes rules, established facts, dice faces, citations, exact source quotes, identifiers or required JSON structure/
     );
     assert.doesNotMatch(GAMEPLAY_WRITING_GUIDANCE, /[\u2013\u2014]/);
   }
