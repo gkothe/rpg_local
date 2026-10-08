@@ -5,6 +5,14 @@ import {
   gameplayInstructionEnvelope,
 } from '../src/domain/gameplayNarrator.js';
 
+test('book guidance reuses delivered originals and identifies the missing fact before discovery', () => {
+  const prompt = gameplayInstructionEnvelope('', '', true);
+  assert.match(prompt, /originalComplete means the entire section/);
+  assert.match(prompt, /Identify the specific missing fact before further discovery/);
+  assert.match(prompt, /Intentional verification and rereads remain allowed/);
+  assert.doesNotMatch(gameplayInstructionEnvelope('', '', false), /originalComplete means/);
+});
+
 test('the envelope separates documented knowledge from emergent details', () => {
   const current = gameplayInstructionEnvelope('System', 'Campaign', true);
   assert.match(current, /Use origin source only for claims directly supported/);

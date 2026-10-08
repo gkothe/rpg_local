@@ -177,7 +177,7 @@ function ownedRegistrations(
         (name === 'rules_get'
           ? 'Read bounded direct original text or derived fields. Only direct text receipts support citations.'
           : 'Discover current rule paths and derived navigation metadata. Results are not ruling authority.') +
-        ' Reuse suppliedOriginals receipt locators when alreadySupplied; originalComplete means the whole passage was delivered. Intentional rereads remain available.',
+        ' Reuse suppliedOriginals receipt locators when alreadySupplied; originalComplete means the whole section was delivered, while complete may describe a later page. Intentional verification and rereads remain available.',
       schema: ruleToolSchemas[name],
       purpose: 'book',
       capability: 'rules',
@@ -187,7 +187,7 @@ function ownedRegistrations(
     {
       name: RULE_FIND_TOOL_NAME,
       description:
-        'Find relevant book rules and read up to three eligible originals in one call. Each read contains its own citable receipt; reuse these originals before further reads. Follow search/read cursors or unreadPaths for more text. Search metadata alone is not authority.',
+        'Find relevant book rules and read up to three eligible originals in one call. Inspect suppliedOriginals first: titles and originalComplete identify whole sections already delivered with citable receipts. Identify the specific missing fact before further discovery; reuse delivered originals rather than rediscovering their paths. Follow nextRead for partial text and search cursors or unreadPaths for more rules. Intentional verification and rereads remain available. Search metadata alone is not authority.',
       schema: ruleToolSchemas.rules_search,
       purpose: 'book',
       capability: 'rules',

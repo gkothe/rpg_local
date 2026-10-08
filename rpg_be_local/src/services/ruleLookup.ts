@@ -1,7 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { Problem } from '../errors.js';
-import { rankRuleNode } from '../domain/ruleSearch.js';
+import {
+  compareRuleMatches,
+  rankRuleNode,
+  RULE_SEARCH_SNIPPET_CHARS,
+} from '../domain/ruleSearch.js';
 import {
   RULE_COLUMNS,
   RULE_LIMITS,
@@ -315,7 +319,7 @@ export class RuleLookup {
           .filter((hit) => hit.found)
           .sort(
             (a, b) =>
-              a.rank - b.rank ||
+              compareRuleMatches(a, b) ||
               a.node.source.localeCompare(b.node.source) ||
               a.path.localeCompare(b.path)
           );
@@ -329,11 +333,11 @@ export class RuleLookup {
           cache.set(argumentHash, hits);
         }
       }
-      entries = hits.map(({ path, node, derived, matchedTerms, exactTitle, match }) => {
-        let start = Math.max(0, match - 80);
+      entries = hits.map(({ path, node, derived, matchedTerms, exactTitle, snippetStart }) => {
+        let start = snippetStart;
         if (start && /[\uDC00-\uDFFF]/.test(node.text[start]!)) start--;
         locatorOffsets.set(path, start);
-        let end = Math.min(node.text.length, start + 160);
+        let end = Math.min(node.text.length, start + RULE_SEARCH_SNIPPET_CHARS);
         if (end < node.text.length && /[\uD800-\uDBFF]/.test(node.text[end - 1]!)) end--;
         return {
           path,

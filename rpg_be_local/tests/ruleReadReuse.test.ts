@@ -29,6 +29,8 @@ test('repeated find reuses delivered complete originals while still checking and
   };
   const first = await findRules(read, { query: 'rule' }, 'first', active);
   assert.equal(first.reads.length, 1);
+  assert.equal(first.suppliedOriginals[0]?.originalComplete, true);
+  assert.equal(first.suppliedOriginals[0]?.name, 'core.rule');
   const repeated = await findRules(read, { query: 'rule' }, 'second', active);
   assert.equal(repeated.reads.length, 0);
   assert.deepEqual(repeated.suppliedOriginals, first.suppliedOriginals);
@@ -76,4 +78,43 @@ test('partial and failed originals never cause a complete-read shortcut; intenti
   failed = true;
   const failure = await read('rules_get', {}, 'failure');
   assert.deepEqual(failure.error, { code: 'rules_missing' });
+});
+
+test('find labels completeness per delivered span, not from another complete span on the entry', async () => {
+  const read = withSuppliedRuleReads(async (tool, input, id) => {
+    if (tool === 'rules_search')
+      return {
+        revision: 1,
+        contentHash: 'hash',
+        entries: [{ path: 'core.rule', name: 'Healing', readableOriginal: true }],
+      };
+    const later = (input as { cursor?: string }).cursor === 'later';
+    return {
+      revision: 1,
+      contentHash: 'hash',
+      receipt: id,
+      path: 'core.rule',
+      view: 'text',
+      structural: false,
+      text: 'Original passage.',
+      start: later ? 10 : 0,
+      end: 25,
+      complete: true,
+    };
+  });
+  await read('rules_get', { path: 'core.rule' }, 'whole');
+  await read('rules_get', { path: 'core.rule', cursor: 'later' }, 'tail');
+  const result = await findRules(read, { query: 'healing' }, 'find', async () => {});
+  assert.equal(result.reads.length, 0);
+  assert.deepEqual(
+    result.suppliedOriginals.map((span) => ({
+      name: span.name,
+      originalComplete: span.originalComplete,
+      receiptId: span.receiptId,
+    })),
+    [
+      { name: 'Healing', originalComplete: true, receiptId: 'whole' },
+      { name: 'Healing', originalComplete: false, receiptId: 'tail' },
+    ]
+  );
 });

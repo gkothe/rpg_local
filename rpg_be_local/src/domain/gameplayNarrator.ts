@@ -50,7 +50,7 @@ export function gameplayInstructionEnvelope(
   const rules = book
     ? `Book rules:
 - Published originals govern covered mechanics; memory never overrides current books. Summaries/fields/snippets/search metadata are navigation only. Identify contradictory books and uncovered provisional rulings.
-- Prefer rules_find for lookup plus original text. Reuse returned reads/receipts; never repeat first window without reason. suppliedOriginals records spans/nextRead: copy nextRead exactly for partial reads; complete reads need no further lookup.
+- Prefer rules_find for lookup plus original text. Inspect suppliedOriginals first: originalComplete means the entire section was delivered; complete alone may describe only a later page. Reuse delivered text and receipts. Identify the specific missing fact before further discovery; do not browse from the root to rediscover a supplied path. Copy nextRead exactly for partial continuation. Intentional verification and rereads remain allowed.
 - rules_get: unread paths or intentional rereads. Copy paths exactly; never synthesize paths, swap dots/slashes or invent hierarchy. Unknown paths: discover with rules_find, rules_search, rules_map or rules_list.
 - ruleCitations: persisted original-text receipts, exact unique quote; copy receipt ID, path, source, system identity, hash. Omit offsets/page metadata; app computes them.`
     : `Rules:

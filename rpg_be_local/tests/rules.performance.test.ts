@@ -105,11 +105,16 @@ test(
         const cold: number[] = [];
         const guardedCached: number[] = [];
         for (let index = 0; index < 30; index++) {
-          const query = { query: `unique_${String(index).padStart(5, '0')} passage` };
+          // Query the exclusive identifier: shared words intentionally return partial matches.
+          const query = { query: String(index).padStart(5, '0') };
           let started = performance.now();
           const warmResult = lookup.execute(cached, 'rules_search', query, 'benchmark');
           warm.push(performance.now() - started);
           assert.equal((warmResult.entries as unknown[]).length, 1);
+          assert.equal(
+            (warmResult.entries as { path: string }[])[0]!.path,
+            `core_rules.original.node_${index}`
+          );
           started = performance.now();
           const loaded = await rules.get(system.systemId);
           lookup.execute(loaded, 'rules_search', query, 'benchmark');
@@ -131,11 +136,15 @@ test(
             const result = new RuleLookup().execute(
               current,
               'rules_search',
-              { query: `unique_${String(index % 4).padStart(5, '0')} passage` },
+              { query: String(index % 4).padStart(5, '0') },
               `fresh-${index}`
             );
             assert.equal(result.receipt, `fresh-${index}`);
             assert.equal((result.entries as unknown[]).length, 1);
+            assert.equal(
+              (result.entries as { path: string }[])[0]!.path,
+              `core_rules.original.node_${index % 4}`
+            );
           });
           if (index >= 4) guardedCached.push(performance.now() - started);
         }

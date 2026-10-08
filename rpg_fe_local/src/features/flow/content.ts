@@ -561,21 +561,26 @@ export const tools: FlowTool[] = [
       'Find relevant book rules and read original text in one request.',
       'Preferred first lookup in new book turns.',
       'A query, optional source/columns and search continuation cursor.',
-      'Search metadata, up to three eligible original-text receipts, suppliedOriginals with exact continuation arguments, and unread paths.',
+      'Supplied originals with titles, whole-section completeness and exact continuation arguments, search metadata, up to three original-text receipts, and unread paths.',
       'Saves ordinary rules_search/rules_get receipts, each guarded independently.',
       '5.4',
       ['rpg_be_local/src/providers/rulesFind.ts', 'rpg_be_local/src/services/ruleLookup.ts'],
-      'The first three reads are a retrieval page, not a call limit. Reuse returned originals and receipts; copy suppliedOriginals.nextRead to continue partial text. Copy paths exactly from tool results. Intentional rereads remain available. Historical frozen tool sets remain unchanged.'
+      'The first three reads are a retrieval page, not a call limit. Inspect suppliedOriginals first: originalComplete identifies a whole section, while complete alone can describe a later page. Reuse returned originals and receipts; identify the missing fact before further discovery and copy suppliedOriginals.nextRead to continue partial text. Copy paths exactly from tool results. Intentional rereads remain available. Historical frozen tool sets remain unchanged.'
     ),
     bookOnly: true,
     args: { query: 'crossing', columns: ['core_rules'] },
     result: {
-      search: { entries: [{ path: ruleResult.path, readableOriginal: true }], cursor: null },
+      search: {
+        entries: [{ path: ruleResult.path, name: 'Crossing', readableOriginal: true }],
+        cursor: null,
+      },
       reads: [ruleResult],
       suppliedOriginals: [
         {
           receiptId: ruleReceiptId,
           path: ruleResult.path,
+          name: 'Crossing',
+          originalComplete: true,
           start: ruleResult.start,
           end: ruleResult.end,
           complete: true,
@@ -600,7 +605,7 @@ export const tools: FlowTool[] = [
       'The search text or book section path, with options for which information to return.',
       name === 'rules_get'
         ? 'Original text, its position and pages in the book, and the ID of the saved read receipt.'
-        : 'Section lists or search results that help the model find original text. The model must read that text before citing a rule.',
+        : 'Section lists or search results that help the model find original text. Search prefers exact titles, then direct matches, distinct term coverage, title coverage and readability. Snippets show the densest matching 160-character original window. The model must read original text before citing a rule.',
       "The app's rule service reads PostgreSQL and saves a receipt for each call, including navigation calls and errors.",
       '5.4',
       ['rpg_be_local/src/services/ruleStore.ts', 'rpg_be_local/src/domain/rules.ts'],

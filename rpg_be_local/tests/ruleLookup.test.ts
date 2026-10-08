@@ -12,6 +12,7 @@ import {
   RULE_COLUMNS,
 } from '../src/domain/rules.js';
 import { generateRuleMapping } from '../src/domain/ruleMapping.js';
+import { findRules } from '../src/providers/rulesFind.js';
 function fixture(): RuleSystem {
   const system: RuleSystem = {
     ...emptyRuleColumns(),
@@ -53,11 +54,111 @@ function fixture(): RuleSystem {
   return system;
 }
 
+test('public lookup and combined reads prefer query coverage and preserve paging and filters', async () => {
+  const system = fixture();
+  const template = ruleNodeAt(system, 'core_rules.example.deep');
+  const root = system.core_rules.example!;
+  root.children = {
+    full: {
+      ...template,
+      name: 'Recovery',
+      text: 'Mending damage uses a rouse check for superficial wounds.',
+      pageSpans: [],
+    },
+    incidental: {
+      ...template,
+      name: 'Check In',
+      text: 'A conversation about comfort.',
+      pageSpans: [],
+    },
+    ...Object.fromEntries(
+      Array.from({ length: RULE_LIMITS.searchHits + 1 }, (_, index) => [
+        `partial_${index}`,
+        { ...template, name: 'Other', text: 'Superficial wounds.', pageSpans: [] },
+      ])
+    ),
+  };
+  const query = 'mending damage rouse check superficial';
+  const lookup = new RuleLookup();
+  const first = lookup.execute(system, 'rules_search', { query }, randomUUID());
+  const entries = first.entries as { path: string }[];
+  assert.equal(entries[0]!.path, 'core_rules.example.full');
+  assert.equal(entries[1]!.path, 'core_rules.example.incidental');
+  assert.equal(first.complete, false);
+  const second = lookup.execute(
+    system,
+    'rules_search',
+    { query, cursor: first.cursor },
+    randomUUID()
+  );
+  assert.ok(
+    (second.entries as { path: string }[]).every(
+      (entry) => !entries.some((old) => old.path === entry.path)
+    )
+  );
+  assert.deepEqual(
+    lookup.execute(system, 'rules_search', { query, columns: ['gm_guidance'] }, randomUUID())
+      .entries,
+    []
+  );
+  assert.deepEqual(
+    lookup.execute(system, 'rules_search', { query, source: 'other' }, randomUUID()).entries,
+    []
+  );
+  const found = await findRules(
+    async (tool, input, id) => lookup.execute(system, tool, input, id),
+    { query },
+    'combined',
+    async () => {}
+  );
+  assert.deepEqual(
+    found.reads.map((read) => read.path),
+    entries.slice(0, 3).map((entry) => entry.path)
+  );
+});
+
 test('invalid slash paths direct the caller to copy exact tool-returned dotted paths', () => {
   assert.throws(
     () => ruleNodeAt(fixture(), 'core_rules/combat/damage_and_healing'),
     /Copy the exact dotted path returned by rules_find/
   );
+});
+
+test('dense search snippets retain a wide cluster and locators preserve original Unicode and pages', () => {
+  const system = fixture();
+  const node = ruleNodeAt(system, 'core_rules.example.deep');
+  node.text =
+    'İ'.repeat(400) +
+    ' alpha ' +
+    'padding '.repeat(40) +
+    '🐉 alpha ' +
+    'x'.repeat(100) +
+    ' beta gamma';
+  const cluster = node.text.lastIndexOf('alpha');
+  node.pageSpans = [
+    { start: 0, end: cluster, pdfPage: 1, printedPage: '1' },
+    { start: cluster, end: node.text.length, pdfPage: 2, printedPage: '2' },
+  ];
+  const lookup = new RuleLookup();
+  const result = lookup.execute(
+    system,
+    'rules_search',
+    { query: 'alpha beta gamma' },
+    randomUUID()
+  );
+  const hit = (result.entries as { path: string; snippet: string; locator: string }[])[0]!;
+  assert.match(hit.snippet, /alpha/);
+  assert.match(hit.snippet, /beta gamma/);
+  const read = lookup.execute(
+    system,
+    'rules_get',
+    { path: hit.path, locator: hit.locator },
+    randomUUID()
+  );
+  assert.equal(read.text, node.text.slice(read.start as number, read.end as number));
+  assert.ok((read.start as number) > 400);
+  assert.match(read.text as string, /beta gamma/);
+  assert.ok((read.pages as { pdfPages: number[] }).pdfPages.includes(2));
 });
 
 test('book search matches relevant title/text terms without requiring every query word', () => {

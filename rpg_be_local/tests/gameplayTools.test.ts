@@ -22,6 +22,14 @@ const DEFAULT_TOOLS = [
 ];
 const BOOK_TOOLS = ['rules_map', 'rules_search', 'rules_get', 'rules_list', 'rules_find'];
 
+test('rule tool descriptions distinguish complete sections from pages and preserve intentional verification', () => {
+  const registry = ownedTools({ book: true, read: async () => ({}) });
+  const find = registry.definitions.find((definition) => definition.name === 'rules_find')!;
+  assert.match(find.description, /originalComplete/);
+  assert.match(find.description, /specific missing fact/);
+  assert.match(find.description, /Intentional verification/);
+});
+
 test('owned NPC tools read the frozen roster, list an empty one and enforce replay/ownership', async () => {
   const c = newCampaign({ name: 'NPC tools' });
   c.characters.push({
@@ -122,6 +130,8 @@ test('combined originals identify supplied receipts and exact continuation argum
     {
       receiptId: 'original-receipt',
       path: 'core_rules.book.damage',
+      name: 'core_rules.book.damage',
+      originalComplete: false,
       start: 0,
       end: 8,
       complete: false,

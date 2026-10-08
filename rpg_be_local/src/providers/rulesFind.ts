@@ -21,9 +21,10 @@ export async function findRules(
           entry
         ): entry is {
           path: string;
+          name?: string;
           readableOriginal: true;
           originalComplete?: boolean;
-          suppliedOriginals?: unknown[];
+          suppliedOriginals?: ReturnType<typeof originalReadLocator>[];
         } =>
           !!entry &&
           typeof entry === 'object' &&
@@ -39,24 +40,28 @@ export async function findRules(
       await read('rules_get', { path: hit.path, view: 'text' }, `find:${identity}:get:${index}`)
     );
   }
+  const names = new Map(eligible.map((hit) => [hit.path, hit.name]));
+  const suppliedOriginals = [
+    ...eligible.filter((hit) => hit.originalComplete).flatMap((hit) => hit.suppliedOriginals ?? []),
+    ...reads
+      .filter(
+        (read) =>
+          !read.error &&
+          read.view === 'text' &&
+          !read.structural &&
+          typeof read.text === 'string' &&
+          read.text.length > 0
+      )
+      .map(originalReadLocator),
+  ].map((span) => ({
+    ...span,
+    name: names.get(span.path as string) ?? String(span.path),
+    originalComplete: span.start === 0 && span.complete === true,
+  }));
   return {
+    suppliedOriginals,
     search,
     reads,
-    suppliedOriginals: [
-      ...eligible
-        .filter((hit) => hit.originalComplete)
-        .flatMap((hit) => hit.suppliedOriginals ?? []),
-      ...reads
-        .filter(
-          (read) =>
-            !read.error &&
-            read.view === 'text' &&
-            !read.structural &&
-            typeof read.text === 'string' &&
-            read.text.length > 0
-        )
-        .map(originalReadLocator),
-    ],
     unreadPaths: unread.slice(INITIAL_ORIGINAL_READS).map((hit) => hit.path),
   };
 }
