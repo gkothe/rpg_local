@@ -739,7 +739,7 @@ export const storageItems: FlowItem[] = [
   item(
     'journal',
     'Journal ledger & jobs',
-    'The Journal shows what your character knows from saved knowledge. Optional backfill and correction jobs add a private ledger of what changed and why.',
+    'The Journal shows what your character knows from saved knowledge. Each section has a ? help button explaining its information and effect on the GM, without making a provider call. Optional backfill and correction jobs add a private ledger of what changed and why.',
     'When you open the Journal, run Fill from past conversations, or flag and accept a correction.',
     'Your saved conversations and the facts your character can see, never private notes, hidden GM knowledge or your own suspicions.',
     'New entries, or one corrected fact with its exact quotes, a before and after value and a retained history.',

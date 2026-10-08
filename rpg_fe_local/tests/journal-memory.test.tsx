@@ -61,6 +61,12 @@ it('shows one Journal section at a time and supports keyboard tab navigation', (
   fireEvent.keyDown(screen.getByRole('tab', { name: 'Campaign knowledge' }), { key: 'End' });
   expect(screen.getByRole('tab', { name: 'Advancement' })).toHaveFocus();
   expect(screen.getByRole('tabpanel', { name: 'Advancement' })).toBeVisible();
+  expect(
+    screen
+      .getByRole('tablist', { name: 'Journal sections' })
+      .compareDocumentPosition(screen.getByRole('tabpanel', { name: 'Advancement' })) &
+      Node.DOCUMENT_POSITION_FOLLOWING
+  ).toBeTruthy();
   fireEvent.keyDown(screen.getByRole('tab', { name: 'Advancement' }), { key: 'Home' });
   expect(notes).toBeVisible();
   expect(notes).toHaveValue('Keep my notes');

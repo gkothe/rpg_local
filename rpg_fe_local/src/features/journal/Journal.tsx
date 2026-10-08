@@ -9,14 +9,9 @@ import MemoryRebuild from './MemoryRebuild';
 import { MemoryText } from './MemoryText';
 import HistoryMemory from './HistoryMemory';
 import Advancement from '../advancement/Advancement';
-const JOURNAL_TABS = [
-  { id: 'notes', label: 'Personal notes' },
-  { id: 'knowledge', label: 'Campaign knowledge' },
-  { id: 'memory', label: 'Campaign memory' },
-  { id: 'history', label: 'History recall' },
-  { id: 'advancement', label: 'Advancement' },
-] as const;
-type JournalTab = (typeof JOURNAL_TABS)[number]['id'];
+import JournalHelp from './JournalHelp';
+import { JOURNAL_SECTIONS, type JournalSection } from './journalSections';
+type JournalTab = JournalSection['id'];
 
 export default function Journal({
   campaign,
@@ -34,6 +29,7 @@ export default function Journal({
 }) {
   const tabId = useId();
   const [tab, setTab] = useState<JournalTab>(initialEntryId ? 'knowledge' : 'notes');
+  const [help, setHelp] = useState<JournalSection | null>(null);
   const [entryTarget, setEntryTarget] = useState(initialEntryId);
   if (entryTarget !== initialEntryId) {
     setEntryTarget(initialEntryId);
@@ -70,16 +66,6 @@ export default function Journal({
   return (
     <section className="stack">
       <h2>Journal & context</h2>
-      {active && options?.advancement && (
-        <div
-          role="tabpanel"
-          id={`${tabId}-panel-advancement`}
-          aria-labelledby={`${tabId}-tab-advancement`}
-          hidden={tab !== 'advancement'}
-        >
-          <Advancement key={campaign.id} campaign={campaign} options={options} onSaved={onSaved} />
-        </div>
-      )}
       <ErrorNotice message={error} />
       {feedback && <small role="status">{feedback}</small>}
       <button
@@ -96,34 +82,48 @@ export default function Journal({
         Reload current journal
       </button>
       <div className="tabs" role="tablist" aria-label="Journal sections">
-        {JOURNAL_TABS.map(({ id, label }, index) => (
-          <button
-            key={id}
-            id={`${tabId}-tab-${id}`}
-            role="tab"
-            aria-selected={tab === id}
-            aria-controls={`${tabId}-panel-${id}`}
-            tabIndex={tab === id ? 0 : -1}
-            className={tab === id ? 'selected' : ''}
-            onClick={() => setTab(id)}
-            onKeyDown={(event) => {
-              let next: number;
-              if (event.key === 'ArrowRight') next = (index + 1) % JOURNAL_TABS.length;
-              else if (event.key === 'ArrowLeft')
-                next = (index + JOURNAL_TABS.length - 1) % JOURNAL_TABS.length;
-              else if (event.key === 'Home') next = 0;
-              else if (event.key === 'End') next = JOURNAL_TABS.length - 1;
-              else return;
-              event.preventDefault();
-              const nextTab = JOURNAL_TABS[next]!.id;
-              setTab(nextTab);
-              document.getElementById(`${tabId}-tab-${nextTab}`)?.focus();
-            }}
-          >
-            {label}
-          </button>
-        ))}
+        {JOURNAL_SECTIONS.map((section, index) => {
+          const { id, label } = section;
+          return (
+            <div key={id} className="journal-tab" role="presentation">
+              <button
+                id={`${tabId}-tab-${id}`}
+                role="tab"
+                aria-selected={tab === id}
+                aria-controls={`${tabId}-panel-${id}`}
+                tabIndex={tab === id ? 0 : -1}
+                className={tab === id ? 'selected' : ''}
+                onClick={() => setTab(id)}
+                onKeyDown={(event) => {
+                  let next: number;
+                  if (event.key === 'ArrowRight') next = (index + 1) % JOURNAL_SECTIONS.length;
+                  else if (event.key === 'ArrowLeft')
+                    next = (index + JOURNAL_SECTIONS.length - 1) % JOURNAL_SECTIONS.length;
+                  else if (event.key === 'Home') next = 0;
+                  else if (event.key === 'End') next = JOURNAL_SECTIONS.length - 1;
+                  else return;
+                  event.preventDefault();
+                  const nextTab = JOURNAL_SECTIONS[next]!.id;
+                  setTab(nextTab);
+                  document.getElementById(`${tabId}-tab-${nextTab}`)?.focus();
+                }}
+              >
+                {label}
+              </button>
+              <button
+                type="button"
+                className="journal-help-button"
+                aria-label={`Help for ${label}`}
+                aria-haspopup="dialog"
+                onClick={() => setHelp(section)}
+              >
+                ?
+              </button>
+            </div>
+          );
+        })}
       </div>
+      {active && help && <JournalHelp section={help} onClose={() => setHelp(null)} />}
       <div
         className="panel stack"
         role="tabpanel"
@@ -133,7 +133,7 @@ export default function Journal({
         tabIndex={0}
       >
         <Field label="Personal notes" hint="Private notes are not sent to the GM.">
-          <textarea rows={6} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <textarea rows={18} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
         <button
           onClick={() =>
@@ -261,6 +261,17 @@ export default function Journal({
       >
         <HistoryMemory campaign={campaign} options={options} active={active} onChanged={onSaved} />
       </div>
+      {active && options?.advancement && (
+        <div
+          role="tabpanel"
+          id={`${tabId}-panel-advancement`}
+          aria-labelledby={`${tabId}-tab-advancement`}
+          hidden={tab !== 'advancement'}
+          tabIndex={0}
+        >
+          <Advancement key={campaign.id} campaign={campaign} options={options} onSaved={onSaved} />
+        </div>
+      )}
       <details
         className="panel"
         hidden

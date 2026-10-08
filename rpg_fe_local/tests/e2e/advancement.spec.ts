@@ -130,11 +130,11 @@ test('manual advancement review edits, Apply, player total and phone layout', as
     page.getByRole('status').filter({ hasText: 'Update your character sheet manually' })
   ).toBeVisible();
   await page.goto(`/campaigns/${campaign.id}?tab=characters`);
-  await expect(page.getByLabel('Awarded through this feature')).toHaveText('25 XP (Test RPG)');
+  await expect(page.getByLabel('Exp Awarded so far')).toHaveText('Exp Awarded so far: 25 points');
   expect(posts.every((p) => p.includes('/advancement/'))).toBe(true);
   expect(campaign.characters[0]!.attributes).toEqual({ health: 12 });
   await page.setViewportSize({ width: 360, height: 800 });
-  await expect(page.getByLabel('Awarded through this feature')).toBeVisible();
+  await expect(page.getByLabel('Exp Awarded so far')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true
   );

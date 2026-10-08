@@ -146,6 +146,7 @@ async function mockApi(page: Page) {
     if (path === '/api/settings')
       result = {
         ...options,
+        advancement: { statuses: [], actions: [], kinds: [], bases: [], outcomes: [], limits: {} },
         journal: { limits: { queryMaxChars: 200, pageSizeDefault: 20, explanationMaxChars: 2000 } },
       };
     else if (path === '/api/providers') result = providers;
@@ -215,7 +216,9 @@ async function mockApi(page: Page) {
       const mira = entries.find((e) => e.id === 'e-mira')!;
       mira.text = mira.overview = 'Mira is a sister of the temple.';
       result = { decision: 'accepted', entry: mira };
-    } else result = [campaign];
+    } else if (path.endsWith('/advancement/reviews'))
+      result = { reviews: [], outstandingTurnCount: 37, nextCursor: null };
+    else result = [campaign];
     requests.push({
       method,
       path: `${path}${url.search}`,
@@ -233,7 +236,7 @@ test('knowledge has its own tab, preserves notes while filtering and links to ol
 }) => {
   await mockApi(page);
   await page.goto(`/campaigns/${campaign.id}?tab=journal`);
-  const notes = page.getByLabel('Personal notes').and(page.locator('textarea'));
+  const notes = page.getByRole('textbox', { name: /Personal notes/, includeHidden: true });
   await notes.fill('my unsaved draft');
   await page.getByRole('tab', { name: 'Campaign knowledge' }).click();
   await expect(page.getByRole('heading', { name: 'Mira', level: 5 })).toBeVisible();
@@ -291,6 +294,74 @@ test('journal knowledge fits a 360px phone with 44px controls and no horizontal 
   await page.getByLabel('Search knowledge').focus();
   await expect(page.getByLabel('Search knowledge')).toBeFocused();
 });
+
+for (const width of [1280, 360]) {
+  test(`all journal helpers explain GM effects and preserve drafts at ${width}px`, async ({
+    page,
+  }) => {
+    const { requests } = await mockApi(page);
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto(`/campaigns/${campaign.id}?tab=journal`);
+    const notes = page.getByRole('textbox', { name: /Personal notes/ });
+    await notes.fill('Keep my private draft');
+    const explanations = [
+      ['Personal notes', 'Personal notes are never sent to the GM.'],
+      ['Campaign knowledge', 'Accepting a correction changes the fact'],
+      ['Campaign memory', 'A summary does not override saved character state'],
+      ['History recall', 'It can search and read the original older conversations'],
+      ['Advancement', 'does not update your character sheet'],
+    ];
+    for (const [label, explanation] of explanations) {
+      const helper = page.getByRole('button', { name: `Help for ${label}` });
+      await expect(helper).toHaveText('?');
+      const bounds = await helper.boundingBox();
+      expect(bounds?.width).toBeGreaterThanOrEqual(44);
+      expect(bounds?.height).toBeGreaterThanOrEqual(44);
+      await helper.focus();
+      await page.keyboard.press('Enter');
+      const dialog = page.getByRole('dialog', { name: `${label} help` });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByRole('heading', { name: `${label} help` })).toBeFocused();
+      await expect(
+        dialog.getByRole('heading', { name: 'What this section contains' })
+      ).toBeVisible();
+      await expect(dialog.getByRole('heading', { name: 'How it affects the GM' })).toBeVisible();
+      await expect(dialog).toContainText(explanation!);
+      await page.keyboard.press('Tab');
+      await expect(dialog.getByRole('button', { name: 'Close help' })).toBeFocused();
+      // Background controls are inert while the native modal is open.
+      await notes.evaluate((node) => node.focus());
+      expect(await dialog.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+      ).toBe(true);
+      expect(await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+      await page.keyboard.press('Escape');
+      await expect(dialog).not.toBeVisible();
+      await expect(helper).toBeFocused();
+      await expect(page.getByRole('tab', { name: 'Personal notes' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      );
+      await expect(notes).toHaveValue('Keep my private draft');
+    }
+    await page.getByRole('tab', { name: 'Campaign knowledge' }).click();
+    await page.getByRole('button', { name: 'Help for Campaign knowledge' }).click();
+    await page.getByRole('button', { name: 'Close help' }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Campaign knowledge' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await expect(page.getByRole('button', { name: 'Help for Campaign knowledge' })).toBeFocused();
+    await page.getByRole('tab', { name: 'Advancement', exact: true }).click();
+    const tabBounds = await page.getByRole('tablist', { name: 'Journal sections' }).boundingBox();
+    const panelBounds = await page.getByRole('tabpanel', { name: 'Advancement' }).boundingBox();
+    expect(panelBounds!.y).toBeGreaterThanOrEqual(tabBounds!.y + tabBounds!.height);
+    await expect(page.getByText('37 completed turns awaiting review.')).toBeVisible();
+    expect(requests.every((request) => request.method === 'GET')).toBe(true);
+  });
+}
 
 test('backfill and correction flows run without gameplay writes or hidden text', async ({
   page,

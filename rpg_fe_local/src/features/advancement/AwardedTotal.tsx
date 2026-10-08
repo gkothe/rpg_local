@@ -27,6 +27,15 @@ async function loadSummary(path: string): Promise<AdvancementSummary> {
     throw new Error('The server returned an incomplete advancement summary.');
   return value;
 }
+function formatTotal(t: { total: number; unitLabel: string }) {
+  const formatted = t.total.toLocaleString(undefined, { maximumSignificantDigits: 21 });
+  const unit = t.unitLabel.trim().toLowerCase();
+  if (unit === 'experience points' || unit === 'experience' || unit === 'points' || unit === 'xp') {
+    return `${formatted} ${t.total === 1 ? 'point' : 'points'}`;
+  }
+  return `${formatted} ${t.unitLabel}`;
+}
+
 export default function AwardedTotal({
   campaignId,
   characterId,
@@ -42,27 +51,21 @@ export default function AwardedTotal({
   useEffect(() => subscribeAdvancement(campaignId, () => void reload()), [campaignId, reload]);
   const player = summary.data?.players.find((p) => p.characterId === characterId);
   return (
-    <div className="stack">
-      <label>Awarded through this feature</label>
-      <output aria-label="Awarded through this feature">
+    <div className="awarded-total">
+      <output aria-label="Exp Awarded so far">
+        Exp Awarded so far:{' '}
         {summary.loading
           ? 'Loading…'
           : summary.error
             ? 'Unavailable'
             : player
               ? player.totals.length
-                ? player.totals
-                    .map(
-                      (t) =>
-                        `${t.total.toLocaleString(undefined, { maximumSignificantDigits: 21 })} ${t.unitLabel} (${t.systemLabel})`
-                    )
-                    .join('; ')
-                : '0 — no awards recorded'
+                ? player.totals.map(formatTotal).join('; ')
+                : '0 points'
               : 'Player record unavailable'}
       </output>
       <small className="muted">
-        Historical awards only. Update your sheet manually; spending and sheet edits do not change
-        this total.
+        Update your sheet manually; spending and sheet edits do not change this total.
       </small>
       <ErrorNotice message={summary.error} />
       {summary.error && <button onClick={() => void summary.reload()}>Retry awards load</button>}

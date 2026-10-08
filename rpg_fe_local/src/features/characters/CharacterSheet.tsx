@@ -38,7 +38,6 @@ function Editor({
           {character.name} <small>{character.type}</small>
         </h3>
       </header>
-      {player && <AwardedTotal campaignId={campaign.id} characterId={character.id} />}
       <ErrorNotice message={error} />
       <Field label="Name">
         <input value={name} onChange={(e) => setName(e.target.value)} />
@@ -46,6 +45,7 @@ function Editor({
       <Field label="Character notes">
         <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </Field>
+      {player && <AwardedTotal campaignId={campaign.id} characterId={character.id} />}
       <nav className="tabs sheet-tabs" aria-label={`${character.name} sheet sections`}>
         {CHARACTER_SECTIONS.map(({ key: item, label }) => (
           <button

@@ -193,20 +193,24 @@ it('one read-only award field separates currencies and refreshes on ledger chang
   );
   render(<AwardedTotal campaignId={campaign.id} characterId={campaign.characters[0]!.id} />);
   await waitFor(() =>
-    expect(screen.getByLabelText('Awarded through this feature')).toHaveTextContent(
-      '12 XP (D&D); 2 Improvement checks (Other game)'
+    expect(screen.getByLabelText('Exp Awarded so far')).toHaveTextContent(
+      'Exp Awarded so far: 12 points; 2 Improvement checks'
     )
   );
   expect(screen.queryByRole('spinbutton')).toBeNull();
   total = 20;
   notifyAdvancement(campaign.id);
   await waitFor(() =>
-    expect(screen.getByLabelText('Awarded through this feature')).toHaveTextContent('20 XP')
+    expect(screen.getByLabelText('Exp Awarded so far')).toHaveTextContent(
+      'Exp Awarded so far: 20 points'
+    )
   );
   total = 0.0001;
   notifyAdvancement(campaign.id);
   await waitFor(() =>
-    expect(screen.getByLabelText('Awarded through this feature')).toHaveTextContent('0.0001 XP')
+    expect(screen.getByLabelText('Exp Awarded so far')).toHaveTextContent(
+      'Exp Awarded so far: 0.0001 points'
+    )
   );
 });
 
@@ -219,5 +223,5 @@ it('a failed totals request displays unavailable, never a fabricated zero', asyn
   );
   render(<AwardedTotal campaignId={campaign.id} characterId={campaign.characters[0]!.id} />);
   await screen.findByText('Database unavailable');
-  expect(screen.getByLabelText('Awarded through this feature')).toHaveTextContent('Unavailable');
+  expect(screen.getByLabelText('Exp Awarded so far')).toHaveTextContent('Unavailable');
 });

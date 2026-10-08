@@ -562,12 +562,6 @@ export class AdvancementService {
           ...cap,
           turnIdentities: Object.fromEntries(batch.map((t) => [t.id, cap.turnIdentities[t.id]!])),
         });
-        if (proposal && digest(part.rewardSystem) !== digest(proposal.rewardSystem))
-          throw new Problem(
-            422,
-            'advancement_system_changed',
-            'The provider changed system identity between batches; resolve the campaign system and resume'
-          );
         const needsGuidance =
           part.outcome === AdvancementOutcome.NeedsGuidance ||
           proposal?.outcome === AdvancementOutcome.NeedsGuidance;

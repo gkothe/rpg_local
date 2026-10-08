@@ -506,7 +506,7 @@ test(
 );
 
 test(
-  'sequential batches checkpoint successful turns and resume only unfinished evidence',
+  'sequential batches accept system label variations and resume only unfinished evidence',
   { skip: !dbEnabled },
   async () => {
     const f = await fixture(3);
@@ -521,6 +521,7 @@ test(
       }
       successfulIds.push(turns[0]!.id);
       const p = proposal(f.characterId, [turns[0]!.id]);
+      if (successfulIds.length > 1) p.rewardSystem.label = 'Test system Edition 1';
       p.cumulativeSummary = [prompt.previousSummary, turns[0]!.gm].filter(Boolean).join(' ');
       return p;
     });
