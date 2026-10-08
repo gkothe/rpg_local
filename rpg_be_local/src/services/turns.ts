@@ -783,6 +783,7 @@ export class TurnService {
       }
     };
     call.definitions = registry.call.definitions;
+    call.assertActive = registry.call.assertActive;
     return call;
   }
   private async finishEditing(

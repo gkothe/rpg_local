@@ -118,6 +118,8 @@ export interface RuleImportPreview {
   columns: string[];
 }
 export interface Provider {
+  /** Backend-served: CLI rows are installed executables, API rows are configured remote services. */
+  transport: 'cli' | 'api';
   compatibilityWarning?: string | null;
   rules?: { supported: boolean; reason: string | null };
   id: string;

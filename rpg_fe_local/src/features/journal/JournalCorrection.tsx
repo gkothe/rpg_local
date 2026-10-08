@@ -84,8 +84,8 @@ export default function JournalCorrection({
             />
           </label>
           <small className="muted">
-            The GM checks your saved conversations with the selected campaign CLI/model, which uses
-            your provider allowance. Nothing changes until you accept a proposed correction.
+            The GM checks your saved conversations with the selected campaign provider/model, which
+            uses your provider allowance. Nothing changes until you accept a proposed correction.
           </small>
           {(!job || settled) && !done && (
             <button

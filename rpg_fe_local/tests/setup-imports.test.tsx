@@ -74,7 +74,7 @@ function mount(failSecond = false) {
 async function chooseFiles() {
   await screen.findByLabelText('PDF OCR language');
   await screen.findByRole('option', { name: providers[0].name });
-  fireEvent.change(screen.getByLabelText('AI CLI'), { target: { value: providers[0].id } });
+  fireEvent.change(screen.getByLabelText('AI provider'), { target: { value: providers[0].id } });
   fireEvent.change(screen.getByLabelText('Campaign name'), { target: { value: 'Vampire' } });
   fireEvent.change(screen.getByLabelText('Campaign files (select multiple)'), {
     target: {
@@ -232,9 +232,9 @@ it('retains the saved campaign and sheet when the selected CLI fails to parse', 
 it('requires a selected CLI before creating a campaign with an automatic character import', async () => {
   const app = mount();
   await chooseFiles();
-  fireEvent.change(screen.getByLabelText('AI CLI'), { target: { value: '' } });
+  fireEvent.change(screen.getByLabelText('AI provider'), { target: { value: '' } });
   fireEvent.click(screen.getByRole('button', { name: 'Create campaign' }));
-  await screen.findByText(/Select an AI CLI and model to automatically parse/);
+  await screen.findByText(/Select an AI provider and model to automatically parse/);
   expect(app.creates()).toBe(0);
 });
 

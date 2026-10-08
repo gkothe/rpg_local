@@ -48,7 +48,11 @@ export type GameplayToolDispatch = ((
   name: string,
   input: unknown,
   requestId: string | number
-) => Promise<GameplayToolResult>) & { definitions?: GameplayToolDefinition[] };
+) => Promise<GameplayToolResult>) & {
+  definitions?: GameplayToolDefinition[];
+  /** Re-checks cancellation and ownership; API transports call it before every HTTP request. */
+  assertActive?: () => Promise<void>;
+};
 export type GameplayToolDefinition = {
   name: string;
   description: string;
@@ -273,6 +277,11 @@ export class GameplayTools {
       throw new Error('Duplicate gameplay tool registration');
     this.definitions = this.registrations.map(definition);
     this.call.definitions = this.definitions;
+    this.call.assertActive = async () => {
+      if (options.signal?.aborted)
+        throw new Problem(409, 'cancelled', 'Gameplay attempt cancelled');
+      await options.assertActive();
+    };
   }
   call: GameplayToolDispatch = (name, input, requestId) => {
     const work = this.tail.then(() => this.dispatch(name, input, requestId));

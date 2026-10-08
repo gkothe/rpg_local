@@ -405,13 +405,13 @@ test('journal layout has no horizontal overflow across standard widths', async (
   expect(
     await page.locator('.transcript').evaluate((element) => getComputedStyle(element).overflowY)
   ).toBe('auto');
-  await expect(page.getByLabel('AI CLI')).toBeHidden();
+  await expect(page.getByLabel('AI provider')).toBeHidden();
   await page.getByRole('button', { name: 'Game master', exact: true }).click();
-  await expect(page.getByLabel('AI CLI')).toBeVisible();
+  await expect(page.getByLabel('AI provider')).toBeVisible();
   await expect(page.getByLabel('System rules', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Your action')).toBeHidden();
   await page.getByRole('button', { name: 'Play', exact: true }).click();
-  await expect(page.getByLabel('AI CLI')).toBeHidden();
+  await expect(page.getByLabel('AI provider')).toBeHidden();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: 'test-results/journal-desktop.png', fullPage: true });
   for (const width of [320, 375, 768, 1024, 1280, 1440, 1920, 2560]) {

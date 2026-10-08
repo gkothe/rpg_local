@@ -140,7 +140,7 @@ export default function CharacterCreator({
             </select>
           </Field>
           <button
-            title="Use the selected AI CLI to draft a character from this source. Review the result before adding it."
+            title="Use the selected AI provider to draft a character from this source. Review the result before adding it."
             disabled={busy || !draft}
             onClick={async () => {
               if (draftGuard.current) return;
@@ -178,8 +178,8 @@ export default function CharacterCreator({
             Generate editable character draft
           </button>
           <p className="muted">
-            Parsing uses your selected CLI. Review the draft above and click Add character to save
-            it.
+            Parsing uses your selected AI provider. Review the draft above and click Add character
+            to save it.
           </p>
         </div>
       </details>

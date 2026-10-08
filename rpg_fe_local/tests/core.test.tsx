@@ -9,6 +9,7 @@ import type { Provider } from '../src/services/types';
 const providers: Provider[] = [
   {
     id: 'claude',
+    transport: 'cli',
     name: 'Claude Code',
     available: true,
     supported: true,
@@ -74,7 +75,7 @@ describe('provider controls', () => {
       />
     );
     expect(
-      screen.getByText('Choose an AI CLI first to unlock its models and effort options.')
+      screen.getByText('Choose an AI provider first to unlock its models and effort options.')
     ).toBeVisible();
     expect(screen.getByText('Missing CLI: CLI not found on PATH')).toBeVisible();
     expect(screen.getByLabelText('Model')).toBeDisabled();

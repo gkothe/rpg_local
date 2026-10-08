@@ -77,7 +77,7 @@ test('setup imports separate campaign documents and character sheet before sourc
   });
   await page.goto('/new');
   await page.getByLabel('Campaign name').fill('Vampire');
-  await page.getByLabel('AI CLI').selectOption(providers[0]!.id);
+  await page.getByLabel('AI provider').selectOption(providers[0]!.id);
   await expect(page.getByRole('status')).toContainText('Untested CLI version. Gameplay is allowed');
   await page.getByLabel('Campaign files (select multiple)').setInputFiles([
     { name: 'adventure.md', mimeType: 'text/markdown', buffer: Buffer.from('Adventure') },

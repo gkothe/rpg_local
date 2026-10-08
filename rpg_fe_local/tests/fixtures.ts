@@ -29,6 +29,7 @@ export const options: Settings = {
 export const providers: Provider[] = [
   {
     id: 'claude',
+    transport: 'cli',
     name: 'Claude Code',
     available: true,
     supported: true,

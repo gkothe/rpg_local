@@ -36,7 +36,7 @@ test('explores the complete guide without campaign or provider requests', async 
   );
   await page.getByRole('button', { name: /Send prompt/ }).click();
   await expect(page.getByRole('complementary')).toContainText(
-    'Context builder → Provider CLI / LLM'
+    'Context builder → Provider CLI or API / LLM'
   );
   await page.reload();
   await expect(page.getByRole('complementary')).toContainText('Send prompt');

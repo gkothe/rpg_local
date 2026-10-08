@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 import { cliFailure } from '../processingErrors.js';
 import { responseRetryFeedback } from '../domain/responseRetry.js';
 import { Problem } from '../errors.js';
+import { withoutApiCredentials } from './apiConfig.js';
 export type RunOptions = {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -32,7 +33,7 @@ export function runProcess(
     }
     const child = spawn(binary, args, {
       cwd: options.cwd,
-      env: options.env ?? process.env,
+      env: withoutApiCredentials(options.env ?? process.env),
       shell: false,
       windowsHide: true,
       detached: process.platform !== 'win32',
@@ -56,6 +57,7 @@ export function runProcess(
         const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
           windowsHide: true,
           stdio: 'ignore',
+          env: withoutApiCredentials(process.env),
         });
         killer.on('error', () => child.kill());
       } else {

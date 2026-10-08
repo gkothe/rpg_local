@@ -27,13 +27,24 @@ import {
   modelSlug,
 } from './antigravity.js';
 import {
+  API_PROVIDER_ID,
+  API_PROVIDER_IDS,
   MAX_PROVIDER_INPUT_TOKENS,
   MODEL_EFFORTS,
   PROVIDERS,
   PROVIDER_ID,
   PROVIDER_IDS,
-  type ProviderId,
+  PROVIDER_TRANSPORT,
+  isApiProvider,
+  type AnyProviderId,
+  type ApiProviderId,
+  type ProviderTransport,
 } from './options.js';
+import { API_MODEL_INPUT_TOKENS, readApiConfiguration } from './apiConfig.js';
+import type { ApiFetch } from './apiHttp.js';
+import { generateGemini } from './geminiApi.js';
+import { generateOpenRouter } from './openrouterApi.js';
+import type { GameplayAdapter } from './gameplayTools.js';
 export type RulesCapability = {
   supported: boolean;
   reason: string | null;
@@ -48,8 +59,12 @@ export type ModelOption = {
   rules?: RulesCapability;
 };
 const CLAUDE_CLI_INPUT_TOKENS = 8000;
+const API_SYSTEM_PROMPT =
+  'You are a tabletop RPG narrator. The supplied JSON is the entire campaign context. No tools or outside context.';
 export type Provider = {
-  id: ProviderId;
+  id: AnyProviderId;
+  /** Backend-owned: CLI rows are installed executables, API rows are configured remote services. */
+  transport: ProviderTransport;
   name: string;
   available: boolean;
   supported: boolean;
@@ -124,10 +139,19 @@ async function invocationTrace(
   return invocation;
 }
 export class ProviderService implements Generator {
+  /** Injection points for tests; production uses global fetch and process.env. */
+  constructor(private readonly api: { fetch?: ApiFetch; env?: NodeJS.ProcessEnv } = {}) {}
   private cache: Provider[] | null = null;
   private locations = new Map<string, { binary: string; prefix: string[] }>();
   async list(refresh = false): Promise<Provider[]> {
     if (this.cache && !refresh) return this.cache;
+    const result = await this.discoverCli();
+    for (const id of API_PROVIDER_IDS) result.push(this.apiProvider(id));
+    this.cache = result;
+    return result;
+  }
+  /** Installed-CLI discovery; API rows are configuration-only and never need an executable. */
+  protected async discoverCli(): Promise<Provider[]> {
     let configured: z.infer<typeof configSchema> = [];
     if (process.env.RPG_MODEL_CATALOG) {
       try {
@@ -315,6 +339,7 @@ export class ProviderService implements Generator {
             : ANTIGRAVITY_ISOLATED_VERSION;
       result.push({
         id,
+        transport: PROVIDER_TRANSPORT.Cli,
         name,
         available: !!executable,
         supported: isolated && models.length > 0,
@@ -353,8 +378,79 @@ export class ProviderService implements Generator {
                   : 'Installed CLI; tool/customization isolation is not verified',
       });
     }
-    this.cache = result;
     return result;
+  }
+  /** Local inspection only: no request is made to the remote service. */
+  private apiProvider(id: ApiProviderId): Provider {
+    const config = readApiConfiguration(id, this.api.env);
+    const ready = config.reason === null;
+    const capability = { supported: ready, reason: config.reason };
+    return {
+      id,
+      transport: PROVIDER_TRANSPORT.Api,
+      name: config.name,
+      available: config.key !== null,
+      supported: ready,
+      reason: config.reason,
+      version: null,
+      compatibilityWarning: null,
+      models: config.models.map((model) => ({
+        id: model,
+        label: model,
+        efforts: [],
+        inputTokens: API_MODEL_INPUT_TOKENS,
+        dice: { supported: true, reason: null },
+        rules: { supported: true, reason: null, efforts: [] },
+      })),
+      dice: capability,
+      rules: capability,
+      catalogProvenance:
+        'Administrator model list from the backend environment; runs remotely, so the API key and model access are checked only when a request is made' +
+        (id === API_PROVIDER_ID.OpenRouter
+          ? '. If the selected model is rate limited or unavailable, later entries of OPENROUTER_MODELS are tried in listed order'
+          : ''),
+    };
+  }
+  private apiKey(id: ApiProviderId): string {
+    const config = readApiConfiguration(id, this.api.env);
+    if (!config.key) throw new Problem(503, 'provider_unavailable', config.reason!);
+    return config.key;
+  }
+  private async runApi(
+    settings: ProviderSettings,
+    prompt: string,
+    schema: unknown,
+    systemPrompt: string,
+    adapter: GameplayAdapter | undefined,
+    signal: AbortSignal | undefined,
+    trace: PromptTraceContext
+  ): Promise<unknown> {
+    const id = settings.provider as ApiProviderId;
+    const context = { key: this.apiKey(id), fetchImpl: this.api.fetch };
+    if (id === API_PROVIDER_ID.Gemini)
+      return generateGemini(
+        context,
+        settings,
+        prompt,
+        schema,
+        systemPrompt,
+        adapter,
+        signal,
+        trace
+      );
+    // The configured list is an ordered waterfall: only entries after the selected model are used.
+    const listed = readApiConfiguration(id, this.api.env).models;
+    const fallbackModels = listed.slice(listed.indexOf(settings.model) + 1);
+    return generateOpenRouter(
+      { ...context, fallbackModels },
+      settings,
+      prompt,
+      schema,
+      systemPrompt,
+      adapter,
+      signal,
+      trace
+    );
   }
   async narrativeEditorSettings(settings: ProviderSettings): Promise<ProviderSettings> {
     const defaults = { ...settings, effort: null };
@@ -390,6 +486,24 @@ export class ProviderService implements Generator {
     trace = await invocationTrace(trace, 'generate');
     await traceEvent(trace, 'request', { settings, prompt, schema }, true);
     await this.capacity(settings);
+    if (isApiProvider(settings.provider)) {
+      try {
+        const parsed = await this.runApi(
+          settings,
+          prompt,
+          schema,
+          API_SYSTEM_PROMPT,
+          undefined,
+          signal,
+          trace
+        );
+        await traceEvent(trace, 'final', { response: parsed });
+        return parsed;
+      } catch (error) {
+        await traceEvent(trace, 'failure', safeTraceFailure(error));
+        throw error;
+      }
+    }
     const executable = this.locations.get(settings.provider)!;
     const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-cli-'));
     try {
@@ -513,9 +627,18 @@ export class ProviderService implements Generator {
         'gameplay_registry',
         'Owned gameplay requires explicit tool definitions'
       );
+    const adapter = { dispatch: tools, definitions: tools.definitions, schema, systemPrompt };
+    if (isApiProvider(settings.provider)) {
+      try {
+        // Final output goes through the same validation and repair as CLI transports.
+        return await this.runApi(settings, prompt, schema, systemPrompt, adapter, signal, trace);
+      } catch (error) {
+        await traceEvent(trace, 'failure', safeTraceFailure(error));
+        throw error;
+      }
+    }
     const executable = this.locations.get(settings.provider)!;
     const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-owned-cli-'));
-    const adapter = { dispatch: tools, definitions: tools.definitions, schema, systemPrompt };
     try {
       if (settings.provider === PROVIDER_ID.Codex)
         return await generateCodexDice(

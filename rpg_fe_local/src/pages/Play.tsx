@@ -110,7 +110,7 @@ export default function PlayPage() {
     : bookSelected && (!provider?.rules?.supported || !model?.rules?.supported)
       ? (model?.rules?.reason ??
         provider?.rules?.reason ??
-        'Book gameplay is unavailable for the selected CLI/model.')
+        'Book gameplay is unavailable for the selected provider/model.')
       : '';
   const playable =
     !!settings.data && !rulesBlocked && validProvider(providers.data || [], campaign.settings);
@@ -255,8 +255,8 @@ export default function PlayPage() {
           />
           <h2>Game master</h2>
           <p className="muted">
-            Change CLI, model or effort between turns. Your campaign, characters and saved context
-            stay with the game; the next turn uses your new selection.
+            Change provider, model or effort between turns. Your campaign, characters and saved
+            context stay with the game; the next turn uses your new selection.
           </p>
           <ProviderPicker
             providers={providers.data || []}
@@ -618,7 +618,7 @@ export default function PlayPage() {
             </div>
             {!playable && (
               <p className="muted">
-                {rulesBlocked || 'Select an available CLI and model above to play.'}
+                {rulesBlocked || 'Select an available provider and model above to play.'}
               </p>
             )}
             {settings.data && !settings.data.audio.available && (

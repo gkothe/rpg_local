@@ -23,7 +23,7 @@ export default function ProviderPicker({
   );
   return (
     <div className="provider-picker">
-      <Field label="AI CLI">
+      <Field label="AI provider">
         <select
           disabled={disabled}
           value={value.provider}
@@ -33,7 +33,7 @@ export default function ProviderPicker({
             onChange({ provider: p?.id || '', model: m?.id || '', effort: m?.efforts[0] || null });
           }}
         >
-          <option value="">Select a CLI</option>
+          <option value="">Select a provider</option>
           {providers.map((p) => (
             <option
               key={p.id}
@@ -44,9 +44,13 @@ export default function ProviderPicker({
             >
               {p.name}
               {!p.available
-                ? ' — not detected'
+                ? p.transport === 'api'
+                  ? ' — not configured'
+                  : ' — not detected'
                 : !p.supported || p.dice?.supported === false || !p.models.length
-                  ? ' — installed, gameplay disabled'
+                  ? p.transport === 'api'
+                    ? ' — configuration incomplete'
+                    : ' — installed, gameplay disabled'
                   : ''}
             </option>
           ))}
@@ -95,6 +99,13 @@ export default function ProviderPicker({
         </select>
       </Field>
       {provider?.reason && <small className="provider-reason">{provider.reason}</small>}
+      {provider?.transport === 'api' && provider.supported && (
+        <p className="notice" role="status">
+          {provider.name} runs remotely: each request sends the assembled campaign context to it
+          using the API key held by your backend. The key and model access are checked only when a
+          request is made.
+        </p>
+      )}
       {provider?.compatibilityWarning && (
         <p className="notice" role="status">
           {provider.compatibilityWarning}
@@ -107,8 +118,8 @@ export default function ProviderPicker({
         {!value.provider && (
           <small className="muted">
             {readyProviders.length
-              ? 'Choose an AI CLI first to unlock its models and effort options.'
-              : 'No usable CLI with models was found. Review the diagnostics below or Settings & connections.'}
+              ? 'Choose an AI provider first to unlock its models and effort options.'
+              : 'No usable provider with models was found. Review the diagnostics below or Settings & connections.'}
           </small>
         )}
         {provider?.available && provider.supported && model && !model.efforts.length && (
@@ -141,7 +152,7 @@ export default function ProviderPicker({
               }
             }}
           >
-            {refreshing ? 'Refreshing CLIs…' : 'Refresh CLI diagnostics'}
+            {refreshing ? 'Refreshing providers…' : 'Refresh provider diagnostics'}
           </button>
         )}
       </div>

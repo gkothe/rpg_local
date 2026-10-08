@@ -15,16 +15,22 @@ export default function SettingsPage() {
       <h1>Settings & connections</h1>
       <ErrorNotice message={settings.error || providers.error} />
       <section className="panel stack">
-        <h2>Installed AI CLIs</h2>
+        <h2>AI providers</h2>
         {providers.data?.map((p) => (
           <article key={p.id}>
             <h3>{p.name}</h3>
             <p>
-              {p.available && p.supported
-                ? 'Ready for gameplay'
-                : p.available
-                  ? 'Installed — gameplay disabled'
-                  : 'Not detected'}
+              {p.transport === 'api'
+                ? p.supported
+                  ? 'Configured — runs remotely; the key and model access are checked when used'
+                  : p.available
+                    ? 'API key found — gameplay disabled'
+                    : 'Not configured'
+                : p.available && p.supported
+                  ? 'Ready for gameplay'
+                  : p.available
+                    ? 'Installed — gameplay disabled'
+                    : 'Not detected'}
               {p.version ? ` · ${p.version}` : ''}
             </p>
             {p.reason && <p className="notice">{p.reason}</p>}
@@ -73,8 +79,8 @@ export default function SettingsPage() {
         <p>LAN access is {settings.data?.lan.enabled ? 'enabled' : 'disabled'}.</p>
         <p>
           Run the game on your Windows computer. Optional LAN setup must explicitly allow your local
-          host and browser origin. The phone runs only the browser; AI CLIs and PostgreSQL stay on
-          the computer.
+          host and browser origin. The phone runs only the browser; installed AI CLIs and PostgreSQL
+          stay on the computer; configured API providers run remotely.
         </p>
         <p className="muted">
           For phone dictation, use trusted HTTPS. Firewall permissions, certificate trust, device

@@ -65,7 +65,7 @@ export default function Setup() {
             }
             if ((characterFile || characterUrl.trim()) && (!settings.provider || !settings.model)) {
               throw new Error(
-                'Select an AI CLI and model to automatically parse your character sheet.'
+                'Select an AI provider and model to automatically parse your character sheet.'
               );
             }
             for (const file of files) {
@@ -161,7 +161,7 @@ export default function Setup() {
                 throw new Error(
                   'Character document was saved, but its source could not be identified. Open Characters to parse it.'
                 );
-              setProgress('Parsing your player character with the selected AI CLI…');
+              setProgress('Parsing your player character with the selected AI provider…');
               const parsed = await request<{
                 draft: Pick<Character, 'name' | 'attributes' | 'inventory' | 'description'>;
               }>(
@@ -246,7 +246,7 @@ export default function Setup() {
             onRefresh={() => providers.reload('/providers?refresh=true')}
           />
           <small className="muted">
-            You can create and prepare a campaign before a CLI is available.
+            You can create and prepare a campaign before a provider is available.
           </small>
           <section className="stack" aria-label="Campaign documents">
             <h2>Campaign documents</h2>
@@ -300,9 +300,9 @@ export default function Setup() {
               />
             </Field>
             <p className="muted">
-              When you create the campaign, the selected AI CLI converts this sheet into the app’s
-              character format and adds it as your player character automatically. Choose either a
-              file or a Google Docs link. You can edit the character afterward.
+              When you create the campaign, the selected AI provider converts this sheet into the
+              app’s character format and adds it as your player character automatically. Choose
+              either a file or a Google Docs link. You can edit the character afterward.
             </p>
           </section>
           {options.data && (

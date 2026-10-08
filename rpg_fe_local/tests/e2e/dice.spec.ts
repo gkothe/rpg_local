@@ -122,7 +122,7 @@ test('terminal dice stay visible, retry preserves drafts and undo retains the au
   await page.goto(`/campaigns/${campaign.id}`);
   await page.getByLabel('Show debug info').check();
   await expect(page.getByText('Declared before rolling: +2 agility; target 12')).toBeVisible();
-  await expect(page.getByLabel('AI CLI').locator('option[value="agy"]')).toHaveAttribute(
+  await expect(page.getByLabel('AI provider').locator('option[value="agy"]')).toHaveAttribute(
     'disabled',
     ''
   );

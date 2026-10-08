@@ -74,7 +74,7 @@ export const nodes: FlowItem[] = [
   ),
   item(
     'model',
-    'Provider CLI / LLM',
+    'Provider CLI or API / LLM',
     "The selected provider's language model writes the story and proposes campaign changes. It can also ask the app to run one of the allowed tools.",
     'While the app waits for the model, before it opens the transaction that saves the gameplay result.',
     'System instructions, the fixed user prompt, the required response format (schema), allowed tool definitions, and any tool results.',
@@ -86,7 +86,7 @@ export const nodes: FlowItem[] = [
       'rpg_be_local/src/providers/codexDice.ts',
       'rpg_be_local/src/providers/antigravityDice.ts',
     ],
-    'The app launches the provider through its command-line program (CLI). Claude and Antigravity exchange tool messages through a private local HTTP MCP server. Codex uses its app-server through standard input and output (stdio). The configured session disables other native tools. The launched process still needs provider authentication and may inherit sensitive environment values.'
+    'CLI providers: the app launches the provider through its command-line program. Claude and Antigravity exchange tool messages through a private local HTTP MCP server. Codex uses its app-server through standard input and output (stdio). The configured session disables other native tools. The launched process still needs provider authentication and may inherit sensitive environment values. API providers (Gemini API, OpenRouter): the backend itself sends HTTPS requests with a key from its environment and a model from its configured list, declares only the owned tools, runs the returned tool calls one at a time, and sends each result back. The campaign context in every request goes to that cloud service. The app never switches provider; only OpenRouter tries the next model in its configured list when the selected one is rate limited or unavailable.'
   ),
   item(
     'tools',
@@ -286,13 +286,13 @@ export const steps: FlowStep[] = [
     id: 'check',
     label: '7. Validate the proposal',
     node: 'validate',
-    data: "The model proposes changing Mira's HP from 10 to 9. The app computes citation positions and pages from exact supplied quotes, then checks the format, roll IDs, provenance and Mira's saved HP. Invalid fields can receive restricted CLI corrections without changing the scene or rerolling dice.",
+    data: "The model proposes changing Mira's HP from 10 to 9. The app computes citation positions and pages from exact supplied quotes, then checks the format, roll IDs, provenance and Mira's saved HP. Invalid fields can receive restricted provider corrections without changing the scene or rerolling dice.",
   },
   {
     id: 'edit',
     label: '8. Edit the final narrative',
     node: 'validate',
-    data: 'The selected CLI and model, using low effort when advertised (otherwise its lowest advertised effort or CLI default), rewrites only the validated final prose. Numbers, names, quoted dialogue and the player decision are checked conservatively. The original candidate stays private if editing fails; Resume narrative editing continues this stage without new dice or a new GM turn.',
+    data: 'The selected provider and model, using low effort when advertised (otherwise its lowest advertised effort or the provider default; API models use their default), rewrites only the validated final prose. Numbers, names, quoted dialogue and the player decision are checked conservatively. The original candidate stays private if editing fails; Resume narrative editing continues this stage without new dice or a new GM turn.',
   },
   {
     id: 'commit',
@@ -790,7 +790,7 @@ export const branches = [
   },
   {
     label: 'Journal backfill & corrections',
-    text: 'You can ask the selected CLI to read every saved conversation in order and add missing people, places and unfinished business, or to check one fact you flag. Both run sequentially outside gameplay, make no turns or dice rolls, and commit nothing unless they finish. A correction is proposed with exact quotes and changes the record only after you accept it. Old conversations are never rewritten.',
+    text: 'You can ask the selected provider to read every saved conversation in order and add missing people, places and unfinished business, or to check one fact you flag. Both run sequentially outside gameplay, make no turns or dice rolls, and commit nothing unless they finish. A correction is proposed with exact quotes and changes the record only after you accept it. Old conversations are never rewritten.',
     section: '2.12',
   },
   {

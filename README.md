@@ -1,15 +1,15 @@
 # Local RPG
 
-Play a solo tabletop RPG in your browser, with Claude Code, Codex or Antigravity as the game master.
+Play a solo tabletop RPG in your browser, with Claude Code, Codex, Antigravity, the Gemini API or OpenRouter as the game master.
 
-The app keeps campaigns, characters and game history in a local PostgreSQL database. You choose the CLI, model and effort in the interface and can change them between turns. The CLI uses your own account; the app does not need an OpenRouter key.
+The app keeps campaigns, characters and game history in a local PostgreSQL database. You choose the provider, model and effort in the interface and can change them between turns. The CLIs use your own subscription sign-in and need no key. The Gemini API and OpenRouter are optional cloud providers that need an API key in your local `.env` (see [AI providers](#ai-providers)).
 
 **Windows is the tested platform.** AI requests still go to the selected provider, so local storage does not mean offline AI. macOS and Linux setup is not covered by the installation guide.
 
 ## What you can do
 
 - Play through a chat journal, manage your player character and NPCs, and edit their sheets.
-- Import campaign material and character sheets from text files, Markdown, JSON, PDFs or public Google Docs. A character uploaded during campaign creation is parsed into the main player sheet using the selected CLI.
+- Import campaign material and character sheets from text files, Markdown, JSON, PDFs or public Google Docs. A character uploaded during campaign creation is parsed into the main player sheet using the selected provider.
 - Keep reusable rule libraries, or play with the instructions-only **Model knowledge** default. The GM interprets the rules; the app supplies original book text through lookup tools.
 - Roll dice automatically through an app-owned tool. The backend generates and saves the faces; the GM explains the result and applies the rules.
 - Save important campaign facts and NPCs as play unfolds. The GM can recall them in later turns, including after a provider switch.
@@ -21,7 +21,7 @@ Story generation and map generation are outside this app's current scope. There 
 
 ## Install on Windows
 
-You need Git, Node.js **22.13 or newer**, PostgreSQL and at least one authenticated AI CLI for gameplay. PDF processing and dictation need extra local tools.
+You need Git, Node.js **22.13 or newer**, PostgreSQL and at least one AI provider for gameplay: an authenticated AI CLI, or a Gemini API / OpenRouter key. PDF processing and dictation need extra local tools.
 
 Start with the [installation guide](docs/documentation/installation.md). It covers external dependencies, database creation, migrations, CLI sign-in, OCR, voice setup and verification. It also includes a [setup procedure for coding agents](docs/documentation/installation.md#installation-by-a-coding-agent).
 
@@ -47,10 +47,37 @@ For a built version served by the backend:
 
 Open **http://127.0.0.1:4100**. This command builds both apps before starting them. The backend loads the root `.env` automatically for npm commands and the Windows launcher; explicit environment variables take precedence. The launcher also loads saved speech settings.
 
+## AI providers
+
+The GM needs at least one provider. Pick any combination; none replaces another and the app never switches provider by itself.
+
+| Provider    | Kind           | Setup                                                                                                          |
+| ----------- | -------------- | -------------------------------------------------------------------------------------------------------------- |
+| Claude Code | Local CLI      | Install the CLI and sign in with its own login ([guide](docs/documentation/installation.md#install-an-ai-cli)) |
+| Codex       | Local CLI      | Same                                                                                                           |
+| Antigravity | Local CLI      | Same                                                                                                           |
+| Gemini API  | Cloud, API key | Add `GEMINI_API_KEY` and `GEMINI_MODELS` to the root `.env`                                                    |
+| OpenRouter  | Cloud, API key | Add `OPENROUTER_API_KEY` and `OPENROUTER_MODELS` to the root `.env`                                            |
+
+The two API providers read only the root `.env` (copy `.env.example`; the file is ignored by Git). Model variables are comma-separated model ids, **best first**, and each provider has its own variables. Restart the backend after editing:
+
+```text
+GEMINI_API_KEY=<your key from https://aistudio.google.com/apikey>
+GEMINI_MODELS=gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash
+OPENROUTER_API_KEY=<your key from https://openrouter.ai/keys>
+OPENROUTER_MODELS=nvidia/nemotron-3-super-120b-a12b:free,google/gemma-4-31b-it:free,openrouter/free
+```
+
+- Model ids must come from your account. Settings reports a provider as configured when its key and list are valid, but only a real request proves access, quota and model support.
+- Gameplay needs tool calling, and the ordinary calls (character parsing, memory, journal, narrative editing) need JSON output. For OpenRouter, pick models that list both `tools` and `response_format` in their supported parameters.
+- **OpenRouter waterfall:** the list is ordered. If the selected model is rate limited or unavailable, the app tries the later entries in order, so put `openrouter/free` (a router that picks any free model) last. Gemini and the CLIs never fall back.
+- API providers are cloud services: every request sends the assembled campaign context to them and may be billed. The key stays in the backend and is never sent to the browser, saved in campaigns or archives, or passed to CLI subprocesses.
+- API models have no effort setting; each model uses its provider default.
+
 ## Start a game
 
-1. Open **Settings** and refresh CLI diagnostics. Sign in through the CLI's own terminal if needed.
-2. Create a campaign, choose a rules system and select an available CLI/model/effort.
+1. Open **Settings** and refresh provider diagnostics. Sign in through a CLI's own terminal if needed; API providers need their `.env` variables and a backend restart.
+2. Create a campaign, choose a rules system and select an available provider, model and effort.
 3. Add campaign documents and, if you have one, a player character sheet. Successful uploads are usable immediately; reviewing extracted text is optional.
 4. Open **Play** and tell the GM what your character does.
 
@@ -64,7 +91,7 @@ Dice faces survive a failed attempt. **Retry with saved dice** continues the ori
 
 The Journal tab shows, below your private notes, only what your character has learned. Reported rumors are labeled, your own suspicions are never recorded as facts, and hidden GM information never appears. Completed items collapse to a short line; open **Details** for the full text, connections, sources and history.
 
-- **Fill from past conversations** asks the selected campaign CLI/model to read all saved conversations in order and add missing people, places and unfinished business. It uses your provider allowance, can take a while across a long campaign, and adds entries only when it finishes; cancelling or failing adds nothing. Running it again fills only what is still missing. While it runs you cannot play, retry or undo (your notes stay editable).
+- **Fill from past conversations** asks the selected campaign provider/model to read all saved conversations in order and add missing people, places and unfinished business. It uses your provider allowance, can take a while across a long campaign, and adds entries only when it finishes; cancelling or failing adds nothing. Running it again fills only what is still missing. While it runs you cannot play, retry or undo (your notes stay editable).
 - **Flag a mistake** on an entry checks your saved conversations and proposes a correction with the exact quotes it relies on. Nothing changes until you accept; inconclusive results propose nothing. An accepted correction updates the GM's canonical knowledge, is kept in the entry's history, and never rewrites the original conversation, sheets or inventory. It also retires existing memory summaries so they are regenerated with the correction.
 - Undo will not overwrite an accepted correction or remove a conversation one relies on; it explains the conflict instead. Undoing a turn also rewinds anything recovered from it.
 
@@ -72,11 +99,11 @@ Backups include this history; campaign templates do not. Mocked checks cannot sh
 
 ## Your data
 
-Campaigns, source documents, characters, dice and undo records live in PostgreSQL. The root `.env` contains the local database connection in plain text and is ignored by Git; `.env.example` contains placeholders only. Windows speech and LAN settings remain under `%LOCALAPPDATA%\LocalRPG`. CLI credentials remain managed by the providers' own tools.
+Campaigns, source documents, characters, dice and undo records live in PostgreSQL. The root `.env` contains the local database connection in plain text and is ignored by Git; `.env.example` contains placeholders only. Windows speech and LAN settings remain under `%LOCALAPPDATA%\LocalRPG`. CLI credentials remain managed by the providers' own tools. API keys, if you use them, sit in the same plain-text `.env`.
 
 GM and AI parsing prompts are written to `log/` at the repository root. These files can contain character sheets, rule text and private campaign details. The folder is ignored by Git. Campaign exports and library backups can contain private material too; keep them outside the checkout when sharing or publishing code.
 
-Gameplay exposes the app's dice, rules and campaign-recall tools to the GM. Shell commands, unrelated MCPs and arbitrary computer-file access are blocked by the provider adapters. Imported text can still affect model behavior, and selected context is sent to your AI provider.
+Gameplay exposes the app's dice, rules and campaign-recall tools to the GM. Shell commands, unrelated MCPs and arbitrary computer-file access are blocked by the provider adapters. Imported text can still affect model behavior, and selected context is sent to your AI provider, including the cloud services behind the Gemini API and OpenRouter.
 
 ## Voice and phone access
 
@@ -89,7 +116,7 @@ The app opens on the same computer by default. Optional phone access needs expli
 This repository contains two npm workspaces:
 
 ```text
-rpg_be_local/   Express + TypeScript API, PostgreSQL migrations, CLI adapters
+rpg_be_local/   Express + TypeScript API, PostgreSQL migrations, provider adapters
 rpg_fe_local/   React + Vite interface
 scripts/       Shared launch, database and maintenance tooling
 docs/          Maintained public documentation under documentation/
@@ -112,7 +139,7 @@ npx.cmd playwright install chromium
 npm.cmd run test:e2e --workspace rpg-fe-local
 ```
 
-Default tests use synthetic provider boundaries. Database integration tests need a separate local database whose name ends in `_test`, with `NODE_ENV=test` and `RPG_TEST_DATABASE_URL`; live CLI checks are opt-in and consume your account's allowance. Read the test files before enabling them. Never run tests against your actual campaign database.
+Default tests use synthetic provider boundaries. Database integration tests need a separate local database whose name ends in `_test`, with `NODE_ENV=test` and `RPG_TEST_DATABASE_URL`; live provider checks are opt-in and consume your account's allowance. Read the test files before enabling them. Never run tests against your actual campaign database.
 
 Before changing code, read [CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md) and the target workspace's rules.
 

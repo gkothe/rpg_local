@@ -109,9 +109,9 @@ export default function JournalKnowledge({
         <summary>Fill from past conversations</summary>
         <div className="stack">
           <p className="muted">
-            The selected campaign CLI/model reads your saved conversations and adds missing people,
-            places and unfinished business. This uses your provider allowance and can take a while.
-            Entries are added only when it finishes; cancelling or failing adds nothing. Your
+            The selected campaign provider/model reads your saved conversations and adds missing
+            people, places and unfinished business. This uses your provider allowance and can take a
+            while. Entries are added only when it finishes; cancelling or failing adds nothing. Your
             current entries stay readable meanwhile.
           </p>
           <button

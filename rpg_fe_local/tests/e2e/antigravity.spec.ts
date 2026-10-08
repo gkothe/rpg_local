@@ -15,10 +15,10 @@ test('actual Antigravity selector, persisted GM turn, model switch and full undo
   const headers = { 'X-RPG-Client': 'local-rpg', Origin: origin };
   try {
     await page.getByLabel('Campaign name').fill(name);
-    await expect(page.getByLabel('AI CLI').locator('option[value="agy"]')).toBeEnabled({
+    await expect(page.getByLabel('AI provider').locator('option[value="agy"]')).toBeEnabled({
       timeout: 30000,
     });
-    await page.getByLabel('AI CLI').selectOption('agy');
+    await page.getByLabel('AI provider').selectOption('agy');
     await page
       .getByRole('combobox', { name: 'Model', exact: true })
       .selectOption('gemini-3.8-flash');

@@ -55,7 +55,8 @@ export default function LanConnection() {
         <>
           <p>
             Open a permitted address below on your phone, then approve that device with a connection
-            code. The game, database and AI CLIs continue running on this computer.
+            code. The game, database and any installed AI CLIs continue running on this computer;
+            configured API providers run remotely.
           </p>
           {lan.status.connectUrls.length > 0 ? (
             <ul>

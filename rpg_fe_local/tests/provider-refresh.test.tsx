@@ -40,7 +40,7 @@ it('provider picker excludes unverified dice models and selects a verified model
   expect(
     (screen.getByRole('option', { name: 'Blocked model' }) as HTMLOptionElement).disabled
   ).toBe(true);
-  fireEvent.change(screen.getByLabelText('AI CLI'), { target: { value: verified.id } });
+  fireEvent.change(screen.getByLabelText('AI provider'), { target: { value: verified.id } });
   expect(onChange).toHaveBeenCalledWith({
     provider: verified.id,
     model: 'verified',
@@ -98,7 +98,7 @@ it('allows selecting an untested provider and shows its compatibility warning', 
   );
   expect(screen.getByRole('status')).toHaveTextContent(provider.compatibilityWarning);
   expect(screen.getByRole('option', { name: provider.name })).not.toBeDisabled();
-  fireEvent.change(screen.getByLabelText('AI CLI'), { target: { value: provider.id } });
+  fireEvent.change(screen.getByLabelText('AI provider'), { target: { value: provider.id } });
   expect(onChange).toHaveBeenCalled();
 });
 
@@ -137,7 +137,7 @@ describe('CLI diagnostic refresh', () => {
       if (page === 'play')
         fireEvent.click(await screen.findByRole('button', { name: 'Game master' }));
       const button = await screen.findByRole('button', {
-        name: page === 'settings' ? 'Refresh diagnostics' : 'Refresh CLI diagnostics',
+        name: page === 'settings' ? 'Refresh diagnostics' : 'Refresh provider diagnostics',
       });
       fireEvent.click(button);
       await waitFor(() =>
@@ -186,7 +186,7 @@ it('switches providers in an existing game without losing its draft or history',
   fireEvent.change(action, { target: { value: 'Speak to Marta' } });
   fireEvent.click(screen.getByRole('button', { name: 'Game master' }));
   await screen.findByRole('option', { name: 'Antigravity' });
-  fireEvent.change(screen.getByLabelText('AI CLI'), { target: { value: 'agy' } });
+  fireEvent.change(screen.getByLabelText('AI provider'), { target: { value: 'agy' } });
   await screen.findByText('Game master settings saved.');
   fireEvent.click(screen.getByRole('button', { name: 'Play' }));
   expect(action).toHaveValue('Speak to Marta');

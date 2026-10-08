@@ -12,6 +12,7 @@ The project scripts configure their own database and Python runtime. They do not
 | Node.js 22.13+ with npm               | App, builds and migrations     | [Node.js](https://nodejs.org/en/download)                                                           |
 | PostgreSQL                            | Campaign storage               | [Official Windows downloads](https://www.postgresql.org/download/windows/)                          |
 | Claude Code, Codex or Antigravity CLI | GM turns and character parsing | [CLI setup below](#install-an-ai-cli)                                                               |
+| Gemini API or OpenRouter key          | GM turns, alternative to a CLI | [API setup below](#optional-gemini-api-and-openrouter)                                              |
 | Python 3.12 with the py launcher      | PDFs and dictation             | [Python Windows downloads](https://www.python.org/downloads/windows/)                               |
 | Tesseract with language data          | Scanned PDFs                   | [Tesseract Windows instructions](https://tesseract-ocr.github.io/tessdoc/Installation.html#windows) |
 | Local Faster-Whisper model            | Dictation                      | Downloaded by setup-voice.cmd                                                                       |
@@ -158,7 +159,7 @@ For partial setup, inspect PG_VERSION, server.log, the saved port and existing r
 
 ## Install an AI CLI
 
-Install at least one CLI under the same Windows account used to run the app. A desktop app or IDE alone does not guarantee that its CLI exists. Account access and model entitlement are managed by each provider.
+You need at least one AI provider: a CLI from this section, or a Gemini API / OpenRouter key from [the API section](#optional-gemini-api-and-openrouter). To use a CLI, install it under the same Windows account used to run the app. A desktop app or IDE alone does not guarantee that its CLI exists. Account access and model entitlement are managed by each provider.
 
 ### Codex
 
@@ -194,6 +195,27 @@ Open a new terminal, run agy --help, then launch agy and finish its first-run/ac
 Restart a running Local RPG backend after installing a CLI, then refresh diagnostics in Settings. Restart the parent terminal/agent app if its PATH is stale, or refresh its process PATH from the Windows user/machine environment.
 
 If discovery still fails, RPG_CODEX_BIN, RPG_CLAUDE_BIN or RPG_AGY_BIN can point to an absolute native executable or JavaScript entrypoint. CMD, BAT and PowerShell wrappers are rejected as overrides; locate their underlying binary instead. Select models/efforts from the discovered frontend options rather than hard-coding this guide's examples.
+
+## Optional: Gemini API and OpenRouter
+
+Gemini API and OpenRouter are extra providers beside the CLIs; they never replace them and nothing switches to them automatically. They run in the cloud: every request sends the assembled campaign context (selected sources, knowledge, history and your action) to that service, billed to your API account.
+
+Add both a key and a model list for each provider you want to the root `.env` (the file is ignored by Git; see `.env.example`):
+
+```text
+GEMINI_API_KEY=...
+GEMINI_MODELS=gemini-2.5-pro,gemini-2.5-flash
+OPENROUTER_API_KEY=...
+OPENROUTER_MODELS=anthropic/claude-sonnet-4.5,google/gemini-2.5-pro
+```
+
+- The model variables are comma-separated model ids, **best first**; choose ids your account can use. Gemini and OpenRouter have separate variables. Keys come from [Google AI Studio](https://aistudio.google.com/apikey) and [OpenRouter](https://openrouter.ai/keys).
+- **OpenRouter waterfall:** if the selected model is rate limited, unavailable, errors on the server or cannot be reached, the app tries the later entries of `OPENROUTER_MODELS` in order; put `openrouter/free` last. Authentication, refusal and cancellation never fall back, the fallback is sticky for that one generation, and previous-model reasoning data is dropped before another model continues. The trace logs each switch. Gemini has no fallback.
+- Gameplay needs tool calling and ordinary calls need JSON output. For OpenRouter choose models whose supported parameters include `tools` and `response_format`; free models are rate limited and shared. Duplicate or malformed ids disable only that provider and Settings shows why.
+- Restart the backend after editing `.env`; Refresh diagnostics only rereads state the running backend already has.
+- Keys stay in the backend. They are never sent to the browser, saved in campaigns, archives or templates, written to logs, or given to CLI subprocesses.
+- Settings reports a provider as configured when the key and models are present. It does not call the service, so an invalid key, missing model access or exhausted quota appears as an explicit error on the first real request. API models offer no effort options.
+- Mocked tests do not prove a live model works. Verify one model per provider with a disposable campaign: an ordinary reply, a turn with trusted dice and a rule or source read, the narrative editor, and a cancellation.
 
 ## PDFs, OCR and dictation
 
@@ -316,28 +338,30 @@ When asked to clone and install, follow these steps. Read root CLAUDE.md and AGE
 1. Inspect architecture, disk space and installed Git, Node/npm, PostgreSQL, CLIs and Python. Reuse compatible tools; install missing dependencies from the sources above. Refresh PATH and verify versions/exit codes.
 2. Clone into a local writable folder and install root npm dependencies. Preserve any existing checkout and uncommitted changes.
 3. Reuse a supplied dedicated local game URL; otherwise use the separate PostgreSQL ZIP procedure. Resolve its official download link yourself, choose an unused port, initialize once, provision through the existing script, persist settings and migrate. Keep credentials out of output/chat.
-4. Install the requested AI CLI. If none is specified, Codex has a documented install path, but account access must still be checked. Start the official login flow and let the user complete browser sign-in/MFA. Never borrow other applications' tokens or create a paid subscription for them.
+4. Set up at least one AI provider. For a CLI: install the requested one (if none is specified, Codex has a documented install path), start the official login flow and let the user complete browser sign-in/MFA. For the Gemini API or OpenRouter: copy the `.env.example` entries into the root `.env` using the key and model ids the user supplied; if none were supplied, leave the commented placeholders and report the missing key as a remaining human action. Never print, log, commit or echo a key, never borrow other applications' tokens, and never create a paid subscription or API account for the user.
 5. For a full-feature install, install Python, run voice setup, install Tesseract and both language files, persist paths and verify them. For text-only use, report these optional features as unconfigured. Use CPU defaults unless GPU configuration is requested.
 6. Run npm.cmd run typecheck, npm.cmd run lint and npm.cmd run build. Start in the user's terminal or use Start-Process -WindowStyle Hidden with redirected output for an agent-managed background process. Record its PID; stop only the process you own.
-7. Check health, CLI diagnostics and a disposable GM exchange when account access permits. Test enabled PDF/audio features with synthetic material. Leave the app running on success.
+7. Check health, provider diagnostics (installed CLIs and configured API providers) and a disposable GM exchange when account access permits. An API provider shown as configured has not yet proved its key or model access; only the exchange does. Test enabled PDF/audio features with synthetic material. Leave the app running on success.
 8. Report the URL, start/stop commands, PostgreSQL reboot/start instructions, settings/data locations and remaining human actions.
 
 UAC, provider sign-in/MFA and browser microphone permission may require the person. Other authorized setup work should proceed without repeated confirmations. The default desktop install does not change firewall ports, certificate trust or existing databases. Phone access is separate: [LAN setup](lan-setup.md).
 
 ## Common problems
 
-| Symptom                       | What to check                                                                                              |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Command not found             | Installation and fresh PATH; a provider desktop app may not include its CLI                                |
-| Database URL missing          | Run database setup and restart through start.cmd; direct npm needs environment settings                    |
-| Connection refused            | Start the PostgreSQL service/cluster and check its saved port                                              |
-| Missing table/column          | Stop the app, run migrations, restart                                                                      |
-| Database/role already exists  | Use its known dedicated URL; do not drop it                                                                |
-| CLI/model unavailable         | CLI sign-in, model access, quota and refreshed diagnostics; version warnings alone do not disable gameplay |
-| PDF/dictation unavailable     | Python runtime paths, locked dependencies, local model and Tesseract languages                             |
-| No read-aloud voice           | Install a local OS voice and restart the browser                                                           |
-| Port already used             | Identify the listener; stop it only if it is yours, or deliberately configure app ports                    |
-| Disk/permission/logging error | Check free space and permissions on the app, runtime and log folders                                       |
+| Symptom                       | What to check                                                                                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| API provider not configured   | Settings names the missing variable: `GEMINI_API_KEY`/`GEMINI_MODELS` or `OPENROUTER_API_KEY`/`OPENROUTER_MODELS`; edit `.env` and restart the backend |
+| API HTTP 503 or rate limit    | Provider-side demand or quota; pick another listed model or retry later (OpenRouter tries later list entries itself)                                   |
+| Command not found             | Installation and fresh PATH; a provider desktop app may not include its CLI                                                                            |
+| Database URL missing          | Run database setup and restart through start.cmd; direct npm needs environment settings                                                                |
+| Connection refused            | Start the PostgreSQL service/cluster and check its saved port                                                                                          |
+| Missing table/column          | Stop the app, run migrations, restart                                                                                                                  |
+| Database/role already exists  | Use its known dedicated URL; do not drop it                                                                                                            |
+| CLI/model unavailable         | CLI sign-in, model access, quota and refreshed diagnostics; version warnings alone do not disable gameplay                                             |
+| PDF/dictation unavailable     | Python runtime paths, locked dependencies, local model and Tesseract languages                                                                         |
+| No read-aloud voice           | Install a local OS voice and restart the browser                                                                                                       |
+| Port already used             | Identify the listener; stop it only if it is yours, or deliberately configure app ports                                                                |
+| Disk/permission/logging error | Check free space and permissions on the app, runtime and log folders                                                                                   |
 
 Ordinary npm tests do not install external tools or authenticate an account. These instructions were checked against project scripts and publisher documentation. A full install on a clean Windows machine remains a separate verification step.
 

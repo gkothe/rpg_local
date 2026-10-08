@@ -15,6 +15,7 @@ test('editor effort comes from selected model capabilities, with canonical fallb
       return [
         {
           id: 'codex',
+          transport: 'cli',
           name: 'Fixture',
           available: true,
           supported: true,
@@ -155,6 +156,7 @@ test('gameplay rejects provider and model dice gates without disabling no-tools 
   class FixtureProviders extends ProviderService {
     provider: Provider = {
       id: 'codex',
+      transport: 'cli',
       name: 'Fixture',
       available: true,
       supported: true,
@@ -304,6 +306,7 @@ test('rules capability accepts model-supported efforts and Default while preserv
   class FixtureProviders extends ProviderService {
     provider: Provider = {
       id: 'codex',
+      transport: 'cli',
       name: 'Original fixture',
       available: true,
       supported: true,
