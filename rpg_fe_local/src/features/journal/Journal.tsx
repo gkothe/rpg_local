@@ -8,11 +8,13 @@ import JournalKnowledge from './JournalKnowledge';
 import MemoryRebuild from './MemoryRebuild';
 import { MemoryText } from './MemoryText';
 import HistoryMemory from './HistoryMemory';
+import Advancement from '../advancement/Advancement';
 const JOURNAL_TABS = [
   { id: 'notes', label: 'Personal notes' },
   { id: 'knowledge', label: 'Campaign knowledge' },
   { id: 'memory', label: 'Campaign memory' },
   { id: 'history', label: 'History recall' },
+  { id: 'advancement', label: 'Advancement' },
 ] as const;
 type JournalTab = (typeof JOURNAL_TABS)[number]['id'];
 
@@ -68,6 +70,16 @@ export default function Journal({
   return (
     <section className="stack">
       <h2>Journal & context</h2>
+      {active && options?.advancement && (
+        <div
+          role="tabpanel"
+          id={`${tabId}-panel-advancement`}
+          aria-labelledby={`${tabId}-tab-advancement`}
+          hidden={tab !== 'advancement'}
+        >
+          <Advancement key={campaign.id} campaign={campaign} options={options} onSaved={onSaved} />
+        </div>
+      )}
       <ErrorNotice message={error} />
       {feedback && <small role="status">{feedback}</small>}
       <button

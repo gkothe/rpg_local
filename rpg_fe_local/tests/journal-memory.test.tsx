@@ -5,6 +5,9 @@ import { fixtureCampaign, options } from './fixtures';
 
 vi.mock('../src/features/journal/JournalKnowledge', () => ({ default: () => null }));
 vi.mock('../src/features/journal/HistoryMemory', () => ({ default: () => null }));
+vi.mock('../src/features/advancement/Advancement', () => ({
+  default: () => <p>Advancement review</p>,
+}));
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -38,8 +41,14 @@ it('shows the Rebuild memory control under the memory text and keeps notes draft
 });
 
 it('shows one Journal section at a time and supports keyboard tab navigation', () => {
-  render(<Journal campaign={fixtureCampaign()} options={options} onSaved={async () => {}} />);
-  expect(screen.getAllByRole('tab')).toHaveLength(4);
+  const advancementOptions = {
+    ...options,
+    advancement: { statuses: [], actions: [], kinds: [], bases: [], outcomes: [], limits: {} },
+  };
+  render(
+    <Journal campaign={fixtureCampaign()} options={advancementOptions} onSaved={async () => {}} />
+  );
+  expect(screen.getAllByRole('tab')).toHaveLength(5);
   expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
   expect(screen.getByRole('tabpanel', { name: 'Personal notes' })).toBeVisible();
   const notes = screen.getByLabelText(/Personal notes/, { selector: 'textarea' });
@@ -50,9 +59,9 @@ it('shows one Journal section at a time and supports keyboard tab navigation', (
   expect(screen.getByRole('tabpanel', { name: 'Campaign knowledge' })).toBeVisible();
   expect(notes).not.toBeVisible();
   fireEvent.keyDown(screen.getByRole('tab', { name: 'Campaign knowledge' }), { key: 'End' });
-  expect(screen.getByRole('tab', { name: 'History recall' })).toHaveFocus();
-  expect(screen.getByRole('tabpanel', { name: 'History recall' })).toBeVisible();
-  fireEvent.keyDown(screen.getByRole('tab', { name: 'History recall' }), { key: 'Home' });
+  expect(screen.getByRole('tab', { name: 'Advancement' })).toHaveFocus();
+  expect(screen.getByRole('tabpanel', { name: 'Advancement' })).toBeVisible();
+  fireEvent.keyDown(screen.getByRole('tab', { name: 'Advancement' }), { key: 'Home' });
   expect(notes).toBeVisible();
   expect(notes).toHaveValue('Keep my notes');
 });

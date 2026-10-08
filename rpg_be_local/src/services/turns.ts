@@ -1,4 +1,5 @@
 import { bindResponseCitations } from '../domain/citationBinding.js';
+import { gameplayAdvancementContext } from './advancement.js';
 import { atResponseField } from '../domain/responseFields.js';
 import { validateWithFieldRepair } from './responseRepair.js';
 import { sourceSpanSchema } from '../domain/knowledge.js';
@@ -153,7 +154,15 @@ export class TurnService {
       const rules = await this.store.retrieve(c, t.action, client, sceneText(c));
       let context = null;
       try {
-        context = buildContext(c, history, t.action, rules, this.rulePrompt(system));
+        context = buildContext(
+          c,
+          history,
+          t.action,
+          rules,
+          this.rulePrompt(system),
+          undefined,
+          await gameplayAdvancementContext(this.store, c, client)
+        );
       } catch (e) {
         if (!(e instanceof Problem && e.code === 'context_overflow')) throw e;
       }
@@ -523,7 +532,8 @@ export class TurnService {
             t.ruleContext
               ? this.rulePrompt(await new RuleStore(this.store).guard(t.ruleContext, client))
               : undefined,
-            await this.compactHistory(campaign, h, client)
+            await this.compactHistory(campaign, h, client),
+            await gameplayAdvancementContext(this.store, campaign, client)
           );
           t.context = turn.context;
           await this.store.saveTurn(turn, client);
@@ -965,6 +975,14 @@ export class TurnService {
       const turns = await this.store.activeTurns(c.id, client);
       const last = turns.at(-1);
       if (!last) throw conflict('No completed active turn to undo');
+      const coverage = await client.query(
+        'SELECT review_id FROM advancement_coverage WHERE campaign_id=$1 AND turn_id=$2',
+        [c.id, last.id]
+      );
+      if (coverage.rowCount)
+        throw conflict(
+          'Reverse the advancement review covering this turn first (Journal advancement tab)'
+        );
       const snapshot = await this.store.snapshot(last.id, client);
       // Journal changes made after this turn are never silently overwritten or left unsupported.
       assertNoCorrectionEvidence(c, last.id);

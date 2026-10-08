@@ -4,18 +4,21 @@ import { request, json, errorMessage } from '../../services/client';
 import { Field, ErrorNotice } from '../../components/Controls';
 import CharacterSection from './CharacterSection';
 import { CHARACTER_SECTIONS } from './sectionOptions';
+import AwardedTotal from '../advancement/AwardedTotal';
 function Editor({
   campaign,
   character,
   onSaved,
   canDelete,
   layout,
+  player,
 }: {
   campaign: Campaign;
   character: Character;
   onSaved: () => Promise<void>;
   canDelete: boolean;
   layout?: SheetLayout;
+  player?: boolean;
 }) {
   const baseRevision = useRef(campaign.revision),
     savingGuard = useRef(false);
@@ -35,6 +38,7 @@ function Editor({
           {character.name} <small>{character.type}</small>
         </h3>
       </header>
+      {player && <AwardedTotal campaignId={campaign.id} characterId={character.id} />}
       <ErrorNotice message={error} />
       <Field label="Name">
         <input value={name} onChange={(e) => setName(e.target.value)} />
@@ -253,6 +257,7 @@ export default function CharacterSheet({
               character={c}
               onSaved={onSaved}
               canDelete={player === false}
+              player={player === true}
               layout={layout}
             />
           </div>

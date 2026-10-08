@@ -95,7 +95,8 @@ export function buildContext(
     name?: string;
   }[],
   rulePrompt?: RulePrompt,
-  recall?: CompactHistoryInput
+  recall?: CompactHistoryInput,
+  advancement?: unknown
 ): ContextManifest {
   const frozenSources = freezeCampaignSources(c);
   const bootstrap = !turns.some((t) => t.status === TurnStatus.Completed && !t.undone);
@@ -111,7 +112,10 @@ export function buildContext(
   if (seed.omitted.length) sourceSelection.reasons.push('target_omission');
   const systemPrompt = gameplayInstructionEnvelope(
     rulePrompt?.instructions ?? '',
-    c.instructions,
+    c.instructions +
+      (c.advancementPolicy?.manual
+        ? `\nApplication advancement policy: progression is awarded only by a separate manual review. Never grant XP/advancement, automatically mirror ledger awards into sheet values, or invent sessions. The player manages their sheet and progression spending. Preserve unrelated mechanics. Award ledger and previous policy: ${JSON.stringify(advancement ?? null)}`
+        : ''),
     rulePrompt?.context.kind === RuleSystemKind.Library
   );
   const book = rulePrompt?.context.kind === RuleSystemKind.Library;

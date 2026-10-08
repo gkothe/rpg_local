@@ -237,7 +237,7 @@ test('knowledge has its own tab, preserves notes while filtering and links to ol
   await notes.fill('my unsaved draft');
   await page.getByRole('tab', { name: 'Campaign knowledge' }).click();
   await expect(page.getByRole('heading', { name: 'Mira', level: 5 })).toBeVisible();
-  await expect(page.getByRole('tab')).toHaveCount(4);
+  await expect(page.getByRole('tab')).toHaveCount(5);
   await expect(page.getByRole('tabpanel', { name: 'Campaign knowledge' })).toBeVisible();
   await expect(notes).toBeHidden();
   await expect(page.getByRole('region', { name: 'People and places' })).toBeVisible();

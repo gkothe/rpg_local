@@ -78,6 +78,15 @@ import {
 } from '../domain/historyRecall.js';
 import { HISTORY_INSTRUCTION_ID } from '../domain/historyGeneration.js';
 import { JournalEventKind } from '../domain/journal.js';
+import { advancementPolicySchema } from '../domain/advancement.js';
+import {
+  advancementArchiveSchema,
+  exportAdvancement,
+  importAdvancement,
+  validateAdvancementArchive,
+  remapAdvancement,
+  advancementSourceIds,
+} from './advancementArchive.js';
 import { eventDigest, journalLedgerSchema, sha256 } from '../domain/journalLedger.js';
 /** Identifies a Local RPG campaign export; any other JSON document is rejected. */
 export const ARCHIVE_FORMAT_ID = 'local-rpg';
@@ -178,6 +187,7 @@ const campaign = z
     journal: journalLedgerSchema.optional(),
     // Optional: older archives import with selective history disabled.
     historyRecall: historySettingsSchema.optional(),
+    advancementPolicy: advancementPolicySchema.optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -292,6 +302,7 @@ const archiveSchema = z
     combatPreparedCharacters: z.array(combatPreparedCharacterArchiveSchema),
     historyTurnVersions: z.array(historyVersionArchiveSchema).optional(),
     historyFragments: z.array(historyFragmentArchiveSchema).optional(),
+    advancementReviews: advancementArchiveSchema.optional(),
   })
   .strict();
 
@@ -440,6 +451,7 @@ export function remapArchive(raw: unknown): Archive {
   )
     throw new Problem(422, 'archive_invalid', 'Book selection requires a portable rule reference');
   const archive = parsed;
+  validateAdvancementArchive(archive.advancementReviews ?? [], archive.turns);
   const old = archive.campaign;
   const ids = new Map<string, string>();
   const register = (id: string) => {
@@ -455,6 +467,11 @@ export function remapArchive(raw: unknown): Archive {
   archive.diceSessions.forEach((session) => register(session.id));
   archive.diceRecords.forEach((record) => register(record.id));
   archive.combatPreparations.forEach((prep) => register(prep.id));
+  for (const review of archive.advancementReviews ?? []) {
+    register(review.id);
+    review.awards.forEach((a) => register(a.id));
+    review.reads.forEach((r) => register(r.id));
+  }
   for (const entry of archive.turns) {
     for (const read of entry.ruleReads ?? []) register(read.id);
     for (const read of entry.sourceReads ?? []) register(read.id);
@@ -464,6 +481,11 @@ export function remapArchive(raw: unknown): Archive {
   const mids = new Set(archive.memories.map((m) => m.id));
   const nonCharacterIds = new Set([
     old.id,
+    ...(archive.advancementReviews ?? []).flatMap((review) => [
+      review.id,
+      ...review.awards.map((a) => a.id),
+      ...review.reads.map((r) => r.id),
+    ]),
     ...sids,
     ...tids,
     ...mids,
@@ -525,6 +547,7 @@ export function remapArchive(raw: unknown): Archive {
     historicalCharacters.add(id);
   };
   const frozen: FrozenKnowledge[] = [
+    // Advancement recipients can remain in history after their sheets are deleted.
     ...archive.diceSessions.flatMap((session) =>
       session.frozenKnowledge ? [session.frozenKnowledge] : []
     ),
@@ -854,7 +877,15 @@ export function remapArchive(raw: unknown): Archive {
   if (completed.some((t) => !archive.snapshots.some((s) => s.turnId === t.id)))
     throw new Problem(422, 'archive_invalid', 'Completed turn is missing its undo snapshot');
   const out = structuredClone(archive);
+  for (const review of archive.advancementReviews ?? []) {
+    for (const read of review.reads)
+      for (const sourceId of advancementSourceIds(read.payload)) sourceLink(sourceId);
+    for (const award of review.awards) characterLink(award.characterId);
+    for (const proposal of [review.proposal, review.originalProposal])
+      for (const award of proposal?.awards ?? []) characterLink(award.characterId);
+  }
   const mapped = (id: string) => ids.get(id)!;
+  remapAdvancement(out.advancementReviews ?? [], mapped, mapped(old.id));
   for (const session of archive.diceSessions)
     for (const id of session.characterIds) if (!ids.has(id)) ids.set(id, randomUUID());
   for (const session of archive.diceSessions) {
@@ -1401,6 +1432,7 @@ export class LibraryService {
       };
       return {
         format: ARCHIVE_FORMAT_ID,
+        advancementReviews: await exportAdvancement(client, id),
         diceSessions: sessions.rows.map((row) => ({
           id: row.id,
           campaignId: row.campaign_id,
@@ -1499,6 +1531,12 @@ export class LibraryService {
               read.createdAt,
             ]
           );
+      await importAdvancement(
+        this.store,
+        client,
+        archive.campaign,
+        archive.advancementReviews ?? []
+      );
       for (const s of archive.snapshots)
         await client.query('INSERT INTO snapshots(turn_id,campaign_id,document) VALUES($1,$2,$3)', [
           s.turnId,
@@ -1667,6 +1705,8 @@ export class LibraryService {
       delete setup.state;
       // Journal history and audit events belong to one campaign's timeline.
       delete setup.journal;
+      delete setup.advancementReviews;
+      delete setup.advancementPolicy;
       const c = { ...newCampaign({ name: name ?? template.name }), ...setup } as Campaign;
       // Even an externally stored template cannot transplant another campaign's timeline.
       c.knowledge = [];

@@ -17,6 +17,14 @@ import { ProviderService } from './providers/service.js';
 import { TurnService } from './services/turns.js';
 import { LibraryService } from './services/library.js';
 import { JournalService } from './services/journal.js';
+import { AdvancementService } from './services/advancement.js';
+import {
+  ADVANCEMENT_OPTIONS,
+  AdvancementAction,
+  advancementRequestSchema,
+  advancementApplySchema,
+  advancementAdjustSchema,
+} from './domain/advancement.js';
 import { MemoryRebuildService } from './services/memoryRebuild.js';
 import { HistoryRecallService } from './services/historyProtection.js';
 import {
@@ -131,6 +139,7 @@ export function createApp(options: AppOptions) {
   const library = store ? new LibraryService(store) : null;
   const campaigns = store ? new CampaignService(store, providers) : null;
   const journal = store ? new JournalService(store, providers) : null;
+  const advancement = store ? new AdvancementService(store, providers) : null;
   const memoryRebuild = store ? new MemoryRebuildService(store, providers) : null;
   const historyRecall = store ? new HistoryRecallService(store) : null;
   const sources = store ? new SourceLibrary(store) : null;
@@ -215,6 +224,7 @@ export function createApp(options: AppOptions) {
           knowledgeOriginOptions: KNOWLEDGE_ORIGIN_OPTIONS,
           knowledgeCertaintyOptions: KNOWLEDGE_CERTAINTY_OPTIONS,
           knowledgeStatusOptions: KNOWLEDGE_STATUS_OPTIONS,
+          advancement: ADVANCEMENT_OPTIONS,
           journal: {
             groupOptions: JOURNAL_GROUP_OPTIONS,
             jobKindOptions: JOURNAL_JOB_KIND_OPTIONS,
@@ -792,6 +802,48 @@ export function createApp(options: AppOptions) {
       res.json({ data: await store!.turnContext(param(req, 'id'), param(req, 'turnId')) });
     })
   );
+  app.get(
+    '/api/campaigns/:id/advancement/summary',
+    wrap(async (req, res) => {
+      res.json({ data: await advancement!.summary(param(req, 'id')) });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/advancement/reviews',
+    wrap(async (req, res) => {
+      const { limit, offset } = page(req);
+      res.json({ data: await advancement!.list(param(req, 'id'), limit, offset) });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/advancement/reviews',
+    wrap(async (req, res) => {
+      const { requestId } = advancementRequestSchema.parse(req.body);
+      res.status(202).json({ data: await advancement!.start(param(req, 'id'), requestId) });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/advancement/reviews/:reviewId',
+    wrap(async (req, res) => {
+      res.json({ data: await advancement!.status(param(req, 'id'), param(req, 'reviewId')) });
+    })
+  );
+  for (const action of Object.values(AdvancementAction))
+    app.post(
+      `/api/campaigns/:id/advancement/reviews/:reviewId/${action}`,
+      wrap(async (req, res) => {
+        const body = (
+          action === AdvancementAction.Adjust
+            ? advancementAdjustSchema
+            : action === AdvancementAction.Apply
+              ? advancementApplySchema
+              : advancementRequestSchema
+        ).parse(req.body);
+        res.json({
+          data: await advancement!.decide(param(req, 'id'), param(req, 'reviewId'), action, body),
+        });
+      })
+    );
   app.get(
     '/api/campaigns/:id/journal/entries',
     wrap(async (req, res) => {

@@ -70,6 +70,7 @@ export type Memory = {
   createdAt: string;
 };
 export type Campaign = {
+  advancementPolicy?: { manual: true };
   /** Optional selective-history settings; absent means disabled (full memory in prompts). */
   historyRecall?: HistorySettings;
   knowledge?: CampaignKnowledge[];
@@ -178,6 +179,7 @@ export type Snapshot = {
   }[];
 };
 export type Archive = {
+  advancementReviews?: import('../services/advancementArchive.js').AdvancementArchive;
   format: typeof ARCHIVE_FORMAT_ID;
   campaign: Campaign;
   turns: Turn[];

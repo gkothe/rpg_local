@@ -441,3 +441,19 @@ Jobs (all `POST` bodies are strict and carry a UUID `requestId`; `202` starts a 
 Detail history items are `{at, kind: recorded|updated|recovered|corrected, origin, turnId, summary, changes?, reason?}`. A correction never rewrites the original conversation, sheets, inventory or campaign state.
 
 Archives: the current unversioned campaign archive gains the optional `campaign.journal` ledger (`events`, `coverageTurnIds`, `undoneTurnIds`). Import validates digests and quotes against the archived transcript and remaps ids; archives without it import with an empty ledger, numbered archives remain `archive_unsupported`, and templates never include it.
+
+# Manual advancement API
+
+All endpoints use the existing access boundary and `{ data }` envelope under `/api/campaigns/:id/advancement`. Settings advertises `advancement` statuses, actions, kinds, bases, outcomes and limits; no character-sheet format is assumed.
+
+| Method | Path                                                 | Behavior                                                                                      |
+| ------ | ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| GET    | `/summary`                                           | Full applied award ledger, cumulative per-player/per-currency totals and ledger digest        |
+| GET    | `/reviews?limit=100&cursor=0`                        | Review history, outstanding completed-turn count and next cursor                              |
+| POST   | `/reviews`                                           | `{requestId}` starts a durable review; returns 202 with review or null when no eligible turns |
+| GET    | `/reviews/:reviewId`                                 | Public proposal/status/audit, excluding private capture and receipts                          |
+| POST   | `/reviews/:reviewId/adjust`                          | `{requestId, proposalDigest, proposal, adjustmentReason}` saves direct edits without AI       |
+| POST   | `/reviews/:reviewId/apply`                           | `{requestId, proposalDigest}` atomically saves final awards and turn coverage                 |
+| POST   | `/reviews/:reviewId/{cancel,resume,discard,reverse}` | `{requestId}` performs the named state transition                                             |
+
+Decision request IDs replay the original result; reusing an ID with different content is 409. Apply uses the current saved proposal digest and semantic capture checks, never character/campaign revision gates. Resume preserves successful batch checkpoints. Ready proposals permit gameplay; running reviews block competing campaign processing. Reverse is newest-first and never edits character sheets. Imported pending reviews cannot execute. See [Manual advancement](advancement.md) for player workflow, continuous-play rules and archive semantics.

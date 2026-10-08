@@ -751,6 +751,21 @@ export const storageItems: FlowItem[] = [
       'rpg_be_local/src/domain/journalCompatibility.ts',
     ]
   ),
+  item(
+    'advancement',
+    'Manual advancement ledger',
+    'Review new completed turns, edit a proposal, then Apply awards. No session reward per click. The player updates their sheet manually.',
+    'On manual review and Apply.',
+    'Only unreviewed raw turns plus prior summary, objectives, policy and awards.',
+    'Final edited awards and reviewed-turn coverage; one cumulative award field on the player sheet.',
+    'PostgreSQL keeps proposals, final awards, receipts and idempotent decisions. Reverse newest reviews first; character values never change.',
+    '2.13',
+    [
+      'rpg_be_local/src/services/advancement.ts',
+      'rpg_be_local/src/services/advancementArchive.ts',
+      'rpg_fe_local/src/features/advancement/Advancement.tsx',
+    ]
+  ),
 ];
 export const branches = [
   {

@@ -460,6 +460,14 @@ export interface Settings {
   journal?: {
     limits: { queryMaxChars: number; pageSizeDefault: number; explanationMaxChars: number };
   };
+  advancement?: {
+    statuses: { id: string; label: string }[];
+    actions: { id: string; label: string }[];
+    kinds: { id: string; label: string }[];
+    bases: { id: string; label: string }[];
+    outcomes: { id: string; label: string }[];
+    limits: Record<string, number>;
+  };
   sourcePurposeOptions?: { id: string; label: string; default: boolean }[];
   knowledgeKindOptions?: { id: string; label: string }[];
   knowledgeOriginOptions?: { id: string; label: string }[];

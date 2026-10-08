@@ -236,7 +236,8 @@ export class Store {
     id: string,
     client: PoolClient,
     exemptJournalJobId?: string,
-    exemptRebuildJobId?: string
+    exemptRebuildJobId?: string,
+    exemptAdvancementReviewId?: string
   ): Promise<void> {
     const r = await client.query(
       "SELECT id FROM turns WHERE campaign_id=$1 AND (status IN ($2,$3) OR document->>'editingPending'='true')",
@@ -262,6 +263,16 @@ export class Store {
         409,
         'memory_busy',
         'Wait for or cancel the memory rebuild first (Journal tab)'
+      );
+    const advancement = await client.query(
+      "SELECT id FROM advancement_reviews WHERE campaign_id=$1 AND status='running' AND ($2::uuid IS NULL OR id<>$2::uuid)",
+      [id, exemptAdvancementReviewId ?? null]
+    );
+    if (advancement.rowCount)
+      throw new Problem(
+        409,
+        'advancement_busy',
+        'Wait for or cancel the advancement review first (Journal tab)'
       );
   }
   /** Stored before/after versions of one record from non-undone turns, oldest first. */
@@ -325,7 +336,15 @@ export class Store {
     const rebuild = await this.pool.query(
       "UPDATE memory_rebuild_jobs SET status='interrupted',owner=NULL,lease_until=NULL,updated_at=now(),safe_error='The app restarted during this memory rebuild; retry it.',error_code='memory_interrupted' WHERE status IN ('pending','running') AND (lease_until IS NULL OR lease_until < now())"
     );
-    return (r.rowCount ?? 0) + (journal.rowCount ?? 0) + (rebuild.rowCount ?? 0);
+    const advancement = await this.pool.query(
+      "UPDATE advancement_reviews SET status='interrupted',owner=NULL,lease_until=NULL,updated_at=now(),safe_error='The review was interrupted; resume or discard it.' WHERE status='running' AND lease_until < now()"
+    );
+    return (
+      (r.rowCount ?? 0) +
+      (journal.rowCount ?? 0) +
+      (rebuild.rowCount ?? 0) +
+      (advancement.rowCount ?? 0)
+    );
   }
   async reindex(c: Campaign, client: PoolClient): Promise<void> {
     await client.query('DELETE FROM source_chunks WHERE campaign_id=$1', [c.id]);
