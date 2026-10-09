@@ -23,6 +23,9 @@ export async function findRules(
           path: string;
           name?: string;
           readableOriginal: true;
+          exactTitle?: boolean;
+          locator?: string | null;
+          matchSupplied?: boolean;
           originalComplete?: boolean;
           suppliedOriginals?: ReturnType<typeof originalReadLocator>[];
         } =>
@@ -33,16 +36,24 @@ export async function findRules(
       )
     : [];
   const reads: Record<string, unknown>[] = [];
-  const unread = eligible.filter((hit) => !hit.originalComplete);
-  for (const [index, hit] of unread.slice(0, INITIAL_ORIGINAL_READS).entries()) {
+  const exact = eligible.filter((hit) => hit.exactTitle);
+  const selected = (exact.length ? exact : eligible).slice(0, INITIAL_ORIGINAL_READS);
+  const reused = selected.filter((hit) => hit.originalComplete || hit.matchSupplied);
+  const unread = eligible.filter((hit) => !selected.includes(hit));
+  for (const [index, hit] of selected.entries()) {
+    if (reused.includes(hit)) continue;
     await assertActive();
     reads.push(
-      await read('rules_get', { path: hit.path, view: 'text' }, `find:${identity}:get:${index}`)
+      await read(
+        'rules_get',
+        { path: hit.path, view: 'text', ...(hit.locator ? { locator: hit.locator } : {}) },
+        `find:${identity}:get:${index}`
+      )
     );
   }
   const names = new Map(eligible.map((hit) => [hit.path, hit.name]));
   const suppliedOriginals = [
-    ...eligible.filter((hit) => hit.originalComplete).flatMap((hit) => hit.suppliedOriginals ?? []),
+    ...reused.flatMap((hit) => hit.suppliedOriginals ?? []),
     ...reads
       .filter(
         (read) =>
@@ -62,6 +73,6 @@ export async function findRules(
     suppliedOriginals,
     search,
     reads,
-    unreadPaths: unread.slice(INITIAL_ORIGINAL_READS).map((hit) => hit.path),
+    unreadPaths: unread.map((hit) => hit.path),
   };
 }

@@ -77,3 +77,36 @@ test('immutable library reuse never hides mutable aliases or replacement origina
   Object.freeze(replacement);
   assert.equal(rankRuleNode(replacement, 'recovery').found, false);
 });
+
+test('wake groups, compact windows and phrases rank lexical support without filtering partials', () => {
+  const query = 'Rouse Check waking';
+  const waking = rankRuleNode(rule('Awakening', 'To awaken, make a Rouse Check.'), query);
+  const scattered = rankRuleNode(
+    rule('Miscellaneous', 'Rouse ' + 'padding '.repeat(40) + 'check'),
+    query
+  );
+  assert.ok(compareRuleMatches(waking, scattered) < 0);
+  assert.equal(waking.matchQuality, 'strong');
+  assert.equal(scattered.matchQuality, 'partial');
+  assert.equal(
+    rankRuleNode(
+      rule('Awaken', 'Waking wakes awakening wake awaken.'),
+      'wake waking awaken awakening'
+    ).matchedTerms.length,
+    1
+  );
+  const phrase = rankRuleNode(rule('Rule', 'A Rouse Check is required.'), '"Rouse Check"');
+  const separated = rankRuleNode(rule('Rule', 'Rouse elsewhere; a check later.'), '"Rouse Check"');
+  assert.ok(compareRuleMatches(phrase, separated) < 0);
+  assert.equal(rankRuleNode(rule('Rule', 'Rouse.'), '"Rouse Check"').found, true);
+});
+
+test('distinct rarity weights outrank repeated ubiquitous evidence', () => {
+  const weights = new Map([
+    ['check', 1],
+    ['wound', 4],
+  ]);
+  const rare = rankRuleNode(rule('Rule', 'Wounds.'), 'check wound', weights);
+  const common = rankRuleNode(rule('Rule', 'Check '.repeat(50)), 'check wound', weights);
+  assert.ok(compareRuleMatches(rare, common) < 0);
+});

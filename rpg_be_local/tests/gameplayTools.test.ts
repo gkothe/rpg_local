@@ -28,6 +28,10 @@ test('rule tool descriptions distinguish complete sections from pages and preser
   assert.match(find.description, /originalComplete/);
   assert.match(find.description, /specific missing fact/);
   assert.match(find.description, /Intentional verification/);
+  assert.match(find.description, /matchSupplied/);
+  assert.match(find.description, /matchWindow/);
+  assert.match(find.description, /lexical support/);
+  assert.match(find.description, /known paths/);
 });
 
 test('owned NPC tools read the frozen roster, list an empty one and enforce replay/ownership', async () => {
@@ -342,4 +346,51 @@ test('the advertised source search schema offers a single query or a bounded bat
   assert.equal(schema.properties.queries.maxItems, 6);
   assert.match(schema.properties.queries.description ?? '', /exactly one of query or queries/);
   assert.match(search.description, /queries/);
+});
+
+test('only completed external rule outputs populate delivery evidence and fresh registries start empty', async () => {
+  const snapshots: string[][] = [];
+  let gets = 0;
+  const read = async (
+    tool: string,
+    _input: unknown,
+    _id: string,
+    evidence?: { receiptIds: string[] }
+  ) => {
+    snapshots.push(evidence?.receiptIds ?? []);
+    if (tool === 'rules_search')
+      return {
+        revision: 1,
+        contentHash: 'hash',
+        entries: [
+          { path: 'core_rules.book.a', readableOriginal: true },
+          { path: 'core_rules.book.b', readableOriginal: true },
+        ],
+      };
+    gets++;
+    if (gets === 2) throw new Error('interrupted find');
+    return {
+      receipt: 'receipt-' + gets,
+      revision: 1,
+      contentHash: 'hash',
+      path: 'core_rules.book.a',
+      view: 'text',
+      start: 0,
+      end: 8,
+      text: 'Original',
+      complete: true,
+    };
+  };
+  const registry = ownedTools({ book: true, read });
+  await assert.rejects(
+    registry.call('rules_find', { query: 'rule' }, 'failed'),
+    /interrupted find/
+  );
+  await registry.call('rules_search', { query: 'rule' }, 'after');
+  assert.deepEqual(snapshots.at(-1), []);
+  await registry.call('rules_get', { path: 'core_rules.book.a' }, 'delivered');
+  await registry.call('rules_search', { query: 'rule' }, 'new');
+  assert.deepEqual(snapshots.at(-1), ['receipt-3']);
+  await ownedTools({ book: true, read }).call('rules_search', { query: 'rule' }, 'fresh');
+  assert.deepEqual(snapshots.at(-1), []);
 });

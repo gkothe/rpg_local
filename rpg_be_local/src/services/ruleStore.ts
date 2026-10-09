@@ -1,3 +1,8 @@
+import {
+  isRuleOriginal,
+  type RuleOwnedEvidence,
+  type RuleOriginalRead,
+} from '../domain/ruleReadCoverage.js';
 import { randomUUID, createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { Store, ownerId } from '../store.js';
@@ -278,7 +283,8 @@ export class RuleStore {
     raw: unknown,
     transportRequestId: string,
     lookup: RuleLookup,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    evidence?: RuleOwnedEvidence
   ): Promise<RuleRead> {
     if (!transportRequestId.length || transportRequestId.length > RULE_LIMITS.tokenChars)
       throw new Problem(422, 'rules_transport_invalid', 'Invalid transport request identity');
@@ -324,7 +330,9 @@ export class RuleStore {
       if (prior.rows[0]) {
         if (prior.rows[0].argument_digest !== argumentDigest)
           throw conflict('Transport request identity reused with changed arguments');
-        return this.readFromRow(prior.rows[0]);
+        const saved = this.readFromRow(prior.rows[0]);
+        if (tool === 'rules_search') lookup.restoreSearch(system, saved.payload);
+        return saved;
       }
       await client.query(
         'INSERT INTO turn_rule_budgets(turn_id,campaign_id) VALUES($1,$2) ON CONFLICT(turn_id) DO NOTHING',
@@ -334,11 +342,47 @@ export class RuleStore {
         'SELECT requests,transcript_bytes FROM turn_rule_budgets WHERE turn_id=$1 FOR UPDATE',
         [turn.id]
       );
+      let supplied: RuleOriginalRead[] | undefined;
+      if (tool === 'rules_search' && evidence) {
+        if (
+          !evidence.scope ||
+          !transportRequestId.startsWith(evidence.scope) ||
+          new Set(evidence.receiptIds).size !== evidence.receiptIds.length
+        )
+          throw new Problem(422, 'rules_evidence_invalid', 'Invalid execution evidence scope');
+        const rows = evidence.receiptIds.length
+          ? await client.query(
+              'SELECT * FROM turn_rule_reads WHERE turn_id=$1 AND id=ANY($2::uuid[])',
+              [turn.id, evidence.receiptIds]
+            )
+          : { rows: [] };
+        const reads = rows.rows.map((r) => this.readFromRow(r));
+        if (
+          reads.length !== evidence.receiptIds.length ||
+          reads.some(
+            (r) =>
+              r.campaignId !== turn.campaignId ||
+              !r.transportRequestId.startsWith(evidence.scope) ||
+              r.tool !== 'rules_get' ||
+              r.context.systemId !== system.systemId ||
+              r.context.revision !== system.revision ||
+              r.context.contentHash !== system.contentHash ||
+              r.payload.receipt !== r.id ||
+              !isRuleOriginal(r.payload)
+          )
+        )
+          throw new Problem(
+            422,
+            'rules_evidence_invalid',
+            'Supplied evidence must be successful originals delivered within this execution'
+          );
+        supplied = reads.map((r) => r.payload);
+      }
       const id = randomUUID();
       let payload: Record<string, unknown>;
       try {
         // Pagination bounds each result; accumulated audit bytes never block another read.
-        payload = lookup.execute(system, tool, raw, id);
+        payload = lookup.execute(system, tool, raw, id, RULE_LIMITS.resultBytes, supplied);
       } catch (error) {
         if (!(error instanceof Problem || error instanceof ZodError)) throw error;
         payload = {

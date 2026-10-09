@@ -367,3 +367,208 @@ test('paths use own properties, derived summary matches cannot supply original l
     /byte limit/
   );
 });
+
+test('combined lookup delivers the located Unicode tail and restores persisted search locators after restart', async () => {
+  const system = fixture();
+  const lookup = new RuleLookup();
+  const search = lookup.execute(system, 'rules_search', { query: 'needle original' }, randomUUID());
+  const hit = (
+    search.entries as {
+      path: string;
+      locator: string;
+      matchWindow: { start: number; end: number };
+    }[]
+  )[0]!;
+  assert.ok(hit.matchWindow.start > 100000);
+  const fresh = new RuleLookup();
+  fresh.restoreSearch(system, search);
+  const restored = fresh.execute(
+    system,
+    'rules_get',
+    { path: hit.path, locator: hit.locator },
+    randomUUID()
+  );
+  assert.equal(restored.start, hit.matchWindow.start);
+  assert.match(restored.text as string, /needle original/);
+  assert.equal(restored.complete, true);
+  assert.deepEqual(restored.pages, {
+    precision: 'exact',
+    pdfPages: [1, 2],
+    printedPages: ['3', '4'],
+  });
+  const result = await findRules(
+    async (tool, input) => lookup.execute(system, tool, input, randomUUID()),
+    { query: 'needle original' },
+    'located',
+    async () => {}
+  );
+  assert.match(result.reads[0]!.text as string, /needle original/);
+  assert.equal(result.suppliedOriginals[0]!.originalComplete, false);
+  assert.throws(
+    () =>
+      fresh.execute(
+        { ...system, contentHash: 'b'.repeat(64) },
+        'rules_get',
+        { path: hit.path, locator: hit.locator },
+        randomUUID()
+      ),
+    /changed/
+  );
+});
+test('search captures minimal covering evidence before its existing byte-budget pagination', () => {
+  const system = fixture();
+  const lookup = new RuleLookup();
+  const search = lookup.execute(system, 'rules_search', { query: 'needle original' }, randomUUID());
+  const hit = (search.entries as { path: string; locator: string }[])[0]!;
+  const original = lookup.execute(
+    system,
+    'rules_get',
+    { path: hit.path, locator: hit.locator },
+    randomUUID()
+  );
+  const captured = lookup.execute(
+    system,
+    'rules_search',
+    { query: 'needle original' },
+    randomUUID(),
+    RULE_LIMITS.resultBytes,
+    [original]
+  );
+  assert.equal(captured.suppliedEvidenceCaptured, true);
+  assert.equal((captured.entries as { matchSupplied: boolean }[])[0]!.matchSupplied, true);
+  assert.ok(serializedBytes(captured) <= RULE_LIMITS.resultBytes);
+  const empty = lookup.execute(
+    system,
+    'rules_search',
+    { query: 'needle original' },
+    randomUUID(),
+    RULE_LIMITS.resultBytes,
+    []
+  );
+  assert.equal(empty.suppliedEvidenceCaptured, true);
+  assert.notEqual((empty.entries as { matchSupplied?: boolean }[])[0]!.matchSupplied, true);
+});
+
+test('filtered corpus rarity and lexical quality preserve exact names and shallow mutable snapshots', () => {
+  const system = fixture();
+  const template = ruleNodeAt(system, 'core_rules.example.deep');
+  system.core_rules.example!.children = {
+    rare: { ...template, name: 'Rule', text: 'Wounds.', pageSpans: [] },
+    common: { ...template, name: 'Rule', text: 'Check '.repeat(30), pageSpans: [] },
+    ...Object.fromEntries(
+      Array.from({ length: 10 }, (_, i) => [
+        'filler_' + i,
+        { ...template, name: 'Other', text: 'Check.', pageSpans: [] },
+      ])
+    ),
+  };
+  const lookup = new RuleLookup();
+  const search = () =>
+    lookup.execute(system, 'rules_search', { query: 'check wound' }, randomUUID());
+  const entries = search().entries as Record<string, unknown>[];
+  assert.equal(entries[0]!.path, 'core_rules.example.rare');
+  assert.equal(entries[0]!.matchQuality, 'partial');
+  assert.equal(
+    lookup.execute(system, 'rules_search', { query: 'Rule' }, randomUUID()).entries instanceof
+      Array,
+    true
+  );
+  Object.freeze(system); // Nested content is deliberately mutable: no snapshot cache is valid.
+  system.core_rules.example!.children.rare!.text = 'Unrelated.';
+  assert.ok(
+    !(search().entries as Record<string, unknown>[]).some(
+      (e) => e.path === 'core_rules.example.rare'
+    )
+  );
+  system.core_rules.example!.children.rare!.aliases.push('check wound');
+  assert.equal((search().entries as Record<string, unknown>[])[0]!.matchQuality, 'exact');
+  const filtered = lookup.execute(
+    system,
+    'rules_search',
+    { query: 'check wound', source: 'missing' },
+    randomUUID()
+  );
+  assert.deepEqual(filtered.entries, []);
+});
+
+test('oversized minimal receipt coverage falls back to an ordinary bounded located descriptor', () => {
+  const system = fixture();
+  const lookup = new RuleLookup();
+  const base = lookup.execute(system, 'rules_search', { query: 'needle original' }, randomUUID());
+  const entry = (
+    base.entries as { path: string; matchWindow: { start: number; end: number } }[]
+  )[0]!;
+  const reads = Array.from({ length: entry.matchWindow.end - entry.matchWindow.start }, (_, i) => ({
+    receipt: randomUUID(),
+    revision: system.revision,
+    contentHash: system.contentHash,
+    path: entry.path,
+    view: 'text',
+    structural: false,
+    start: entry.matchWindow.start + i,
+    end: entry.matchWindow.start + i + 1,
+    text: 'x',
+    complete: false,
+    cursor: null,
+  }));
+  const result = lookup.execute(
+    system,
+    'rules_search',
+    { query: 'needle original' },
+    randomUUID(),
+    RULE_LIMITS.resultBytes,
+    reads
+  );
+  assert.equal(result.suppliedEvidenceCaptured, true);
+  const hit = (result.entries as Record<string, unknown>[])[0]!;
+  assert.equal(hit.matchSupplied, undefined);
+  assert.equal(hit.suppliedOriginals, undefined);
+  assert.equal(typeof hit.locator, 'string');
+  assert.ok(serializedBytes(result) <= RULE_LIMITS.resultBytes);
+});
+
+test('rarity statistics follow the filtered immutable corpus rather than the whole library', () => {
+  const system = fixture();
+  const template = ruleNodeAt(system, 'core_rules.example.deep');
+  system.core_rules.example!.children = {
+    alpha: { ...template, name: 'Rule', text: 'Alpha.', pageSpans: [] },
+    beta: { ...template, name: 'Rule', text: 'Beta.', pageSpans: [] },
+    ...Object.fromEntries(
+      Array.from({ length: 10 }, (_, i) => [
+        'alpha_fill_' + i,
+        { ...template, name: 'Rule', text: 'Alpha.', pageSpans: [] },
+      ])
+    ),
+    ...Object.fromEntries(
+      Array.from({ length: 100 }, (_, i) => [
+        'beta_fill_' + i,
+        { ...template, name: 'Rule', source: 'other', text: 'Beta.', pageSpans: [] },
+      ])
+    ),
+  };
+  const freeze = (value: unknown): void => {
+    if (value && typeof value === 'object') {
+      Object.values(value).forEach(freeze);
+      Object.freeze(value);
+    }
+  };
+  freeze(system);
+  const lookup = new RuleLookup();
+  const query = { query: 'alpha beta' };
+  const first = lookup.execute(system, 'rules_search', query, randomUUID());
+  assert.equal((first.entries as { path: string }[])[0]!.path, 'core_rules.example.alpha');
+  const filtered = lookup.execute(
+    system,
+    'rules_search',
+    { ...query, source: 'example' },
+    randomUUID()
+  );
+  assert.equal((filtered.entries as { path: string }[])[0]!.path, 'core_rules.example.beta');
+  const repeated = lookup.execute(
+    system,
+    'rules_search',
+    { ...query, source: 'example' },
+    randomUUID()
+  );
+  assert.equal((repeated.entries as { path: string }[])[0]!.path, 'core_rules.example.beta');
+});

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { remapRuleSearchEvidence } from '../domain/ruleReadArchive.js';
 import { createHash } from 'node:crypto';
 import { canonicalRuleJson } from '../domain/rules.js';
 import { ruleContextSchema, ruleReadSchema } from '../domain/rules.js';
@@ -133,6 +134,7 @@ export function remapNpcPreparation(
       read.campaignId = mapped(read.campaignId);
       read.turnId = mapped(read.turnId);
       read.payload.receipt = read.id;
+      if (read.tool === 'rules_search') remapRuleSearchEvidence(read.payload, mapped);
       read.resultHash = createHash('sha256').update(canonicalRuleJson(read.payload)).digest('hex');
     }
   }

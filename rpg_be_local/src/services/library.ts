@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { npcArgumentDigest } from './npcPreparation.js';
 import { operationExplanationSchema } from '../domain/operationExplanations.js';
+import { remapRuleSearchEvidence, validateRuleSearchEvidence } from '../domain/ruleReadArchive.js';
 import {
   frozenCampaignSourcesSchema,
   CAMPAIGN_SOURCE_SEARCH_TOOL_NAME,
@@ -1062,6 +1063,7 @@ export function remapArchive(raw: unknown): Archive {
       )
         throw new Problem(422, 'archive_invalid', 'Rule receipt provenance or hash is invalid');
     }
+    validateRuleSearchEvidence(reads);
     if (captured)
       validateRuleCitations(
         { ruleCitations: turn.ruleCitations ?? [] },
@@ -1350,6 +1352,7 @@ export function remapArchive(raw: unknown): Archive {
       read.campaignId = out.campaign.id;
       read.turnId = mapped(t.id);
       read.payload.receipt = read.id;
+      if (read.tool === 'rules_search') remapRuleSearchEvidence(read.payload, mapped);
       read.resultHash = createHash('sha256').update(canonicalRuleJson(read.payload)).digest('hex');
     }
     for (const citation of t.ruleCitations ?? []) citation.receiptId = mapped(citation.receiptId);

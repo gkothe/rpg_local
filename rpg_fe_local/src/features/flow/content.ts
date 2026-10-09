@@ -580,17 +580,27 @@ export const tools: FlowTool[] = [
       'Find relevant book rules and read original text in one request.',
       'Preferred first lookup in new book turns.',
       'A query, optional source/columns and search continuation cursor.',
-      'Supplied originals with titles, whole-section completeness and exact continuation arguments, search metadata, up to three original-text receipts, and unread paths.',
+      'Supplied original receipt spans, located match windows and lexical match quality, up to three selected original-text reads, exact continuation arguments and alternative paths.',
       'Saves ordinary rules_search/rules_get receipts, each guarded independently.',
       '5.4',
       ['rpg_be_local/src/providers/rulesFind.ts', 'rpg_be_local/src/services/ruleLookup.ts'],
-      'The first three reads are a retrieval page, not a call limit. Inspect suppliedOriginals first: originalComplete identifies a whole section, while complete alone can describe a later page. Reuse returned originals and receipts; identify the missing fact before further discovery and copy suppliedOriginals.nextRead to continue partial text. Copy paths exactly from tool results. Intentional rereads remain available. Historical frozen tool sets remain unchanged.'
+      'Reads start at the search locator. Select up to three ranked readable hits before reuse; when readable exact-title/alias hits exist, select only those. Reused hits keep their slots without backfilling weaker alternatives. matchSupplied means delivered receipt spans cover matchWindow; alreadySupplied alone means only some text was delivered. originalComplete identifies a whole section, while complete alone can describe a later page. Identify the missing fact internally before further lookup, inspect partial matches and reformulate when needed. Copy suppliedOriginals.nextRead for continuation or deliberately read an alternative. The initial page is not a call limit. Intentional verification and rereads remain available.'
     ),
     bookOnly: true,
     args: { query: 'crossing', columns: ['core_rules'] },
     result: {
       search: {
-        entries: [{ path: ruleResult.path, name: 'Crossing', readableOriginal: true }],
+        entries: [
+          {
+            path: ruleResult.path,
+            name: 'Crossing',
+            readableOriginal: true,
+            locator: 'illustrated-crossing-original-window',
+            matchWindow: { start: ruleResult.start, end: ruleResult.end },
+            matchQuality: 'exact',
+            exactTitle: true,
+          },
+        ],
         cursor: null,
       },
       reads: [ruleResult],
@@ -624,7 +634,7 @@ export const tools: FlowTool[] = [
       'The search text or book section path, with options for which information to return.',
       name === 'rules_get'
         ? 'Original text, its position and pages in the book, and the ID of the saved read receipt.'
-        : 'Section lists or search results that help the model find original text. Search prefers exact titles, then direct matches, distinct term coverage, title coverage and readability. Snippets show the densest matching 160-character original window. The model must read original text before citing a rule.',
+        : 'Section lists or search results that locate original text. Exact titles/aliases lead; direct evidence precedes summary-only matches. Ranking rewards rare terms, compact coverage and contiguous phrases. matchQuality describes lexical support, not correctness; partial matches remain available. matchWindow and locator identify an original passage, while snippets remain navigation. Read original text before citing a rule.',
       "The app's rule service reads PostgreSQL and saves a receipt for each call, including navigation calls and errors.",
       '5.4',
       ['rpg_be_local/src/services/ruleStore.ts', 'rpg_be_local/src/domain/rules.ts'],

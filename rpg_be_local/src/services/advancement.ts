@@ -439,6 +439,12 @@ export class AdvancementService {
         if (old.rows[0]) {
           if (old.rows[0].argument_digest !== argumentDigest)
             throw conflict('Lookup identity reused with different arguments');
+          if (name === 'rules_search') {
+            const rules = await this.rules.resolve(await this.store.campaign(campaignId));
+            if (digest(ruleContext(rules)) !== digest(cap.rules))
+              throw conflict('Rules changed during review');
+            lookup.restoreSearch(rules, old.rows[0].payload);
+          }
           return old.rows[0].payload;
         }
         const receiptId = randomUUID();

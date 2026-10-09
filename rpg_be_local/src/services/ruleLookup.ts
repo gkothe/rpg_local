@@ -1,9 +1,13 @@
+import { ruleReadCoverage, type RuleOriginalRead } from '../domain/ruleReadCoverage.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { Problem } from '../errors.js';
 import {
   compareRuleMatches,
   rankRuleNode,
+  ruleCorpusTerms,
+  ruleTokens,
+  ruleQueryTerms,
   RULE_SEARCH_SNIPPET_CHARS,
 } from '../domain/ruleSearch.js';
 import {
@@ -76,6 +80,80 @@ type SearchHit = { path: string; node: RuleNode } & ReturnType<typeof rankRuleNo
 const searchCaches = new WeakMap<RuleSystem, Map<string, SearchHit[]>>();
 const MAX_SEARCH_CACHE_QUERIES = 8;
 const MAX_SEARCH_CACHE_HITS = 4096;
+const immutableSystems = new WeakSet<RuleSystem>();
+const corpusCaches = new WeakMap<
+  RuleSystem,
+  Map<
+    string,
+    {
+      candidates: { path: string; node: RuleNode; index: ReturnType<typeof ruleTokens> }[];
+      weights: Map<string, number>;
+    }
+  >
+>();
+const MAX_CORPUS_CACHE_FILTERS = 8;
+function immutableSnapshot(system: RuleSystem): boolean {
+  if (immutableSystems.has(system)) return true;
+  function frozen(value: unknown): boolean {
+    if (!value || typeof value !== 'object') return true;
+    return Object.isFrozen(value) && Object.values(value).every(frozen);
+  }
+  if (!frozen(system)) return false;
+  immutableSystems.add(system);
+  return true;
+}
+function corpus(
+  system: RuleSystem,
+  columns: readonly string[] | undefined,
+  source: string | undefined,
+  immutable: boolean,
+  query: string
+) {
+  const key = JSON.stringify({ columns: columns ? [...columns].sort() : null, source });
+  let cache = immutable ? corpusCaches.get(system) : undefined;
+  const old = cache?.get(key);
+  if (old) return old;
+  const queryTerms = ruleQueryTerms(query);
+  const selected = new Set(queryTerms);
+  const candidates = nodes(system)
+    .filter(
+      ({ path, node }) =>
+        (!columns || columns.includes(path.split('.')[0]!)) && (!source || node.source === source)
+    )
+    .map((candidate) => ({
+      ...candidate,
+      index: ruleTokens(candidate.node, immutable ? undefined : selected),
+    }));
+  const frequencies = new Map<string, number>();
+  for (const { node, index } of candidates) {
+    const terms = immutable
+      ? ruleCorpusTerms(node, index)
+      : queryTerms.filter(
+          (term) =>
+            index.titleTokens.has(term) ||
+            index.directTokens.has(term) ||
+            index.summaryTokens.has(term)
+        );
+    for (const term of terms) frequencies.set(term, (frequencies.get(term) ?? 0) + 1);
+  }
+  const weights = new Map(
+    [...frequencies].map(([term, count]) => [
+      term,
+      1 + Math.log((candidates.length + 1) / (count + 1)),
+    ])
+  );
+  const result = { candidates, weights };
+  if (immutable) {
+    if (!cache) {
+      cache = new Map();
+      corpusCaches.set(system, cache);
+    }
+    if (cache.size >= MAX_CORPUS_CACHE_FILTERS) cache.delete(cache.keys().next().value!);
+    cache.set(key, result);
+  }
+  return result;
+}
+
 function digest(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
@@ -155,6 +233,46 @@ export class RuleLookup {
       this.positions.delete(this.positions.keys().next().value!);
     return key;
   }
+  /** Authenticated persisted searches may rehydrate their original opaque locator keys. */
+  restoreSearch(system: RuleSystem, payload: Record<string, unknown>): void {
+    if (payload.error || !Array.isArray(payload.entries)) return;
+    if (payload.contentHash !== system.contentHash)
+      throw new Problem(409, 'rules_context_changed', 'Rule content changed; restart this lookup');
+    for (const entry of payload.entries) {
+      if (!entry?.locator || !entry.matchWindow) continue; // Legacy metadata cannot establish an offset.
+      const window = entry.matchWindow;
+      const node = ruleNodeAt(system, entry.path);
+      if (
+        !token.safeParse(entry.locator).success ||
+        !Number.isInteger(window.start) ||
+        !Number.isInteger(window.end) ||
+        window.start < 0 ||
+        window.end <= window.start ||
+        window.end > node.text.length ||
+        node.structural ||
+        entry.derived ||
+        entry.source !== node.source ||
+        entry.snippet !== node.text.slice(window.start, window.end) ||
+        /[\uDC00-\uDFFF]/.test(node.text[window.start]!) ||
+        (window.end < node.text.length && /[\uD800-\uDBFF]/.test(node.text[window.end - 1]!))
+      )
+        throw new Problem(
+          422,
+          'rules_locator_invalid',
+          'Saved search locator does not match original text'
+        );
+      this.positions.set(entry.locator, {
+        systemId: system.systemId,
+        revision: system.revision,
+        hash: system.contentHash,
+        argumentHash: digest({ tool: 'rules_get', path: entry.path, view: 'text' }),
+        offset: window.start,
+        locator: true,
+      });
+      if (this.positions.size > MAX_LOOKUP_TOKENS)
+        this.positions.delete(this.positions.keys().next().value!);
+    }
+  }
   private offset(
     system: RuleSystem,
     key: string | undefined,
@@ -167,6 +285,8 @@ export class RuleLookup {
       throw new Problem(409, 'cursor_expired', 'Paging token expired; restart this lookup');
     if (position.systemId !== system.systemId)
       throw new Problem(409, 'rules_context_changed', 'Rule system changed; restart this lookup');
+    if (position.hash !== system.contentHash)
+      throw new Problem(409, 'rules_context_changed', 'Rule content changed; restart this lookup');
     if (position.argumentHash !== argumentHash || position.locator !== locator)
       throw new Problem(422, 'rules_cursor_invalid', 'Token does not match this lookup');
     return position.offset;
@@ -176,7 +296,8 @@ export class RuleLookup {
     tool: RuleTool,
     raw: unknown,
     receiptId: string,
-    allowance: number = RULE_LIMITS.resultBytes
+    allowance: number = RULE_LIMITS.resultBytes,
+    suppliedEvidence?: readonly RuleOriginalRead[]
   ): Record<string, unknown> {
     if (serializedBytes(raw) > RULE_LIMITS.requestBytes)
       throw new Problem(422, 'rules_request_limit', 'Rule request byte limit exceeded');
@@ -187,6 +308,9 @@ export class RuleLookup {
     const argumentHash = digest({ tool, ...normalized });
     const budget = Math.min(allowance, RULE_LIMITS.resultBytes);
     const envelope = {
+      ...(tool === 'rules_search' && suppliedEvidence !== undefined
+        ? { suppliedEvidenceCaptured: true }
+        : {}),
       revision: system.revision,
       contentHash: system.contentHash,
       receipt: receiptId,
@@ -301,21 +425,27 @@ export class RuleLookup {
     } else {
       const args = ruleToolSchemas.rules_search.parse(input);
       cap = RULE_LIMITS.searchHits;
-      let cache = Object.isFrozen(system) ? searchCaches.get(system) : undefined;
-      if (Object.isFrozen(system) && !cache) {
+      const immutable = immutableSnapshot(system);
+      let cache = immutable ? searchCaches.get(system) : undefined;
+      if (immutable && !cache) {
         cache = new Map();
         searchCaches.set(system, cache);
       }
       let hits = cache?.get(argumentHash);
       if (!hits) {
-        hits = nodes(system)
-          .filter(
-            ({ path, node }) =>
-              (!args.columns ||
-                args.columns.includes(path.split('.')[0] as (typeof RULE_COLUMNS)[number])) &&
-              (!args.source || node.source === args.source)
-          )
-          .map(({ path, node }) => ({ path, node, ...rankRuleNode(node, args.query) }))
+        const { candidates, weights } = corpus(
+          system,
+          args.columns,
+          args.source,
+          immutable,
+          args.query
+        );
+        hits = candidates
+          .map(({ path, node, index }) => ({
+            path,
+            node,
+            ...rankRuleNode(node, args.query, weights, index),
+          }))
           .filter((hit) => hit.found)
           .sort(
             (a, b) =>
@@ -333,27 +463,53 @@ export class RuleLookup {
           cache.set(argumentHash, hits);
         }
       }
-      entries = hits.map(({ path, node, derived, matchedTerms, exactTitle, snippetStart }) => {
-        let start = snippetStart;
-        if (start && /[\uDC00-\uDFFF]/.test(node.text[start]!)) start--;
-        locatorOffsets.set(path, start);
-        let end = Math.min(node.text.length, start + RULE_SEARCH_SNIPPET_CHARS);
-        if (end < node.text.length && /[\uD800-\uDBFF]/.test(node.text[end - 1]!)) end--;
-        return {
-          path,
-          name: node.name,
-          source: node.source,
-          review: node.review,
-          derived,
-          matchedTerms,
-          exactTitle,
-          readableOriginal: !node.structural && node.text.length > 0,
-          snippet: derived ? (node.summary ?? '').slice(0, 120) : node.text.slice(start, end),
-          locator: !derived && node.text.length ? 'x'.repeat(32) : null,
-          pages: ruleWindowPages(node, start, end),
-        };
-      });
+      entries = hits.map(
+        ({ path, node, derived, matchedTerms, exactTitle, snippetStart, matchQuality }) => {
+          let start = snippetStart;
+          if (start && /[\uDC00-\uDFFF]/.test(node.text[start]!)) start--;
+          locatorOffsets.set(path, start);
+          let end = Math.min(node.text.length, start + RULE_SEARCH_SNIPPET_CHARS);
+          if (end < node.text.length && /[\uD800-\uDBFF]/.test(node.text[end - 1]!)) end--;
+          return {
+            path,
+            name: node.name,
+            source: node.source,
+            review: node.review,
+            derived,
+            matchedTerms,
+            exactTitle,
+            matchQuality,
+            ...(!derived && !node.structural && node.text.length
+              ? { matchWindow: { start, end } }
+              : {}),
+            readableOriginal: !node.structural && node.text.length > 0,
+            snippet: derived ? (node.summary ?? '').slice(0, 120) : node.text.slice(start, end),
+            locator: !derived && !node.structural && node.text.length ? 'x'.repeat(32) : null,
+            pages: ruleWindowPages(node, start, end),
+          };
+        }
+      );
     }
+    if (tool === 'rules_search' && suppliedEvidence !== undefined)
+      entries = entries.map((entry) => {
+        const coverage = ruleReadCoverage(
+          entry,
+          system.revision,
+          system.contentHash,
+          suppliedEvidence
+        );
+        if (!coverage.alreadySupplied) return entry;
+        const annotated = { ...entry, ...coverage };
+        return serializedBytes({
+          ...envelope,
+          entries: [annotated],
+          complete: false,
+          omitted: true,
+          cursor: 'x'.repeat(32),
+        }) <= budget
+          ? annotated
+          : entry;
+      });
     const start = this.offset(system, cursor, argumentHash);
     const result = { ...envelope, entries: [] as Record<string, unknown>[] };
     let index = start;

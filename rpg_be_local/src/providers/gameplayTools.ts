@@ -1,3 +1,4 @@
+import type { RuleDeliveredEvidence } from '../domain/ruleReadCoverage.js';
 import { z } from 'zod';
 import {
   NPC_PREPARE_TOOL_NAME,
@@ -86,6 +87,7 @@ export type GameplayToolRegistration = {
   purpose: 'default' | 'book';
   capability: 'dice' | 'rules' | 'knowledge' | 'sources' | 'characters' | 'history';
   handler: (input: unknown, requestId: string | number) => Promise<GameplayToolResult>;
+  delivered?: (result: GameplayToolResult) => void;
   invalid?: (input: unknown, requestId: string | number) => Promise<GameplayToolResult>;
 };
 function definition(registration: GameplayToolRegistration): GameplayToolDefinition {
@@ -199,22 +201,24 @@ function ownedRegistrations(
         (name === 'rules_get'
           ? 'Read bounded direct original text or derived fields. Only direct text receipts support citations.'
           : 'Discover current rule paths and derived navigation metadata. Results are not ruling authority.') +
-        ' Reuse suppliedOriginals receipt locators when alreadySupplied; originalComplete means the whole section was delivered, while complete may describe a later page. Intentional verification and rereads remain available.',
+        ' Identify the specific missing fact before discovery. Use known paths and nextRead for continuation. Reuse suppliedOriginals when matchSupplied covers the located window; originalComplete means the whole section was delivered, while complete may describe a later page. matchQuality is lexical support, not rule certainty; inspect partial matches and prerequisites. Intentional verification and rereads remain available.',
       schema: ruleToolSchemas[name],
       purpose: 'book',
       capability: 'rules',
       handler: (input, id) => ruleRead!(name, input, JSON.stringify(id)),
+      delivered: (result) => ruleRead!.delivered(result as Record<string, unknown>),
       invalid: (input, id) => ruleRead!(name, input, JSON.stringify(id)),
     })),
     {
       name: RULE_FIND_TOOL_NAME,
       description:
-        'Find relevant book rules and read up to three eligible originals in one call. Inspect suppliedOriginals first: titles and originalComplete identify whole sections already delivered with citable receipts. Identify the specific missing fact before further discovery; reuse delivered originals rather than rediscovering their paths. Follow nextRead for partial text and search cursors or unreadPaths for more rules. Intentional verification and rereads remain available. Search metadata alone is not authority.',
+        'Find relevant book rules and read up to three selected originals at their located passages. Exact names select exact hits; reused slots do not automatically open weaker alternatives. Inspect suppliedOriginals first: matchSupplied covers a matchWindow, while originalComplete identifies a whole section. Identify the specific missing fact before further discovery; use known paths and delivered receipts. Follow nextRead for continuation or unreadPaths/search cursors for intentional alternatives. matchQuality describes lexical support, not rule certainty; inspect partial matches, prerequisites and exceptions. Intentional verification and rereads remain available. Search metadata alone is not authority.',
       schema: ruleToolSchemas.rules_search,
       purpose: 'book',
       capability: 'rules',
       handler: (input: unknown, id: string | number) =>
         findRules(ruleRead!, input, id, assertActive),
+      delivered: (result) => ruleRead!.delivered(result as Record<string, unknown>),
     },
     {
       name: KNOWLEDGE_SEARCH_TOOL_NAME,
@@ -270,7 +274,8 @@ export class GameplayTools {
       read?: (
         tool: RuleTool,
         input: unknown,
-        requestId: string
+        requestId: string,
+        evidence?: RuleDeliveredEvidence
       ) => Promise<Record<string, unknown>>;
       assertActive: () => Promise<void>;
       signal?: AbortSignal;
@@ -358,6 +363,7 @@ export class GameplayTools {
           })();
     if (this.options.signal?.aborted)
       throw new Problem(409, 'cancelled', 'Gameplay attempt cancelled');
+    registration.delivered?.(result);
     this.receipts.set(key, { identity, result });
     return result;
   }

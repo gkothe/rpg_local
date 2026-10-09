@@ -515,3 +515,6 @@ export function validateRuleContent(content: RuleContent, kind: RuleSystemKind):
     throw new Error('System byte limit exceeded');
   return content;
 }
+
+export const RULE_MATCH_QUALITIES = ['exact', 'strong', 'partial'] as const;
+export type RuleMatchQuality = (typeof RULE_MATCH_QUALITIES)[number];

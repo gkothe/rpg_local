@@ -592,7 +592,7 @@ export class TurnService {
               sourceLookup.read(t, tool, input, `repair:${attempt}:${requestId}`, ctl.signal),
             signal: ctl.signal,
             roll: (input) => dice.roll(t.diceSessionId!, t, input),
-            read: async (tool, input, requestId) =>
+            read: async (tool, input, requestId, evidence) =>
               (
                 await rules.read(
                   t,
@@ -600,7 +600,8 @@ export class TurnService {
                   input,
                   `repair:${attempt}:${requestId}`,
                   lookup,
-                  ctl.signal
+                  ctl.signal,
+                  evidence ? { ...evidence, scope: `repair:${attempt}:` } : undefined
                 )
               ).payload,
             assertActive: async () => {

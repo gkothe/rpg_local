@@ -90,7 +90,12 @@ test('combined rule lookup example identifies originals already supplied without
         assert.deepEqual(input, example.args);
         return example.result.search;
       }
-      assert.deepEqual(input, { path: example.result.reads[0].path, view: 'text' });
+      assert.deepEqual(input, {
+        path: example.result.reads[0].path,
+        view: 'text',
+        locator: example.result.search.entries[0].locator,
+      });
+      assert.ok(input.locator, 'The example must read at the returned search locator');
       return example.result.reads[0];
     },
     example.args,

@@ -10,6 +10,12 @@ test('book guidance reuses delivered originals and identifies the missing fact b
   assert.match(prompt, /originalComplete means the entire section/);
   assert.match(prompt, /Identify the specific missing fact before further discovery/);
   assert.match(prompt, /Intentional verification and rereads remain allowed/);
+  assert.match(prompt, /matchSupplied means the located window is covered/);
+  assert.match(prompt, /alreadySupplied alone does not establish that coverage/);
+  assert.match(prompt, /matchQuality describes lexical support, never rule correctness/);
+  assert.match(prompt, /Inspect partial matches and reformulate around the missing fact/);
+  assert.match(prompt, /Another mechanic may need a separate lookup/);
+  assert.match(prompt, /Keep retrieval reasoning internal/);
   assert.doesNotMatch(gameplayInstructionEnvelope('', '', false), /originalComplete means/);
 });
 
