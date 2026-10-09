@@ -4,6 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { randomUUID } from 'node:crypto';
 import { startGameplayMcp } from '../src/providers/gameplayMcp.js';
+import { GAMEPLAY_ENVELOPE_BYTES } from '../src/providers/gameplayTools.js';
 import { ownedTools } from './ownedGameplayFixture.js';
 
 const definitions = ownedTools().definitions;
@@ -43,7 +44,7 @@ test('private MCP exposes only owned tools, serializes calls and closes its list
         await fetch(server.url, {
           method: 'POST',
           headers: server.headers,
-          body: 'x'.repeat(1_200_000),
+          body: 'x'.repeat(GAMEPLAY_ENVELOPE_BYTES + 1),
         }).catch((error: unknown) => {
           if ((error as { cause?: { code?: string } }).cause?.code === 'ECONNRESET')
             return { status: 413 };
@@ -209,7 +210,7 @@ test('MCP accepts large combat batches only for combat_prepare and keeps other t
     assert.equal((two as { result: { isError?: boolean } }).result.isError, true);
     assert.equal(calls.length, 2);
     assert.equal(
-      await rpc(endpoint.url, endpoint.headers, 'combat_prepare', batch(1_100_000)),
+      await rpc(endpoint.url, endpoint.headers, 'combat_prepare', batch(GAMEPLAY_ENVELOPE_BYTES)),
       413
     );
     // Other owned tools keep their 1 024-byte argument ceiling.

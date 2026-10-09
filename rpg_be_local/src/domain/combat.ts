@@ -124,12 +124,15 @@ export const draftCombatantSchema = z
   })
   .strict();
 export type DraftCombatant = z.infer<typeof draftCombatantSchema>;
+export const npcReceiptCombatantSchema = z
+  .object({ npcPreparationReceiptId: z.uuid(), label, trackedFields: trackedFieldsSchema })
+  .strict();
 export const combatPrepareSchema = z
   .object({
     localKey,
     encounterId: z.uuid().optional(),
     participants: z
-      .array(z.union([existingCombatantSchema, draftCombatantSchema]))
+      .array(z.union([existingCombatantSchema, draftCombatantSchema, npcReceiptCombatantSchema]))
       .min(1)
       .max(COMBAT_LIMITS.participants),
   })
@@ -138,7 +141,13 @@ export const combatPrepareSchema = z
     if (Buffer.byteLength(JSON.stringify(value), 'utf8') > COMBAT_PREPARATION_LIMITS.requestBytes)
       ctx.addIssue({ code: 'custom', message: 'Combat preparation exceeds its byte limit' });
     const ids = value.participants.flatMap((p) => ('characterId' in p ? [p.characterId] : []));
-    const keys = value.participants.flatMap((p) => ('localKey' in p ? [p.localKey] : []));
+    const keys = value.participants.flatMap((p) =>
+      'localKey' in p
+        ? [p.localKey]
+        : 'npcPreparationReceiptId' in p
+          ? [p.npcPreparationReceiptId]
+          : []
+    );
     if (!uniqueIds(ids) || !uniqueIds(keys))
       ctx.addIssue({ code: 'custom', message: 'A batch lists each individual once' });
   });

@@ -97,6 +97,7 @@ export function selectRepairEvidence(response: unknown, paths: ResponsePath[], e
     }
     if (row.op === 'state') includeState = includeCombat = true;
     if ('preparationReceiptId' in row) includeCombat = true;
+    if ('npcPreparationReceiptId' in row) fallbackReasons.add('prepared_npc_context');
     if ('operationIndex' in row) operation(row.operationIndex);
     if (
       (row.origin === 'source' || row.basis === 'source' || row.basis === 'rule') &&
@@ -107,6 +108,7 @@ export function selectRepairEvidence(response: unknown, paths: ResponsePath[], e
   };
 
   for (const path of paths) {
+    if (path[0] === 'continuityChanges') return broad('private_continuity_context');
     const [field, index] = path;
     const collection = candidate[String(field)];
     if (!Array.isArray(collection) || typeof index !== 'number' || !collection[index])

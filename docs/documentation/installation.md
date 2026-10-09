@@ -393,3 +393,7 @@ full backups can contain spoilers.
 
 The ignored root `log` directory contains prompts, responses and correlated traces.
 Treat these files as private campaign data and do not add them to a public repository.
+
+### Compact NPC creation
+
+Run normal database setup/migrations and restart after updating. Migrations 0022/0023 add frozen private NPC inputs and operational preparation receipts without publishing drafts. API providers can use the on-demand creator with existing settings. Native CLI creation requires `RPG_NPC_PREPARATION_NATIVE=1` in the project environment and restart; leave it unset until separately checking nested native creation/tool waits. That live check consumes provider allowance. Ordinary native gameplay remains available without this option. No extra NPC model installation or account is required. Default tests mock provider generation and use isolated test schemas.

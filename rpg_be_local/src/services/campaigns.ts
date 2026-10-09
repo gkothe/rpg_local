@@ -148,6 +148,12 @@ export class CampaignService {
     return this.store.edit(id, revision, (c) => {
       if (!c.characters.some((x) => x.id === characterId))
         throw new Problem(404, 'not_found', 'Character not found');
+      if (c.continuity?.npcProfiles.some((p) => p.characterId === characterId))
+        throw new Problem(
+          409,
+          'npc_profile_reference',
+          'Remove this NPC profile before deleting the character'
+        );
       assertCharacterRemovable(c.state, characterId);
       c.characters = c.characters.filter((x) => x.id !== characterId);
     });

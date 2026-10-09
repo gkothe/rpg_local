@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+import { npcArgumentDigest } from './npcPreparation.js';
 import { operationExplanationSchema } from '../domain/operationExplanations.js';
 import {
   frozenCampaignSourcesSchema,
@@ -6,6 +8,18 @@ import {
 } from '../domain/campaignSourceRecall.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
+import {
+  continuitySchema,
+  npcProfileSchema,
+  frozenContinuitySchema,
+  validateContinuity,
+} from '../domain/continuity.js';
+import { profileCollections, validateProfileLinks, remapProfile } from './continuityArchive.js';
+import {
+  npcPreparationArchiveSchema,
+  preparationArchiveRow,
+  remapNpcPreparation,
+} from './npcPreparationArchive.js';
 import { Store } from '../store.js';
 import { newCampaign } from '../domain/campaign.js';
 import type { Campaign, Archive, Snapshot, Memory } from '../domain/types.js';
@@ -122,6 +136,7 @@ const settings = z
   .strict();
 const campaign = z
   .object({
+    continuity: continuitySchema.optional(),
     ruleSystemId: uuid.nullable().optional(),
     ruleReference: ruleReferenceSchema.optional(),
     ruleResolution: z
@@ -213,6 +228,7 @@ const context = z
     diceSessionId: uuid.optional(),
     frozenKnowledge: frozenKnowledgeSchema.optional(),
     frozenHistory: frozenHistorySchema.optional(),
+    frozenContinuity: frozenContinuitySchema.optional(),
     sourceSpans: z.array(sourceSpanSchema).optional(),
     frozenSources: frozenCampaignSourcesSchema.optional(),
     sourceSelection: z
@@ -269,6 +285,8 @@ const turn = z
   .strict();
 const snapshot = z
   .object({
+    beforeContinuity: z.array(npcProfileSchema).optional(),
+    afterContinuity: z.array(npcProfileSchema).optional(),
     turnId: uuid,
     beforeCharacters: z.array(character),
     afterCharacters: z.array(character),
@@ -298,6 +316,7 @@ const archiveSchema = z
     memories: z.array(memory),
     diceSessions: z.array(diceSessionSchema).max(MAX_ARCHIVE_TURNS),
     diceRecords: z.array(diceRecordSchema).max(MAX_ARCHIVE_TURNS * DICE_LIMITS.slots),
+    npcPreparations: z.array(npcPreparationArchiveSchema).optional(),
     combatPreparations: z.array(combatPreparationArchiveSchema),
     combatPreparedCharacters: z.array(combatPreparedCharacterArchiveSchema),
     historyTurnVersions: z.array(historyVersionArchiveSchema).optional(),
@@ -453,6 +472,7 @@ export function remapArchive(raw: unknown): Archive {
   const archive = parsed;
   validateAdvancementArchive(archive.advancementReviews ?? [], archive.turns);
   const old = archive.campaign;
+  validateContinuity(old);
   const ids = new Map<string, string>();
   const register = (id: string) => {
     if (ids.has(id)) throw new Problem(422, 'archive_invalid', 'Duplicate entity ID in archive');
@@ -467,6 +487,7 @@ export function remapArchive(raw: unknown): Archive {
   archive.diceSessions.forEach((session) => register(session.id));
   archive.diceRecords.forEach((record) => register(record.id));
   archive.combatPreparations.forEach((prep) => register(prep.id));
+  (archive.npcPreparations ?? []).forEach((prep) => register(prep.id));
   for (const review of archive.advancementReviews ?? []) {
     register(review.id);
     review.awards.forEach((a) => register(a.id));
@@ -493,6 +514,7 @@ export function remapArchive(raw: unknown): Archive {
     ...archive.diceSessions.map((session) => session.id),
     ...archive.diceRecords.map((record) => record.id),
     ...archive.combatPreparations.map((prep) => prep.id),
+    ...(archive.npcPreparations ?? []).map((prep) => prep.id),
     ...archive.turns.flatMap((turn) => (turn.ruleReads ?? []).map((read) => read.id)),
     ...archive.turns.flatMap((turn) => (turn.sourceReads ?? []).map((read) => read.id)),
   ]);
@@ -546,6 +568,75 @@ export function remapArchive(raw: unknown): Archive {
     if (!ids.has(id)) ids.set(id, randomUUID());
     historicalCharacters.add(id);
   };
+  const profiles = [
+    ...profileCollections(old, archive.snapshots),
+    ...archive.diceSessions.map((s) => s.frozenContinuity?.npcProfiles ?? []),
+    ...archive.turns.map((t) => t.context?.frozenContinuity?.npcProfiles ?? []),
+  ];
+  profiles.forEach((p) => validateProfileLinks(p, characterLink, knowledgeIds));
+  const npcKeys = new Set<string>();
+  for (const prep of archive.npcPreparations ?? []) {
+    const key = prep.sessionId + ':' + prep.localKey;
+    if (
+      prep.campaignId !== old.id ||
+      !archive.diceSessions.some((s) => s.id === prep.sessionId) ||
+      !tids.has(prep.turnId) ||
+      !tids.has(prep.ownerTurnId) ||
+      npcKeys.has(key)
+    )
+      throw new Problem(422, 'archive_invalid', 'NPC preparation ownership/key is invalid');
+    const captured = prep.frozenInput.introductionEvidence;
+    const originTurn = archive.turns.find((t) => t.id === captured.turnId);
+    if (
+      captured.campaignId !== old.id ||
+      !originTurn ||
+      originTurn.diceSessionId !== prep.sessionId ||
+      prep.argumentDigest !== npcArgumentDigest(prep.frozenInput.arguments) ||
+      prep.localKey !== prep.frozenInput.arguments.localKey ||
+      captured.ruleReads.some(
+        (r) => !originTurn.ruleReads?.some((known) => isDeepStrictEqual(known, r))
+      )
+    )
+      throw new Problem(
+        422,
+        'archive_invalid',
+        'NPC preparation captured evidence is inconsistent'
+      );
+    const suppliedSpans = [
+      ...(originTurn.context?.sourceSpans ?? []),
+      ...(originTurn.sourceReads ?? []).flatMap((read) =>
+        read.payload.sourceSpan ? [read.payload.sourceSpan] : []
+      ),
+    ];
+    if (
+      captured.sourceSpans.some(
+        (span) => !suppliedSpans.some((known) => isDeepStrictEqual(known, span))
+      )
+    )
+      throw new Problem(422, 'archive_invalid', 'NPC preparation source evidence was not supplied');
+    validateKnowledgeEvidence(prep.frozenInput.introduction, captured);
+    if (prep.result && !isDeepStrictEqual(prep.result.introduction, prep.frozenInput.introduction))
+      throw new Problem(422, 'archive_invalid', 'NPC preparation introduction changed');
+    for (const id of [
+      ...(prep.frozenInput.arguments.relevantCharacterIds ?? []),
+      ...(prep.frozenInput.arguments.distinctFromCharacterIds ?? []),
+    ])
+      characterLink(id);
+    for (const id of prep.frozenInput.arguments.relevantKnowledgeIds ?? [])
+      if (!knowledgeIds.has(id))
+        throw new Problem(422, 'archive_invalid', 'NPC preparation links unknown knowledge');
+    npcKeys.add(key);
+    characterLink(prep.reservedCharacterId);
+    if (prep.result) {
+      if (
+        prep.result.receiptId !== prep.id ||
+        prep.result.characterId !== prep.reservedCharacterId ||
+        prep.result.profile.characterId !== prep.reservedCharacterId
+      )
+        throw new Problem(422, 'archive_invalid', 'NPC receipt identity mismatch');
+      validateProfileLinks([prep.result.profile], characterLink, knowledgeIds);
+    }
+  }
   const frozen: FrozenKnowledge[] = [
     // Advancement recipients can remain in history after their sheets are deleted.
     ...archive.diceSessions.flatMap((session) =>
@@ -766,12 +857,22 @@ export function remapArchive(raw: unknown): Archive {
                 'archive_invalid',
                 'Book knowledge requires its owning captured turn'
               );
+            const preparation = (archive.npcPreparations ?? []).find(
+              (p) =>
+                p.sessionId === event.diceSessionId &&
+                p.result &&
+                record.kind === 'npc' &&
+                record.characterIds.length === 1 &&
+                record.characterIds[0] === p.reservedCharacterId &&
+                isDeepStrictEqual(entry.evidence, p.result.introduction.evidence)
+            );
+            const trusted = preparation?.frozenInput.introductionEvidence;
             validateRuleCitations(
               { ruleCitations: [evidence.citation] },
-              event.ruleReads ?? [],
+              trusted?.ruleReads ?? event.ruleReads ?? [],
               old.id,
-              event.id,
-              captured
+              trusted?.turnId ?? event.id,
+              trusted?.ruleContext ?? captured
             );
           }
         }
@@ -928,6 +1029,9 @@ export function remapArchive(raw: unknown): Archive {
           !session.characterIds.includes(id) &&
           !archive.combatPreparedCharacters.some(
             (draft) => draft.id === id && draft.sessionId === session.id
+          ) &&
+          !(archive.npcPreparations ?? []).some(
+            (draft) => draft.sessionId === session.id && draft.result?.characterId === id
           )
       ) ||
       (record.rerollOf &&
@@ -1156,7 +1260,10 @@ export function remapArchive(raw: unknown): Archive {
     h.protectedSectionIds = h.protectedSectionIds.map(mapped);
     h.protectedMemoryIds = h.protectedMemoryIds.map(mapped);
   }
+  out.campaign.continuity?.npcProfiles.forEach((p) => remapProfile(p, mapped));
+  for (const prep of out.npcPreparations ?? []) remapNpcPreparation(prep, mapped);
   for (const session of out.diceSessions) {
+    session.frozenContinuity?.npcProfiles.forEach((p) => remapProfile(p, mapped));
     if (session.frozenHistory) remapFrozenHistory(session.frozenHistory);
     session.id = mapped(session.id);
     session.campaignId = mapped(session.campaignId);
@@ -1260,6 +1367,7 @@ export function remapArchive(raw: unknown): Archive {
       if (t.context.diceSessionId) t.context.diceSessionId = mapped(t.context.diceSessionId);
       if (t.context.frozenKnowledge) remapFrozen(t.context.frozenKnowledge);
       if (t.context.frozenHistory) remapFrozenHistory(t.context.frozenHistory);
+      t.context.frozenContinuity?.npcProfiles.forEach((p) => remapProfile(p, mapped));
       for (const span of t.context.sourceSpans ?? []) span.id = mapped(span.id);
       t.context.sourceVersions = t.context.sourceVersions.map((source) => ({
         ...source,
@@ -1271,6 +1379,8 @@ export function remapArchive(raw: unknown): Archive {
     }
   }
   for (const snapshot of out.snapshots) {
+    snapshot.beforeContinuity?.forEach((p) => remapProfile(p, mapped));
+    snapshot.afterContinuity?.forEach((p) => remapProfile(p, mapped));
     snapshot.beforeKnowledge?.forEach(remapKnowledge);
     snapshot.afterKnowledge?.forEach(remapKnowledge);
     snapshot.turnId = mapped(snapshot.turnId);
@@ -1398,6 +1508,12 @@ export class LibraryService {
         [id]
       );
       const combat = {
+        npcPreparations: (
+          await client.query(
+            'SELECT * FROM npc_preparations WHERE campaign_id=$1 ORDER BY created_at,id',
+            [id]
+          )
+        ).rows.map(preparationArchiveRow),
         combatPreparations: (
           await client.query(
             'SELECT * FROM combat_preparations WHERE campaign_id=$1 ORDER BY created_at,id',
@@ -1450,6 +1566,9 @@ export class LibraryService {
                 frozenKnowledge: row.frozen_knowledge,
                 ...(row.frozen_sources != null ? { frozenSources: row.frozen_sources } : {}),
                 ...(row.frozen_history != null ? { frozenHistory: row.frozen_history } : {}),
+                ...(row.frozen_continuity != null
+                  ? { frozenContinuity: row.frozen_continuity }
+                  : {}),
                 toolDefinitions: row.tool_definitions,
               }
             : {}),
@@ -1576,7 +1695,7 @@ export class LibraryService {
       for (const session of archive.diceSessions)
         await client.query(
           session.systemPrompt !== undefined
-            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13,$14)'
+            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history,frozen_continuity) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13,$14,$15)'
             : 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9)',
           [
             session.id,
@@ -1595,6 +1714,7 @@ export class LibraryService {
                   JSON.stringify(session.toolDefinitions),
                   session.frozenSources ? JSON.stringify(session.frozenSources) : null,
                   session.frozenHistory ? JSON.stringify(session.frozenHistory) : null,
+                  session.frozenContinuity ?? null,
                 ]
               : []),
           ]
@@ -1639,6 +1759,26 @@ export class LibraryService {
           ]
         );
       }
+      for (const prep of archive.npcPreparations ?? [])
+        await client.query(
+          'INSERT INTO npc_preparations(id,campaign_id,session_id,turn_id,owner_turn_id,local_key,argument_digest,frozen_input,provider_settings,reserved_character_id,status,result,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',
+          [
+            prep.id,
+            prep.campaignId,
+            prep.sessionId,
+            prep.turnId,
+            prep.ownerTurnId,
+            prep.localKey,
+            prep.argumentDigest,
+            prep.frozenInput,
+            prep.providerSettings,
+            prep.reservedCharacterId,
+            prep.status,
+            prep.result,
+            prep.createdAt,
+            prep.updatedAt,
+          ]
+        );
       for (const prep of archive.combatPreparations)
         await client.query(
           'INSERT INTO combat_preparations(id,campaign_id,session_id,turn_id,encounter_id,preparation_key,argument_digest,payload,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
@@ -1707,6 +1847,8 @@ export class LibraryService {
       delete setup.journal;
       delete setup.advancementReviews;
       delete setup.advancementPolicy;
+      delete setup.continuity;
+      delete setup.npcPreparations;
       const c = { ...newCampaign({ name: name ?? template.name }), ...setup } as Campaign;
       // Even an externally stored template cannot transplant another campaign's timeline.
       c.knowledge = [];

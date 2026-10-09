@@ -341,3 +341,16 @@ test('illustrated Journal correction matches real evidence, apply, projection an
   const section = journalExample.turns.map((turn) => turn.narrative).join(' ');
   assert.match(section, /sister of the temple/);
 });
+
+test('compact NPC creator teaching tool matches backend receipt contracts', async () => {
+  const { npcPrepareSchema, npcPreparationPayloadSchema, preparationOperations } =
+    await import('../../rpg_be_local/src/domain/npcPreparation.ts');
+  const tool = tools.find((t) => t.id === 'npc_prepare');
+  npcPrepareSchema.parse(tool.args);
+  const { createOperation, profileChange, guidance, ...payload } = tool.result;
+  const parsed = npcPreparationPayloadSchema.parse(payload);
+  assert.deepEqual(preparationOperations(parsed), tool.result);
+  assert.ok(createOperation.npcPreparationReceiptId);
+  assert.equal(profileChange.expected, null);
+  assert.ok(guidance.includes('private'));
+});

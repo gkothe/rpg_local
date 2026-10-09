@@ -1,3 +1,5 @@
+import { isApiProvider } from '../providers/options.js';
+import { npcCore } from './npcContext.js';
 import { sourceSections } from './sourceSections.js';
 import type { Campaign, Turn, ContextManifest } from './types.js';
 import { memoryJsonSchema } from './schemas.js';
@@ -185,7 +187,22 @@ export function buildContext(
   );
   // Live canonical values of accepted corrections outrank older transcript text and summaries.
   const corrections = correctionGuidance(c);
+  const profiles = c.continuity?.npcProfiles ?? [];
+  const selectedProfiles = profiles.filter((p) =>
+    relevantCharacters.some((x) => x.id === p.characterId)
+  );
   const base = {
+    ...(c.continuity
+      ? {
+          npcCores: selectedProfiles.map(npcCore),
+          npcPreparation:
+            isApiProvider(c.settings.provider) || process.env.RPG_NPC_PREPARATION_NATIVE === '1',
+        }
+      : {
+          npcPreparation:
+            isApiProvider(c.settings.provider) || process.env.RPG_NPC_PREPARATION_NATIVE === '1',
+          npcCores: [],
+        }),
     ...(rulePrompt
       ? {
           ruleContext: rulePrompt.context,
@@ -291,6 +308,7 @@ export function buildContext(
   return {
     systemPrompt,
     frozenSources,
+    frozenContinuity: { npcProfiles: structuredClone(profiles) },
     frozenKnowledge: freezeKnowledge(c, true),
     sourceSelection: {
       ...sourceSelection,

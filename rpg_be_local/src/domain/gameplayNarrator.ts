@@ -1,6 +1,13 @@
 import { NARRATIVE_READABILITY_GUIDANCE } from './narrativeWriting.js';
 
 // Adapted from humanizer for gameplay prose, not its editorial workflow.
+export const NPC_CREATION_GUIDANCE = `NPC continuity:
+- Keep each meaningful NPC's core roughly 80-150 words: concrete want, motive, boundary and optional tension/secret. Short phrases with depth, not biographies or generic adjectives. This is a writing target, never a token cutoff.
+- When npc_prepare is offered, search the roster first, then call it before narrating meaningful new NPCs. If absent, use ordinary creation; do not fabricate tool results. Use its exact createOperation and profileChange if the NPC is used. Ordinary incidental NPCs may use normal create operations.
+- Include continuityChanges for new actions (an empty array when no profile changes). Replace changed profile fields; never append a biography. Public description must not contain private motives/secrets.
+- Treat knowledge holder/witness evidence as awareness; characterIds only identify subjects, not who knows a fact. Missing awareness remains unknown. Accepted canonical knowledge overrides contradictory profile links.
+- The creator never supplies trusted mechanics: provide rule-supported attributes/inventory first or use ordinary combat preparation. Never invent stats to satisfy tracked paths.
+`;
 export const GAMEPLAY_WRITING_GUIDANCE = `Narrative writing guidance:
 ${NARRATIVE_READABILITY_GUIDANCE}
 - Usually stay under 300 words per turn; less when enough, longer only for necessary information or requested detail.
@@ -72,5 +79,5 @@ export function gameplayInstructionEnvelope(
 - campaign_npcs_search before creating possible duplicate. Empty query lists frozen roster; resolve ambiguous matches with player.
 - campaign_npcs_get for absent stats; saved attributes/inventory canonical this turn. Never infer saved stats from memory alone; private notes unavailable.
 - campaign_knowledge_get via knowledge links for past events/relationships; preserve certainty, historical status, GM-only visibility.`;
-  return `${technical}\n\n${rules}\n\n${continuity}\n\n${citations}\n\n${KNOWLEDGE_PROVENANCE_GUIDANCE}\n\n${npcs}\n\n${COMBAT_TRACKING_GUIDANCE}\n\n${GAMEPLAY_WRITING_GUIDANCE}\n\nSelected system instructions:\n${systemInstructions}\n\nCampaign instructions:\n${campaignInstructions}\n\n`;
+  return `${NPC_CREATION_GUIDANCE}\n${technical}\n\n${rules}\n\n${continuity}\n\n${citations}\n\n${KNOWLEDGE_PROVENANCE_GUIDANCE}\n\n${npcs}\n\n${COMBAT_TRACKING_GUIDANCE}\n\n${GAMEPLAY_WRITING_GUIDANCE}\n\nSelected system instructions:\n${systemInstructions}\n\nCampaign instructions:\n${campaignInstructions}\n\n`;
 }

@@ -1,5 +1,6 @@
 import { frozenCampaignSourcesSchema } from './campaignSourceRecall.js';
 import { frozenKnowledgeSchema } from './knowledgeRecall.js';
+import { frozenContinuitySchema } from './continuity.js';
 import { frozenHistorySchema } from './historyRecall.js';
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
@@ -158,6 +159,7 @@ export const diceSessionSchema = z
     frozenPrompt: z.string(),
     systemPrompt: z.string().optional(),
     frozenKnowledge: frozenKnowledgeSchema.optional(),
+    frozenContinuity: frozenContinuitySchema.optional(),
     frozenSources: frozenCampaignSourcesSchema.optional(),
     frozenHistory: frozenHistorySchema.optional(),
     toolDefinitions: z

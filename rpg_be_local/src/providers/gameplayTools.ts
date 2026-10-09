@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  NPC_PREPARE_TOOL_NAME,
+  NPC_PREPARATION_LIMITS,
+  npcPrepareSchema,
+} from '../domain/npcPreparation.js';
 import { withSuppliedRuleReads } from './ruleReadReuse.js';
 import { DICE_TOOL_NAME, diceInputSchema, type DiceResult } from '../domain/dice.js';
 import { RULE_LIMITS, RULE_TOOLS, type RuleTool } from '../domain/rules.js';
@@ -94,13 +99,15 @@ function definition(registration: GameplayToolRegistration): GameplayToolDefinit
 }
 /** Argument byte ceiling for one owned tool; combat_prepare carries a whole batch of sheets. */
 export function gameplayToolRequestBytes(name: string): number {
+  if (name === NPC_PREPARE_TOOL_NAME) return NPC_PREPARATION_LIMITS.requestBytes;
   return name === COMBAT_PREPARE_TOOL_NAME
     ? COMBAT_PREPARATION_LIMITS.requestBytes
     : RULE_LIMITS.requestBytes;
 }
 /** Transport body ceiling: the largest owned argument plus its JSON-RPC envelope. */
 export const GAMEPLAY_ENVELOPE_BYTES =
-  COMBAT_PREPARATION_LIMITS.requestBytes + COMBAT_PREPARATION_LIMITS.rpcEnvelopeBytes;
+  Math.max(NPC_PREPARATION_LIMITS.requestBytes, COMBAT_PREPARATION_LIMITS.requestBytes) +
+  COMBAT_PREPARATION_LIMITS.rpcEnvelopeBytes;
 function ownedRegistrations(
   options: GameplayTools['options'],
   assertActive: () => Promise<void>
@@ -114,6 +121,19 @@ function ownedRegistrations(
   );
   const sourceRead = options.readCampaignSource;
   return [
+    ...(options.prepareNpc
+      ? [
+          {
+            name: NPC_PREPARE_TOOL_NAME,
+            description:
+              'Prepare a meaningful new NPC with a compact public role/voice and private goal, motive, boundary and optional tension/secret. A creator call is made only for a new preparation; exact same-key requests replay. Returns unpublished receipt-bound create/profile operations. Search for duplicates first.',
+            schema: npcPrepareSchema,
+            purpose: 'default' as const,
+            capability: 'characters' as const,
+            handler: async (input: unknown) => options.prepareNpc!(input),
+          },
+        ]
+      : []),
     {
       name: NPC_SEARCH_TOOL_NAME,
       description:
@@ -121,7 +141,8 @@ function ownedRegistrations(
       schema: npcSearchSchema,
       purpose: 'default',
       capability: 'characters',
-      handler: async (input: unknown) => npcs.search(input),
+      handler: async (input: unknown) =>
+        (options.npcReader ? await options.npcReader() : npcs).search(input),
     },
     {
       name: NPC_GET_TOOL_NAME,
@@ -130,7 +151,8 @@ function ownedRegistrations(
       schema: npcGetSchema,
       purpose: 'default',
       capability: 'characters',
-      handler: async (input: unknown) => npcs.get(input),
+      handler: async (input: unknown) =>
+        (options.npcReader ? await options.npcReader() : npcs).get(input),
     },
     {
       name: COMBAT_PREPARE_TOOL_NAME,
@@ -259,6 +281,8 @@ export class GameplayTools {
         input: unknown,
         requestId: string
       ) => Promise<Record<string, unknown>>;
+      prepareNpc?: (input: unknown) => Promise<Record<string, unknown>>;
+      npcReader?: () => Promise<ReturnType<typeof createNpcRecall>>;
       prepareCombat: (input: unknown) => Promise<Record<string, unknown>>;
       history?: HistoryToolReader;
     }

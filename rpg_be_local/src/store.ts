@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { databaseUrl } from './config.js';
 import { conflict, Problem } from './errors.js';
 import type { Campaign, Turn, Memory, Snapshot } from './domain/types.js';
+import { continuityConflict } from './domain/continuityCompatibility.js';
 import { frozenContextConflict } from './domain/journalCompatibility.js';
 import type { KnowledgeSnapshotVersion } from './domain/journalProjection.js';
 import { SourceStatus, TurnStatus } from './domain/options.js';
@@ -177,7 +178,8 @@ export class Store {
             ? 'This attempt predates the current game contract; start a new action'
             : latest.rows[0]?.id !== turn.id
               ? 'A later action superseded this attempt'
-              : (frozenContextConflict(session.frozen_knowledge, campaign) ??
+              : (continuityConflict(session.frozen_continuity ?? undefined, campaign) ??
+                frozenContextConflict(session.frozen_knowledge, campaign) ??
                 (outdatedRules || campaign.ruleResolution
                   ? 'Rule library changed or is unresolved; start a new action after selecting current rules'
                   : null));
@@ -208,6 +210,7 @@ export class Store {
       frozenKnowledge: root.frozen_knowledge,
       ...(root.frozen_sources ? { frozenSources: root.frozen_sources } : {}),
       ...(root.frozen_history ? { frozenHistory: root.frozen_history } : {}),
+      ...(root.frozen_continuity ? { frozenContinuity: root.frozen_continuity } : {}),
       toolDefinitions: root.tool_definitions,
     };
   }
@@ -221,6 +224,7 @@ export class Store {
       delete document.context.frozenKnowledge;
       delete document.context.frozenSources;
       delete document.context.frozenHistory;
+      delete document.context.frozenContinuity;
     }
     await client.query('UPDATE turns SET document=$2,status=$3 WHERE id=$1', [
       t.id,
@@ -327,6 +331,9 @@ export class Store {
         TurnStatus.Running,
         'The app restarted during this turn; use Retry to preserve its recorded dice',
       ]
+    );
+    await this.pool.query(
+      "UPDATE npc_preparations SET status='interrupted',owner_id=NULL,updated_at=now() WHERE status='running' AND NOT EXISTS (SELECT 1 FROM turns WHERE id=npc_preparations.owner_turn_id AND status='running' AND lease_until>now())"
     );
     // Journal jobs whose owner lease expired cannot commit; surface them for an explicit retry.
     const journal = await this.pool.query(

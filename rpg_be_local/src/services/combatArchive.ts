@@ -198,6 +198,8 @@ export function remapCombatPreparation(
   for (const op of prep.payload.createOperations) {
     op.characterId = mapped(op.characterId);
     op.preparationReceiptId = mapped(op.preparationReceiptId);
+    if (typeof op.npcPreparationReceiptId === 'string')
+      op.npcPreparationReceiptId = mapped(op.npcPreparationReceiptId);
   }
 }
 export function remapPreparedCharacter(

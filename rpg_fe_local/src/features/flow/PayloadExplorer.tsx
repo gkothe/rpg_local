@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { combatProposal, examplePayload, proposal } from './examples';
+import { npcPrepareResult, combatProposal, examplePayload, proposal } from './examples';
 import { systemPromptExamples } from './systemPromptExample';
 export default function PayloadExplorer() {
   const [pinned, setPinned] = useState(false),
@@ -52,6 +52,18 @@ export default function PayloadExplorer() {
           adds a rulebook overview and makes rulebook tools available.
         </p>
       </div>
+      <details>
+        <summary>Compact NPC preparation example</summary>
+        <p>
+          The optional creator makes one additional call when preparing a meaningful new NPC. This
+          synthetic result includes private GM guidance. In play, only relevant concise cores enter
+          context; the player receives public narrative and revealed Journal facts. Native creation
+          requires explicit opt-in.
+        </p>
+        <pre aria-label="Synthetic NPC preparation JSON">
+          {JSON.stringify(npcPrepareResult, null, 2)}
+        </pre>
+      </details>
       <details>
         <summary>Read the JSON user prompt and response schema</summary>
         <p>

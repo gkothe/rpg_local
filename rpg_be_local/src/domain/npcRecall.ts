@@ -18,6 +18,7 @@ export const npcSnapshotSchema = z
     inventory: characterInput.shape.inventory.removeDefault(),
     description: characterInput.shape.description.removeDefault(),
     revision: z.number().int().nonnegative(),
+    privateCore: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 export const npcSearchSchema = z

@@ -1,3 +1,4 @@
+import { turnRuleReads } from './ruleReadRecords.js';
 import { bindResponseCitations } from '../domain/citationBinding.js';
 import { gameplayAdvancementContext } from './advancement.js';
 import { atResponseField } from '../domain/responseFields.js';
@@ -39,6 +40,15 @@ import { composeMemory } from '../domain/memory.js';
 import { HistoryReader, HistoryStore } from './historyStore.js';
 import { HistoryMaintenance } from './historyMaintenance.js';
 import { historySettingsOf } from '../domain/historyRecall.js';
+import { NpcPreparationService, npcPreparationAvailable } from './npcPreparation.js';
+import {
+  preparationOperations,
+  NPC_PREPARE_TOOL_NAME,
+  stagedNpcSnapshots,
+} from '../domain/npcPreparation.js';
+import { createNpcRecall } from '../domain/npcRecall.js';
+import { npcCore } from '../domain/npcContext.js';
+import { assertContinuity } from '../domain/continuityCompatibility.js';
 import { applyResponse, undoSnapshot } from '../domain/state.js';
 import { assertFrozenContext } from '../domain/journalCompatibility.js';
 import {
@@ -53,12 +63,7 @@ import { validateRuleCitations } from '../domain/ruleCitationValidation.js';
 import { RuleStore, ruleContext } from './ruleStore.js';
 import { RuleLookup } from './ruleLookup.js';
 import { generateRuleMapping } from '../domain/ruleMapping.js';
-import {
-  RuleSystemKind,
-  type RuleSystem,
-  type RulePrompt,
-  type RuleRead,
-} from '../domain/rules.js';
+import { RuleSystemKind, type RuleSystem, type RulePrompt } from '../domain/rules.js';
 import { GameplayTools } from '../providers/gameplayTools.js';
 const TURN_LEASE_SECONDS = 45;
 const TURN_HEARTBEAT_INTERVAL_MS = 10_000;
@@ -208,6 +213,7 @@ export class TurnService {
     if (t.ruleContext) await new RuleStore(this.store).guard(t.ruleContext, client);
     // A saved attempt must not replay facts a Journal correction has since superseded.
     assertFrozenContext(t.context?.frozenKnowledge, campaign);
+    assertContinuity(t.context?.frozenContinuity, campaign);
     return { campaign, turn };
   }
   async retry(
@@ -278,6 +284,7 @@ export class TurnService {
           'Game context changed or this archive session is non-executable; start a new action'
         );
       assertFrozenContext(saved.frozen_knowledge, campaign);
+      assertContinuity(saved.frozen_continuity ?? undefined, campaign);
       const turn: Turn = {
         ...previous,
         id: randomUUID(),
@@ -298,6 +305,7 @@ export class TurnService {
           diceSessionId: saved.id,
           systemPrompt: saved.system_prompt,
           frozenKnowledge: saved.frozen_knowledge,
+          ...(saved.frozen_continuity ? { frozenContinuity: saved.frozen_continuity } : {}),
           ...(saved.frozen_sources ? { frozenSources: saved.frozen_sources } : {}),
           ...(saved.frozen_history ? { frozenHistory: saved.frozen_history } : {}),
         },
@@ -358,12 +366,14 @@ export class TurnService {
       const session = saved.rows[0];
       if (!session?.system_prompt) throw conflict('Saved editing context is missing');
       assertFrozenContext(session.frozen_knowledge, campaign);
+      assertContinuity(session.frozen_continuity ?? undefined, campaign);
       t.context = {
         ...t.context!,
         prompt: session.frozen_prompt,
         revision: session.frozen_revision,
         systemPrompt: session.system_prompt,
         frozenKnowledge: session.frozen_knowledge,
+        ...(session.frozen_continuity ? { frozenContinuity: session.frozen_continuity } : {}),
         frozenSources: session.frozen_sources,
         ...(session.frozen_history ? { frozenHistory: session.frozen_history } : {}),
       };
@@ -548,6 +558,7 @@ export class TurnService {
           await traceEvent(trace, 'execution_attempt', { attempt });
           const dice = new DiceService(this.store);
           const combat = new CombatPreparationService(this.store);
+          const npcPreparation = new NpcPreparationService(this.store, this.generator);
           let frozenDefinitions: GameplayToolDefinition[] | undefined;
           if (t.diceSessionId) {
             const saved = await this.store.pool.query(
@@ -559,6 +570,7 @@ export class TurnService {
               throw new Problem(409, 'dice_context', 'Frozen session metadata is missing');
             t.context!.systemPrompt = root.system_prompt;
             t.context!.frozenKnowledge = root.frozen_knowledge;
+            t.context!.frozenContinuity = root.frozen_continuity ?? undefined;
             t.context!.frozenSources = root.frozen_sources ?? undefined;
             t.context!.frozenHistory = root.frozen_history ?? undefined;
             frozenDefinitions = root.tool_definitions;
@@ -596,6 +608,50 @@ export class TurnService {
                 await this.lockedOwned(t, client);
               });
             },
+            ...(t.context!.frozenContinuity &&
+            (!frozenDefinitions
+              ? npcPreparationAvailable(t.settings.provider)
+              : frozenDefinitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME))
+              ? {
+                  prepareNpc: (input: unknown) =>
+                    npcPreparation.prepare(t, input, ctl.signal, trace),
+                }
+              : {}),
+            ...(t.context!.frozenContinuity
+              ? {
+                  npcReader: async () => {
+                    const frozen = t.context!.frozenKnowledge ?? freezeKnowledge(c, true);
+                    const snapshots = (frozen.npcCharacters ?? []).map((npc) => ({
+                      ...npc,
+                      ...(t.context!.frozenContinuity?.npcProfiles.find(
+                        (p) => p.characterId === npc.id
+                      )
+                        ? {
+                            privateCore: npcCore(
+                              t.context!.frozenContinuity!.npcProfiles.find(
+                                (p) => p.characterId === npc.id
+                              )!
+                            ),
+                          }
+                        : {}),
+                    }));
+                    const drafts =
+                      t.diceSessionId &&
+                      (!frozenDefinitions
+                        ? npcPreparationAvailable(t.settings.provider)
+                        : frozenDefinitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME))
+                        ? await npcPreparation.ready(t.diceSessionId)
+                        : [];
+                    return createNpcRecall(
+                      c.id,
+                      [...snapshots, ...stagedNpcSnapshots(drafts)] as Parameters<
+                        typeof createNpcRecall
+                      >[1],
+                      frozen.records
+                    );
+                  },
+                }
+              : {}),
             prepareCombat: (input) => combat.prepare(t, input),
             ...(t.context!.frozenHistory
               ? { history: new HistoryReader(this.store, t.context!.frozenHistory) }
@@ -617,6 +673,7 @@ export class TurnService {
                 ]),
               ],
               {
+                frozenContinuity: t.context!.frozenContinuity,
                 frozenSources: t.context!.frozenSources,
                 frozenHistory: t.context!.frozenHistory,
                 systemPrompt: t.context!.systemPrompt!,
@@ -664,8 +721,15 @@ export class TurnService {
               createOperations: payload.createOperations,
             })
           );
+          const npcDrafts = registry.definitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME)
+            ? await npcPreparation.ready(t.diceSessionId)
+            : [];
           const prompt =
             t.context!.prompt +
+            (npcDrafts.length
+              ? '\nNPC preparations already recorded; reuse exact operations and private profiles: ' +
+                JSON.stringify(npcDrafts.map(preparationOperations))
+              : '') +
             (feedback ? `\nResponse correction: ${feedback}` : '') +
             (specifications.length
               ? '\nReplay the original requests in order with exactly these specifications before appending any dice: ' +
@@ -720,6 +784,10 @@ export class TurnService {
                     characters: campaign.characters,
                     knowledge: campaign.knowledge,
                     state: campaign.state,
+                    continuity: campaign.continuity,
+                    npcPreparations: t.context?.frozenContinuity
+                      ? await npcPreparation.ready(t.diceSessionId!, client)
+                      : [],
                     rolls: await new DiceService(this.store).records(t.diceSessionId!, client),
                     combat: await combat.authorization(t.diceSessionId!, client),
                   };
@@ -853,6 +921,13 @@ export class TurnService {
           read.payload.sourceSpan ? [sourceSpanSchema.parse(read.payload.sourceSpan)] : []
         ),
       ];
+      const creator = new NpcPreparationService(this.store);
+      const npcPreparations = t.context?.frozenContinuity
+        ? await creator.ready(sessionId, client)
+        : [];
+      const preparedNpcEvidence = npcPreparations.length
+        ? await creator.introductionEvidence(sessionId, client)
+        : undefined;
       Object.assign(
         response,
         bindResponseCitations(response, {
@@ -861,6 +936,7 @@ export class TurnService {
           ruleContext: t.ruleContext,
           sourceSpans,
           ruleReads,
+          preparedNpcEvidence,
         })
       );
       const records = await dice.records(sessionId, client);
@@ -902,6 +978,8 @@ export class TurnService {
         rolls: turn.rolls,
         ruleContext: t.ruleContext,
         ruleReads,
+        npcPreparations,
+        preparedNpcEvidence,
         combat: {
           authorization: await new CombatPreparationService(this.store).authorization(
             sessionId,
@@ -1082,21 +1160,3 @@ export class TurnService {
   }
 }
 const sceneText = (c: Campaign) => (typeof c.state.scene === 'string' ? c.state.scene : '');
-async function turnRuleReads(turnId: string, client: PoolClient): Promise<RuleRead[]> {
-  const rows = await client.query(
-    'SELECT * FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
-    [turnId]
-  );
-  return rows.rows.map((row) => ({
-    id: row.id,
-    campaignId: row.campaign_id,
-    turnId: row.turn_id,
-    context: row.captured_context,
-    tool: row.tool_name,
-    transportRequestId: row.transport_request_id,
-    argumentDigest: row.argument_digest,
-    resultHash: row.result_hash,
-    payload: row.payload,
-    createdAt: new Date(row.created_at).toISOString(),
-  }));
-}

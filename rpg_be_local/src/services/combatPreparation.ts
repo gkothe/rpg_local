@@ -1,3 +1,4 @@
+import { NpcPreparationService } from './npcPreparation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { PoolClient } from 'pg';
@@ -44,6 +45,7 @@ export type CombatPreparationPayload = {
     op: 'create';
     characterId: string;
     preparationReceiptId: string;
+    npcPreparationReceiptId?: string;
     character: PreparedDraft['character'];
     introduction: PreparedDraft['introduction'];
   }[];
@@ -150,6 +152,55 @@ export class CombatPreparationService {
           );
       };
       for (const entry of input.participants) {
+        if ('npcPreparationReceiptId' in entry) {
+          const payload = (
+            await new NpcPreparationService(this.store).ready(session.id, client)
+          ).find((p) => p.receiptId === entry.npcPreparationReceiptId);
+          if (!payload)
+            throw new Problem(
+              422,
+              'npc_receipt',
+              'NPC receipt must belong to this executable session'
+            );
+          if (missingTrackedPaths(payload.publicCharacter.attributes, entry.trackedFields).length)
+            throw new Problem(
+              422,
+              CombatProblem.State,
+              'Prepared NPC lacks authoritative tracked mechanical fields'
+            );
+          sameBinding(payload.characterId, entry.label, entry.trackedFields);
+          const previous = registry.drafts.find((d) => d.characterId === payload.characterId);
+          const combatReceiptId = previous?.receiptId ?? receiptId;
+          const specification = {
+            label: entry.label,
+            character: payload.publicCharacter,
+            introduction: payload.introduction,
+            trackedFields: entry.trackedFields,
+          };
+          if (!previous)
+            reservations.push({
+              id: payload.characterId,
+              localKey: 'npc:' + payload.receiptId,
+              digest: digest(specification),
+              draft: specification,
+            });
+          participants.push({
+            characterId: payload.characterId,
+            label: entry.label,
+            trackedFields: entry.trackedFields,
+            origin: 'prepared',
+            sheet: { id: payload.characterId, ...payload.publicCharacter },
+          });
+          createOperations.push({
+            op: 'create',
+            characterId: payload.characterId,
+            preparationReceiptId: combatReceiptId,
+            npcPreparationReceiptId: payload.receiptId,
+            character: payload.publicCharacter,
+            introduction: payload.introduction,
+          });
+          continue;
+        }
         if ('characterId' in entry) {
           const sheet = frozen.sheets.get(entry.characterId);
           if (!sheet || registry.drafts.some((d) => d.characterId === entry.characterId))

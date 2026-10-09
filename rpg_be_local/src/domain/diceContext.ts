@@ -13,6 +13,7 @@ export function gameplayDigest(
 ): string {
   return diceDigest({
     knowledge: campaign.knowledge ?? [],
+    ...(campaign.continuity ? { continuity: campaign.continuity } : {}),
     ...(ruleContext
       ? {
           rules: {

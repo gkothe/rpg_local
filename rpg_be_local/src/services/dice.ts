@@ -8,6 +8,7 @@ import { Problem } from '../errors.js';
 import { TurnStatus } from '../domain/options.js';
 import type { Turn } from '../domain/types.js';
 import { CombatProblem, CombatRollScope } from '../domain/combat.js';
+import { NpcPreparationService } from './npcPreparation.js';
 import { CombatPreparationService, frozenCombatContext } from './combatPreparation.js';
 import {
   DICE_LIMITS,
@@ -28,6 +29,7 @@ export class DiceService {
     contextDigest: string,
     characterIds: string[],
     metadata: {
+      frozenContinuity?: import('../domain/continuity.js').FrozenContinuity;
       frozenSources?: FrozenCampaignSources;
       frozenHistory?: FrozenHistory;
       systemPrompt: string;
@@ -41,7 +43,7 @@ export class DiceService {
       const id = randomUUID();
       try {
         await client.query(
-          'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+          'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history,frozen_continuity) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
           [
             id,
             turn.campaignId,
@@ -55,6 +57,7 @@ export class DiceService {
             JSON.stringify(metadata.toolDefinitions),
             metadata.frozenSources ?? null,
             metadata.frozenHistory ? JSON.stringify(metadata.frozenHistory) : null,
+            metadata.frozenContinuity ?? null,
           ]
         );
       } catch (error) {
@@ -153,6 +156,12 @@ export class DiceService {
       );
       const frozen = frozenCombatContext(session);
       allowed.push(...prepared.drafts.map((draft) => draft.characterId));
+      if (session.frozen_continuity)
+        allowed.push(
+          ...(await new NpcPreparationService(this.store).ready(sessionId, client)).map(
+            (p) => p.characterId
+          )
+        );
       const active = frozen.encounter?.active ? frozen.encounter : null;
       const encounterId = prepared.encounterId ?? active?.id ?? null;
       const participants = new Set([

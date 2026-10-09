@@ -19,7 +19,7 @@ export function mapResponseCitations(
     response.ruleCitations.forEach((value, index) => {
       if (value && typeof value === 'object') visit(value, true, ['ruleCitations', index]);
     });
-  for (const key of ['knowledgeChanges', 'operationExplanations']) {
+  for (const key of ['knowledgeChanges', 'operationExplanations', 'continuityChanges']) {
     if (Array.isArray(response[key]))
       response[key].forEach((item, index) => evidence(item?.evidence, [key, index, 'evidence']));
   }

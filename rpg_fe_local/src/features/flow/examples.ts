@@ -154,6 +154,8 @@ export const ruleRead = {
 export function examplePayload(pinned: boolean, mentioned: boolean, book: boolean) {
   return {
     mandatory: {
+      npcPreparation: false,
+      npcCores: [],
       ruleContext: {
         systemId: ids.system,
         systemKey: 'teaching-example',
@@ -371,4 +373,94 @@ export const journalExample = {
   flagged: 'Mira is a sister of the temple, not an innkeeper.',
   quote: 'sister of the temple',
   correctedText: 'Mira is a sister of the temple.',
+};
+
+// Synthetic private creator payload; never player campaign data.
+export const npcPrepareArgs = {
+  localKey: 'ivo-ferryman',
+  intent: 'Prepare the ferryman for a recurring role',
+  introduction: {
+    origin: 'gm',
+    evidence: [],
+    visibility: 'player',
+  },
+  establishedCharacter: {
+    name: 'Ivo',
+    type: 'npc',
+    attributes: {
+      hp: 8,
+    },
+    inventory: {},
+    description: {},
+  },
+};
+export const npcPrepareResult = {
+  receiptId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  characterId: '33333333-3333-4333-8333-333333333333',
+  publicCharacter: {
+    name: 'Ivo',
+    type: 'npc',
+    attributes: {
+      hp: 8,
+    },
+    inventory: {},
+    description: {
+      role: 'Ferryman',
+      voice: 'Brief, practical answers',
+    },
+  },
+  profile: {
+    characterId: '33333333-3333-4333-8333-333333333333',
+    shortTermGoal: 'Find a partner to repair the ferry',
+    longTermGoal: 'Keep the river crossing affordable',
+    boundaries: ['Will never sail with an unsafe hull'],
+    relationshipKnowledgeIds: [],
+    revealedTraitKnowledgeIds: [],
+    tension: 'Needs guard protection but resents their toll',
+  },
+  introduction: {
+    origin: 'gm',
+    evidence: [],
+    visibility: 'player',
+  },
+  createOperation: {
+    op: 'create',
+    characterId: '33333333-3333-4333-8333-333333333333',
+    npcPreparationReceiptId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    character: {
+      name: 'Ivo',
+      type: 'npc',
+      attributes: {
+        hp: 8,
+      },
+      inventory: {},
+      description: {
+        role: 'Ferryman',
+        voice: 'Brief, practical answers',
+      },
+    },
+    introduction: {
+      origin: 'gm',
+      evidence: [],
+      visibility: 'player',
+    },
+  },
+  profileChange: {
+    op: 'create',
+    characterId: '33333333-3333-4333-8333-333333333333',
+    expected: null,
+    next: {
+      shortTermGoal: 'Find a partner to repair the ferry',
+      longTermGoal: 'Keep the river crossing affordable',
+      boundaries: ['Will never sail with an unsafe hull'],
+      relationshipKnowledgeIds: [],
+      revealedTraitKnowledgeIds: [],
+      tension: 'Needs guard protection but resents their toll',
+    },
+    explanation: 'Initial private NPC core',
+    origin: 'gm',
+    evidence: [],
+  },
+  guidance:
+    'Use the exact createOperation and profileChange if introducing this NPC. Keep private motives out of public description/narration until revealed. Unused drafts are not committed. Use npcPreparationReceiptId with combat_prepare to reuse this identity.',
 };

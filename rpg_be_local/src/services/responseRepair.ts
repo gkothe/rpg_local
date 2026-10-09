@@ -17,6 +17,7 @@ import { participantReferenceSchema } from '../domain/combat.js';
 const editableFields = new Set([
   'operations',
   'knowledgeChanges',
+  'continuityChanges',
   'ruleCitations',
   'operationExplanations',
   'rollInterpretations',
@@ -39,16 +40,20 @@ function preparedIdentities(response: unknown, corrected?: unknown): string {
             op?.op === 'create' &&
             op.characterId !== undefined &&
             op.preparationReceiptId === undefined &&
+            op.npcPreparationReceiptId === undefined &&
             replacement?.op === 'create' &&
             replacement.characterId === undefined &&
-            replacement.preparationReceiptId === undefined
+            replacement.preparationReceiptId === undefined &&
+            replacement.npcPreparationReceiptId === undefined
           )
             return [];
           return op &&
             typeof op === 'object' &&
-            ('characterId' in op || 'preparationReceiptId' in op) &&
+            ('characterId' in op ||
+              'preparationReceiptId' in op ||
+              'npcPreparationReceiptId' in op) &&
             (op as { op?: unknown }).op === 'create'
-            ? [[index, op.characterId, op.preparationReceiptId]]
+            ? [[index, op.characterId, op.preparationReceiptId, op.npcPreparationReceiptId]]
             : [];
         })
       : []

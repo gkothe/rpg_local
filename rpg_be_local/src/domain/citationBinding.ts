@@ -23,19 +23,27 @@ export function bindResponseCitations<T extends GameplayResponse>(
 ): T {
   const problems: ResponseFieldProblem[] = [];
   const bind = (citation: Record<string, unknown>, book: boolean, path: ResponsePath) => {
+    const operation =
+      path[0] === 'operations' && path[2] === 'introduction'
+        ? response.operations[path[1] as number]
+        : undefined;
+    const owned =
+      operation?.op === 'create' && operation.npcPreparationReceiptId && operation.characterId
+        ? (context.preparedNpcEvidence?.get(operation.characterId) ?? context)
+        : context;
     const invalid = (message: string): never => {
       throw new ResponseFieldProblem(path, new Problem(502, 'citation_binding', message));
     };
     const quote = citation.quote as string;
     let starts: number[];
     if (book) {
-      const read = context.ruleReads?.find((entry) => entry.id === citation.receiptId);
-      const captured = context.ruleContext;
+      const read = owned.ruleReads?.find((entry) => entry.id === citation.receiptId);
+      const captured = owned.ruleContext;
       if (
         !read ||
         !captured ||
-        read.campaignId !== context.campaignId ||
-        read.turnId !== context.turnId ||
+        read.campaignId !== owned.campaignId ||
+        read.turnId !== owned.turnId ||
         read.tool !== 'rules_get' ||
         read.context.systemId !== captured.systemId ||
         citation.systemId !== captured.systemId ||
@@ -61,7 +69,7 @@ export function bindResponseCitations<T extends GameplayResponse>(
       citation.end = starts[0]! + quote.length;
       Object.assign(citation, citationPages(read!.payload, starts[0]!, citation.end as number));
     } else {
-      const spans = (context.sourceSpans ?? []).filter(
+      const spans = (owned.sourceSpans ?? []).filter(
         (span) =>
           span.id === citation.sourceId &&
           span.version === citation.version &&

@@ -70,6 +70,7 @@ export type Memory = {
   createdAt: string;
 };
 export type Campaign = {
+  continuity?: import('./continuity.js').Continuity;
   advancementPolicy?: { manual: true };
   /** Optional selective-history settings; absent means disabled (full memory in prompts). */
   historyRecall?: HistorySettings;
@@ -129,6 +130,7 @@ export type Turn = {
   completedAt: string | null;
 };
 export type ContextManifest = {
+  frozenContinuity?: import('./continuity.js').FrozenContinuity;
   diceSessionId?: string;
   systemPrompt?: string;
   frozenSources?: FrozenCampaignSources;
@@ -165,6 +167,8 @@ export type Operation =
     }
   | { op: typeof OPERATION_KIND.State; expected: JsonObject; value: JsonObject };
 export type Snapshot = {
+  beforeContinuity?: import('./continuity.js').NpcProfile[];
+  afterContinuity?: import('./continuity.js').NpcProfile[];
   beforeKnowledge?: CampaignKnowledge[];
   afterKnowledge?: CampaignKnowledge[];
   turnId: string;
@@ -179,6 +183,7 @@ export type Snapshot = {
   }[];
 };
 export type Archive = {
+  npcPreparations?: import('../services/npcPreparationArchive.js').NpcPreparationArchive[];
   advancementReviews?: import('../services/advancementArchive.js').AdvancementArchive;
   format: typeof ARCHIVE_FORMAT_ID;
   campaign: Campaign;

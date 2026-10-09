@@ -1,3 +1,6 @@
+import { validateNpcPreparedCreates } from './npcPreparation.js';
+import type { NpcPreparationPayload } from './npcPreparation.js';
+import { applyContinuity, undoContinuity } from './continuity.js';
 import { atResponseField, ResponseFieldProblem } from './responseFields.js';
 import { validateOperationExplanations } from './operationExplanations.js';
 import { gameplayResponseSchema, type GameplayResponse } from './gameplayResponse.js';
@@ -35,13 +38,18 @@ export function applyResponse(
   original: Campaign,
   raw: GameplayResponse,
   turnId: string,
-  evidence?: KnowledgeValidation & { combat?: CombatValidation }
+  evidence?: KnowledgeValidation & {
+    combat?: CombatValidation;
+    npcPreparations?: NpcPreparationPayload[];
+  }
 ): { campaign: Campaign; snapshot: Snapshot; changes: string[] } {
   const response = gameplayResponseSchema.parse(raw);
   const authorization = evidence?.combat?.authorization ?? emptyCombatAuthorization();
+  validateNpcPreparedCreates(response, evidence?.npcPreparations ?? [], evidence?.rolls ?? []);
   validateOperationExplanations(response, evidence ?? { campaignId: original.id, turnId });
   const aliases = new Map<number, string>();
   const introductions: KnowledgeChange[] = [];
+  const introductionEvidence = new Map<number, KnowledgeValidation>();
   const c = structuredClone(original);
   const touched = new Set<string>();
   const changedFields = new Map<string, Set<'name' | 'attributes' | 'inventory' | 'description'>>();
@@ -55,10 +63,20 @@ export function applyResponse(
         );
       }
       if (op.op === OPERATION_KIND.Create) {
-        const prepared = resolvePreparedCreate(op, authorization, c.characters);
+        const npcPrepared = op.npcPreparationReceiptId
+          ? evidence?.npcPreparations?.find(
+              (p) => p.receiptId === op.npcPreparationReceiptId && p.characterId === op.characterId
+            )
+          : undefined;
+        const prepared =
+          npcPrepared && !op.preparationReceiptId
+            ? undefined
+            : resolvePreparedCreate(op, authorization, c.characters);
+        if (npcPrepared && c.characters.some((x) => x.id === npcPrepared.characterId))
+          throw new Problem(422, 'npc_identity', 'Prepared NPC already exists');
         const char: Character = {
           ...op.character,
-          id: prepared?.characterId ?? randomUUID(),
+          id: npcPrepared?.characterId ?? prepared?.characterId ?? randomUUID(),
           notes: '',
           revision: c.revision + 1,
         };
@@ -70,7 +88,9 @@ export function applyResponse(
             'knowledge_invalid',
             'Characters are public; keep unrevealed NPCs in GM-only knowledge'
           );
-        if (char.type === CharacterType.Npc)
+        if (char.type === CharacterType.Npc) {
+          const captured = npcPrepared ? evidence?.preparedNpcEvidence?.get(char.id) : undefined;
+          if (captured) introductionEvidence.set(introductions.length, captured);
           introductions.push({
             op: 'create',
             kind: KnowledgeKind.Npc,
@@ -81,6 +101,7 @@ export function applyResponse(
             characterIds: [char.id],
             ...op.introduction,
           });
+        }
         touched.add(char.id);
         changes.push(`${char.name}: introduced`);
       } else if (op.op === OPERATION_KIND.Set) {
@@ -137,7 +158,8 @@ export function applyResponse(
             )[index]!,
             'introduction',
           ]
-        : ['knowledgeChanges', index - introductions.length]
+        : ['knowledgeChanges', index - introductions.length],
+    (index) => introductionEvidence.get(index)
   );
   const npcIds = new Set(
     introductions.flatMap((op) =>
@@ -163,6 +185,29 @@ export function applyResponse(
     );
   c.knowledge = knowledge.records;
   changes.push(...knowledge.changes);
+  const introductionIndices = [...aliases.keys()].filter(
+    (i) =>
+      response.operations[i]?.op === 'create' &&
+      response.operations[i]?.character.type === CharacterType.Npc
+  );
+  const continuity = applyContinuity(
+    c,
+    response.continuityChanges ?? [],
+    {
+      characters: aliases,
+      knowledge: new Map(
+        [...knowledge.createdIds]
+          .filter(([i]) => i >= introductions.length)
+          .map(([i, id]) => [i - introductions.length, id])
+      ),
+      introductions: new Map(
+        [...knowledge.createdIds]
+          .filter(([i]) => i < introductions.length)
+          .map(([i, id]) => [introductionIndices[i]!, id])
+      ),
+    },
+    evidence ?? { campaignId: c.id, turnId }
+  );
   validateCombatTurn({
     before: original,
     after: c,
@@ -182,6 +227,9 @@ export function applyResponse(
     }),
     snapshot: {
       turnId,
+      ...(response.continuityChanges?.length
+        ? { beforeContinuity: continuity.before, afterContinuity: continuity.after }
+        : {}),
       beforeKnowledge: knowledge.before,
       afterKnowledge: knowledge.after,
       beforeCharacters: original.characters.filter((x) => touched.has(x.id)),
@@ -198,6 +246,7 @@ export function applyResponse(
 }
 export function undoSnapshot(original: Campaign, snapshot: Snapshot): Campaign {
   const c = structuredClone(original);
+  undoContinuity(c, snapshot.beforeContinuity ?? [], snapshot.afterContinuity ?? []);
   for (const after of snapshot.afterKnowledge ?? []) {
     if (
       !isDeepStrictEqual(

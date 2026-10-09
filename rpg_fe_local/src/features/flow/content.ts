@@ -9,6 +9,8 @@ import {
   ruleContext,
   combatPrepareArgs,
   combatPrepareResult,
+  npcPrepareArgs,
+  npcPrepareResult,
 } from './examples';
 
 function item(
@@ -70,7 +72,7 @@ export const nodes: FlowItem[] = [
     'The app reads PostgreSQL and copies campaign knowledge into memory for the turn. It leaves private notes out of the gameplay context it builds automatically.',
     '4.3',
     ['rpg_be_local/src/domain/context.ts', 'rpg_be_local/src/domain/knowledgeRecall.ts'],
-    'Every context includes a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene, and always includes every participant of an active encounter. It also selects relevant campaign knowledge and searches source text for matching words. Gameplay has no token target: relevant retrieved sections and matching campaign facts are included without size-based omission. History is summarized in consecutive batches independently of gameplay prompt size. Memory summaries request bullet points while preserving the same information as paragraph summaries. Summaries can lose detail, so the app keeps the original turns. With selective history switched on, the memory text is replaced by a short overview plus the most relevant older sections and any items you protected; the full memory and all originals stay stored and the model can search them with history tools. Knowledge follows a priority: open debts and objectives, relationships, protected facts and records named in the scene are always included, while a record that is merely linked to your character competes for a size target by relevance.'
+    'Every context includes a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Relevant compact NPC motivation cores also reach the GM; full linked histories stay in accepted knowledge and retrieval. Profiles keep goals and secrets private, use explicit holder/witness evidence for awareness, and do not infer presence from mentions. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene, and always includes every participant of an active encounter. It also selects relevant campaign knowledge and searches source text for matching words. Gameplay has no token target: relevant retrieved sections and matching campaign facts are included without size-based omission. History is summarized in consecutive batches independently of gameplay prompt size. Memory summaries request bullet points while preserving the same information as paragraph summaries. Summaries can lose detail, so the app keeps the original turns. With selective history switched on, the memory text is replaced by a short overview plus the most relevant older sections and any items you protected; the full memory and all originals stay stored and the model can search them with history tools. Knowledge follows a priority: open debts and objectives, relationships, protected facts and records named in the scene are always included, while a record that is merely linked to your character competes for a size target by relevance.'
   ),
   item(
     'model',
@@ -304,14 +306,31 @@ export const steps: FlowStep[] = [
 export const tools: FlowTool[] = [
   {
     ...item(
+      'npc_prepare',
+      'npc_prepare',
+      'Prepare a meaningful new NPC with a short public role/voice and a private motivation core.',
+      'Before the first interaction of a likely recurring NPC; ordinary background creates remain available.',
+      'A stable local key, creation intent, established public data, introduction evidence and optional frozen context IDs.',
+      'A reserved identity, public character, private profile and exact paired create/profile operations.',
+      'One tools-free creator call outside database transactions; the same completed key replays its saved result. The npc_preparations table holds unpublished drafts. Native-provider creation requires explicit opt-in.',
+      '4.8',
+      ['rpg_be_local/src/services/npcPreparation.ts', 'rpg_be_local/src/domain/npcPreparation.ts'],
+      'Aim for roughly 80-150 words across the core, with concrete want, motive, boundary and optional tension/secret. Only relevant cores reach the GM; history and mechanics stay separate. Cancellation commits nothing. Public narrative editing never receives the private profile.'
+    ),
+    bookOnly: false,
+    args: npcPrepareArgs,
+    result: npcPrepareResult,
+  },
+  {
+    ...item(
       'campaign_npcs_search',
       'campaign_npcs_search',
       'Find an existing NPC even when their sheet is absent from the initial prompt.',
       'Before using an older NPC or creating a potentially duplicate character.',
       'Saved name or description terms; an empty query lists the roster. An optional cursor retrieves the next page.',
       'Up to 20 matching IDs and names. Duplicate names remain separate choices.',
-      'Uses this turn’s frozen NPC roster in memory, without another database query. Search results are navigation; get retrieves the saved sheet.',
-      '4.7',
+      'Uses the frozen NPC roster plus ready drafts from this logical session; staged receipts are checked on each lookup. Search results are navigation; get retrieves the saved sheet.',
+      '4.8',
       ['rpg_be_local/src/domain/npcRecall.ts']
     ),
     bookOnly: false,
@@ -331,7 +350,7 @@ export const tools: FlowTool[] = [
       'The NPC’s unique ID.',
       'Saved attributes, inventory, description and revision, plus links to knowledge records. Private notes are excluded.',
       'Reads the frozen roster. Current saved sheet values remain distinct from historical events, rumors and GM-only knowledge.',
-      '4.7',
+      '4.8',
       ['rpg_be_local/src/domain/npcRecall.ts']
     ),
     bookOnly: false,
@@ -666,6 +685,20 @@ export const storageItems: FlowItem[] = [
     'PostgreSQL stores these records inside the campaign document, rather than in separate character, source, or knowledge tables.',
     '3.1',
     ['rpg_be_local/src/store.ts', 'rpg_be_local/src/domain/types.ts']
+  ),
+  item(
+    'npc-preparations',
+    'NPC preparation drafts',
+    'Private operational receipts for the optional NPC creator; permanent character data stays in the campaign document.',
+    'Created by npc_prepare, committed as canonical character/profile only with the final edited turn.',
+    'Frozen input, provider settings, reserved identity, argument digest and execution ownership.',
+    'An immutable ready draft reused on retry, or an explicit failed/interrupted status.',
+    'npc_preparations; dice_sessions.frozen_continuity preserves canonical profile inputs. Private profiles live in campaigns.document.continuity.npcProfiles. Undo uses touched profile snapshots; archives remap IDs and templates strip them.',
+    '4.8',
+    [
+      'rpg_be_local/migrationssql/0022_frozen_continuity.sql',
+      'rpg_be_local/migrationssql/0023_npc_preparations.sql',
+    ]
   ),
   item(
     'turns',

@@ -145,6 +145,7 @@ export function normalizeKnowledge(records: readonly CampaignKnowledge[]): Campa
   );
 }
 export type KnowledgeValidation = {
+  preparedNpcEvidence?: ReadonlyMap<string, KnowledgeValidation>;
   rolls?: readonly import('./dice.js').DiceRecord[];
   sourceSpans?: readonly SourceSpan[];
   ruleReads?: readonly RuleRead[];
@@ -196,14 +197,17 @@ export function applyKnowledgeChanges(
   characters: readonly Character[],
   aliases: ReadonlyMap<number, string>,
   context: KnowledgeValidation,
-  responsePath?: (index: number) => ResponsePath
+  responsePath?: (index: number) => ResponsePath,
+  evidenceFor?: (index: number) => KnowledgeValidation | undefined
 ): {
   records: CampaignKnowledge[];
   before: CampaignKnowledge[];
   after: CampaignKnowledge[];
   changes: string[];
+  createdIds: Map<number, string>;
 } {
   const records = structuredClone([...original]);
+  const createdIds = new Map<number, string>();
   const touched = new Set<string>();
   const changes: string[] = [];
   const link = (value: string | { operationIndex: number }): string => {
@@ -217,7 +221,7 @@ export function applyKnowledgeChanges(
   for (const [index, value] of raw.entries()) {
     atResponseField(responsePath?.(index) ?? ['knowledgeChanges', index], () => {
       const op = knowledgeChangeSchema.parse(value);
-      validateKnowledgeEvidence(op, context);
+      validateKnowledgeEvidence(op, evidenceFor?.(index) ?? context);
       const now = new Date().toISOString();
       const current = op.op === 'update' ? records.find((r) => r.id === op.id) : undefined;
       if (op.op === 'update' && !current) invalid('Knowledge record not found');
@@ -298,6 +302,7 @@ export function applyKnowledgeChanges(
       campaignKnowledgeSchema.parse(record);
       if (current) records[records.indexOf(current)] = record;
       else records.push(record);
+      if (op.op === 'create') createdIds.set(index, record.id);
       touched.add(record.id);
       if (visibility === KnowledgeVisibility.Player)
         changes.push(
@@ -307,6 +312,7 @@ export function applyKnowledgeChanges(
   }
   return {
     records,
+    createdIds,
     before: original.filter((r) => touched.has(r.id)).map((r) => structuredClone(r)),
     after: records.filter((r) => touched.has(r.id)).map((r) => structuredClone(r)),
     changes,

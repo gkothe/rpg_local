@@ -1,3 +1,5 @@
+import { NPC_CONTINUITY_LIMITS } from './domain/continuity.js';
+import { NPC_PREPARATION_LIMITS } from './domain/npcPreparation.js';
 import { publicCampaign, publicTurn } from './domain/playerProjection.js';
 import { operationalProblem } from './processingErrors.js';
 import {
@@ -253,6 +255,15 @@ export function createApp(options: AppOptions) {
           limits: { uploadBytes },
           dice: { enabled: true, limits: DICE_LIMITS },
           rules: { columns: RULE_COLUMNS, limits: RULE_LIMITS },
+          npc: {
+            continuity: true,
+            profileLimits: NPC_CONTINUITY_LIMITS,
+            preparation: {
+              api: true,
+              nativeOptIn: process.env.RPG_NPC_PREPARATION_NATIVE === '1',
+              limits: NPC_PREPARATION_LIMITS,
+            },
+          },
           combat: {
             fieldKindOptions: COMBAT_FIELD_KIND_OPTIONS,
             rollScopeOptions: COMBAT_ROLL_SCOPE_OPTIONS,

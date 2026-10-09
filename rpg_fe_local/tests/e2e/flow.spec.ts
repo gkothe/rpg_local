@@ -10,7 +10,7 @@ test('Flow explains off-prompt NPC retrieval using synthetic data only', async (
   await page.getByRole('button', { name: /^campaign_npcs_get/ }).click();
   await expect(page.getByRole('heading', { name: 'How NPC lookup works' })).toBeVisible();
   await expect(
-    page.getByText('The roster stays fixed for this turn and its retries.', { exact: false })
+    page.getByText('The saved roster stays frozen for this turn and its retries;', { exact: false })
   ).toBeVisible();
   await page.getByText('Example arguments and result sent to the model', { exact: true }).click();
   await expect(page.locator('.flow-card pre').filter({ hasText: 'knowledgeLinks' })).toContainText(
@@ -63,7 +63,10 @@ test('explores the complete guide without campaign or provider requests', async 
   await page.getByLabel('Later edit changed a touched field').check();
   await expect(page.getByRole('status')).toContainText('Undo blocked');
   await page.getByText('Source code and documentation', { exact: true }).click();
-  await page.getByRole('button', { name: 'Read document section 3.1' }).click();
+  await page
+    .getByRole('button', { name: /^Read document section/ })
+    .first()
+    .click();
   await expect(page.getByLabel('Architecture document')).toContainText('PostgreSQL');
   expect(calls.length).toBeGreaterThan(0);
   expect(calls.every((call) => call === 'GET /api/lan/status')).toBe(true);
@@ -124,4 +127,22 @@ test('Flow preserves the outer LAN pairing boundary', async ({ page }) => {
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Connect this device' })).toBeVisible();
   await expect(page.locator('[inert]')).toContainText('Follow the Flow');
+});
+
+test('Flow explains compact NPC creation without campaign or provider calls', async ({ page }) => {
+  const calls: string[] = [];
+  await page.route('**/api/**', (route) => {
+    calls.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ json: { data: { enabled: false, desktop: true, paired: true } } });
+  });
+  await page.goto('/flow?view=tools');
+  await page.getByRole('button', { name: /^npc_prepare/ }).click();
+  await page.getByText('Example arguments and result sent to the model', { exact: true }).click();
+  await expect(page.locator('.flow-card pre').filter({ hasText: 'shortTermGoal' })).toContainText(
+    'profileChange'
+  );
+  await page.getByText('Source code and documentation', { exact: true }).click();
+  await page.getByRole('button', { name: 'Read document section 4.8' }).click();
+  await expect(page.getByLabel('Architecture document')).toContainText('npc_preparations');
+  expect(calls.every((path) => path === '/api/lan/status')).toBe(true);
 });

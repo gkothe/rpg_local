@@ -323,7 +323,7 @@ test('combat_prepare validates before dispatch and replays by transport identity
   );
   assert.equal(gameplayToolRequestBytes('combat_prepare'), 1_048_576);
   assert.equal(gameplayToolRequestBytes('roll_dice'), 1024);
-  assert.equal(GAMEPLAY_ENVELOPE_BYTES, 1_048_576 + 65_536);
+  assert.equal(GAMEPLAY_ENVELOPE_BYTES, 4_194_304 + 65_536);
 });
 
 test('the advertised source search schema offers a single query or a bounded batch', () => {

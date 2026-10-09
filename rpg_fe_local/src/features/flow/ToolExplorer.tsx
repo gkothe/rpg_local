@@ -95,12 +95,13 @@ export default function ToolExplorer({
               description. An empty query lists it; duplicate names have separate IDs.
             </li>
             <li>
-              Get returns the chosen NPC’s complete saved sheet without private notes. Knowledge
-              links lead to events and relationships through the knowledge tools.
+              Get returns the chosen NPC’s saved sheet and private core for the GM. Knowledge links
+              lead to events and relationships through the knowledge tools.
             </li>
             <li>
-              The roster stays fixed for this turn and its retries. Lookup reads data; changes still
-              require validated operations in the final proposal.
+              The saved roster stays frozen for this turn and its retries; ready creator drafts
+              appear during the same attempt. Lookup reads data; changes still require validated
+              operations in the final proposal.
             </li>
           </>
         ) : knowledge ? (

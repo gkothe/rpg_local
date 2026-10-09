@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { continuityChangeSchema } from './continuity.js';
 import { prepareCitationInput, citationWireSchema } from './citationInput.js';
 import { operationSchema } from './schemas.js';
 import { placedRollInterpretationSchema } from './diceResponse.js';
@@ -13,10 +14,12 @@ export const createOperationSchema = operationSchema.options[0]
     introduction: knowledgeIntroductionSchema,
     characterId: z.uuid().optional(),
     preparationReceiptId: z.uuid().optional(),
+    npcPreparationReceiptId: z.uuid().optional(),
   })
   .strict();
 export const gameplayResponseSchema = z
   .object({
+    continuityChanges: z.array(continuityChangeSchema).optional(),
     narrative: z.string().trim().min(1),
     operations: z.array(
       z.discriminatedUnion('op', [
