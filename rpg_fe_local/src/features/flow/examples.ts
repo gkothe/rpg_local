@@ -193,6 +193,7 @@ export function examplePayload(pinned: boolean, mentioned: boolean, book: boolea
       campaignSourceSeeds: [],
       characters: mentioned ? [player, npc] : [player],
       state: { location: 'North bridge' },
+      atlas: atlasReadResult,
       schema: responseSchemaExample,
       action: mentioned ? 'I ask Ivo for help and cross the bridge.' : 'I cross the bridge.',
     },
@@ -463,4 +464,40 @@ export const npcPrepareResult = {
   },
   guidance:
     'Use the exact createOperation and profileChange if introducing this NPC. Keep private motives out of public description/narration until revealed. Unused drafts are not committed. Use npcPreparationReceiptId with combat_prepare to reuse this identity.',
+};
+
+// The map stays scoped; this fixture starts before any geography has been recorded.
+export const atlasReadArgs = { scope: 'world', cursor: 0, routeCursor: 0 };
+export const atlasReadResult = {
+  scope: null,
+  position: null,
+  breadcrumb: [],
+  places: [],
+  routes: [],
+  frames: [],
+  nextCursor: null,
+  nextRouteCursor: null,
+};
+export const atlasPrepareArgs = {
+  localKey: 'warehouse-ground-floor',
+  intent: 'Prepare the warehouse as a new site. Keep unknown dimensions schematic.',
+};
+export const atlasPrepareResult = {
+  receiptId: '99999999-9999-4999-8999-999999999999',
+  draft: {
+    places: [
+      {
+        key: 'warehouse',
+        title: 'Warehouse',
+        text: 'A loading site with an interior still to explore.',
+        visibility: 'player',
+        certainty: 'established',
+        origin: 'gm',
+        evidence: [],
+      },
+    ],
+    changes: {
+      places: [{ value: { placeId: { localKey: 'warehouse' }, visited: false }, expected: null }],
+    },
+  },
 };

@@ -114,7 +114,7 @@ export type JournalListQuery = z.infer<typeof journalListQuerySchema>;
 export type JournalConnection = { id: string; title: string; group: JournalGroup };
 export type JournalEvidenceRef = {
   id: string;
-  kind: 'turn' | 'campaign_source' | 'book';
+  kind: 'turn' | 'campaign_source' | 'book' | 'map_asset';
   label: string;
   turnId?: string;
   available: boolean;

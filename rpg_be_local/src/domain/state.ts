@@ -1,3 +1,4 @@
+import { mutateAtlas, undoAtlas } from './atlasMutation.js';
 import { validateNpcPreparedCreates } from './npcPreparation.js';
 import type { NpcPreparationPayload } from './npcPreparation.js';
 import { applyContinuity, undoContinuity } from './continuity.js';
@@ -146,7 +147,18 @@ export function applyResponse(
     [...introductions, ...response.knowledgeChanges],
     c.characters,
     aliases,
-    evidence ?? { campaignId: c.id, turnId },
+    {
+      ...(evidence ?? { campaignId: c.id, turnId }),
+      preparedKnowledgeIds: new Map(
+        [...(evidence?.preparedKnowledgeIds ?? [])].map(([i, id]) => [i + introductions.length, id])
+      ),
+      preparedKnowledgeEvidence: new Map(
+        [...(evidence?.preparedKnowledgeEvidence ?? [])].map(([i, value]) => [
+          i + introductions.length,
+          value,
+        ])
+      ),
+    },
     (index) =>
       index < introductions.length
         ? [
@@ -208,6 +220,22 @@ export function applyResponse(
     },
     evidence ?? { campaignId: c.id, turnId }
   );
+  if (response.atlasChanges) {
+    const maps = {
+      characters: aliases,
+      knowledge: new Map(
+        [...knowledge.createdIds]
+          .filter(([i]) => i >= introductions.length)
+          .map(([i, id]) => [i - introductions.length, id])
+      ),
+      introductions: new Map<number, string>(),
+    };
+    const changed = atResponseField(['atlasChanges'], () =>
+      mutateAtlas(c, response.atlasChanges, maps, evidence ?? { campaignId: c.id, turnId })
+    );
+    c.atlas = changed.atlas;
+    changes.push('Geography updated');
+  }
   validateCombatTurn({
     before: original,
     after: c,
@@ -227,6 +255,9 @@ export function applyResponse(
     }),
     snapshot: {
       turnId,
+      ...(response.atlasChanges
+        ? { ...(original.atlas ? { beforeAtlas: original.atlas } : {}), afterAtlas: c.atlas }
+        : {}),
       ...(response.continuityChanges?.length
         ? { beforeContinuity: continuity.before, afterContinuity: continuity.after }
         : {}),
@@ -246,6 +277,7 @@ export function applyResponse(
 }
 export function undoSnapshot(original: Campaign, snapshot: Snapshot): Campaign {
   const c = structuredClone(original);
+  undoAtlas(c, snapshot.beforeAtlas, snapshot.afterAtlas);
   undoContinuity(c, snapshot.beforeContinuity ?? [], snapshot.afterContinuity ?? []);
   for (const after of snapshot.afterKnowledge ?? []) {
     if (

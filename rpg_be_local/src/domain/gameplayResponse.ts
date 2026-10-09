@@ -1,3 +1,4 @@
+import { atlasMutationSchema } from './atlas.js';
 import { z } from 'zod';
 import { continuityChangeSchema } from './continuity.js';
 import { prepareCitationInput, citationWireSchema } from './citationInput.js';
@@ -20,6 +21,7 @@ export const createOperationSchema = operationSchema.options[0]
 export const gameplayResponseSchema = z
   .object({
     continuityChanges: z.array(continuityChangeSchema).optional(),
+    atlasChanges: atlasMutationSchema.optional(),
     narrative: z.string().trim().min(1),
     operations: z.array(
       z.discriminatedUnion('op', [

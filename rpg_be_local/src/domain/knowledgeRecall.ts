@@ -180,14 +180,16 @@ export function createKnowledgeRecall(raw: FrozenKnowledge) {
       ? { holderHistorical: !frozen.characters.some((c) => c.id === r.holderId) }
       : {}),
     evidence: r.evidence.map((e) =>
-      e.type === 'campaign_source'
-        ? {
-            ...e,
-            available: frozen.sourceVersions
-              ? frozen.sourceVersions.some((s) => s.id === e.sourceId && s.version === e.version)
-              : frozen.sourceIds.includes(e.sourceId),
-          }
-        : e
+      e.type === 'map_asset'
+        ? { type: e.type, assetId: e.assetId, observationId: e.observationId, region: e.region }
+        : e.type === 'campaign_source'
+          ? {
+              ...e,
+              available: frozen.sourceVersions
+                ? frozen.sourceVersions.some((s) => s.id === e.sourceId && s.version === e.version)
+                : frozen.sourceIds.includes(e.sourceId),
+            }
+          : e
     ),
   });
   return {

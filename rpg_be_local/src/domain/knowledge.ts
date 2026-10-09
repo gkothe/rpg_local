@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { atResponseField, type ResponsePath } from './responseFields.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -48,7 +49,25 @@ export const sourceSpanSchema = z
   })
   .strict();
 export type SourceSpan = z.infer<typeof sourceSpanSchema>;
+export const mapAssetEvidenceSchema = z
+  .object({
+    type: z.literal('map_asset'),
+    assetId: z.uuid(),
+    observationId: z.uuid(),
+    region: z
+      .object({
+        x: z.number().min(0).max(1),
+        y: z.number().min(0).max(1),
+        width: z.number().positive().max(1),
+        height: z.number().positive().max(1),
+      })
+      .strict()
+      .refine((r) => r.x + r.width <= 1 && r.y + r.height <= 1),
+  })
+  .strict();
+export type MapAssetEvidence = z.infer<typeof mapAssetEvidenceSchema>;
 export const knowledgeEvidenceSchema = z.discriminatedUnion('type', [
+  mapAssetEvidenceSchema,
   z
     .object({
       type: z.literal('campaign_source'),
@@ -145,6 +164,10 @@ export function normalizeKnowledge(records: readonly CampaignKnowledge[]): Campa
   );
 }
 export type KnowledgeValidation = {
+  mapObservations?: readonly MapAssetEvidence[];
+  preparedKnowledgeIds?: ReadonlyMap<number, string>;
+  preparedKnowledgeEvidence?: ReadonlyMap<number, KnowledgeValidation>;
+  preparedAtlasEvidence?: ReadonlyMap<string, KnowledgeValidation>;
   preparedNpcEvidence?: ReadonlyMap<string, KnowledgeValidation>;
   rolls?: readonly import('./dice.js').DiceRecord[];
   sourceSpans?: readonly SourceSpan[];
@@ -165,7 +188,10 @@ export function validateKnowledgeEvidence(
   if (provenance.origin !== KnowledgeOrigin.Source && provenance.evidence.length)
     invalid('Only source origins may carry source evidence');
   for (const evidence of provenance.evidence) {
-    if (evidence.type === 'campaign_source') {
+    if (evidence.type === 'map_asset') {
+      if (!context.mapObservations?.some((entry) => isDeepStrictEqual(entry, evidence)))
+        invalid('Map evidence must identify a captured accepted observation of an owned asset');
+    } else if (evidence.type === 'campaign_source') {
       const span = context.sourceSpans?.find(
         (s) =>
           s.id === evidence.sourceId &&
@@ -221,7 +247,13 @@ export function applyKnowledgeChanges(
   for (const [index, value] of raw.entries()) {
     atResponseField(responsePath?.(index) ?? ['knowledgeChanges', index], () => {
       const op = knowledgeChangeSchema.parse(value);
-      validateKnowledgeEvidence(op, evidenceFor?.(index) ?? context);
+      validateKnowledgeEvidence(
+        op,
+        evidenceFor?.(index) ?? context.preparedKnowledgeEvidence?.get(index) ?? context
+      );
+      const reservedId = context.preparedKnowledgeIds?.get(index);
+      if (reservedId && records.some((r) => r.id === reservedId))
+        invalid('Prepared Place identity already exists');
       const now = new Date().toISOString();
       const current = op.op === 'update' ? records.find((r) => r.id === op.id) : undefined;
       if (op.op === 'update' && !current) invalid('Knowledge record not found');
@@ -276,7 +308,7 @@ export function applyKnowledgeChanges(
             attributions: [...current.attributions, attribution],
           }
         : {
-            id: randomUUID(),
+            id: context.preparedKnowledgeIds?.get(index) ?? randomUUID(),
             visibility,
             introductionVisibility: visibility,
             kind: op.op === 'create' ? op.kind : KnowledgeKind.Other,

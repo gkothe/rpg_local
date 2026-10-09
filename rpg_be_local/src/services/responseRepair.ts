@@ -18,6 +18,7 @@ const editableFields = new Set([
   'operations',
   'knowledgeChanges',
   'continuityChanges',
+  'atlasChanges',
   'ruleCitations',
   'operationExplanations',
   'rollInterpretations',
@@ -142,6 +143,21 @@ export function applyResponseCorrections<T>(original: T, paths: ResponsePath[], 
       correction.value
     );
   }
+  if (
+    JSON.stringify(
+      (copy as { atlasChanges?: { preparedReceiptIds?: string[] } }).atlasChanges
+        ?.preparedReceiptIds ?? []
+    ) !==
+    JSON.stringify(
+      (original as { atlasChanges?: { preparedReceiptIds?: string[] } }).atlasChanges
+        ?.preparedReceiptIds ?? []
+    )
+  )
+    throw new Problem(
+      502,
+      'response_repair_failed',
+      'Correction cannot replace owned atlas preparation receipts'
+    );
   if (preparedIdentities(copy) !== preparedIdentities(original, copy))
     throw new Problem(
       502,

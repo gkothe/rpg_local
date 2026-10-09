@@ -1,3 +1,6 @@
+import { AtlasImportService } from './services/atlasImport.js';
+import { AtlasService } from './services/atlas.js';
+import { ATLAS_OPTIONS, atlasQuerySchema } from './domain/atlas.js';
 import { NPC_CONTINUITY_LIMITS } from './domain/continuity.js';
 import { NPC_PREPARATION_LIMITS } from './domain/npcPreparation.js';
 import { publicCampaign, publicTurn } from './domain/playerProjection.js';
@@ -141,6 +144,8 @@ export function createApp(options: AppOptions) {
   const turns = store ? new TurnService(store, providers) : null;
   const library = store ? new LibraryService(store) : null;
   const campaigns = store ? new CampaignService(store, providers) : null;
+  const atlas = store ? new AtlasService(store) : null;
+  const atlasImports = store ? new AtlasImportService(store, providers) : null;
   const journal = store ? new JournalService(store, providers) : null;
   const advancement = store ? new AdvancementService(store, providers) : null;
   const memoryRebuild = store ? new MemoryRebuildService(store, providers) : null;
@@ -216,6 +221,7 @@ export function createApp(options: AppOptions) {
     wrap(async (_req, res) => {
       res.json({
         data: {
+          atlas: ATLAS_OPTIONS,
           turnStatuses: TURN_STATUS_OPTIONS.map((x) => x.id),
           sourceKinds: SOURCE_KIND_OPTIONS.map((x) => x.id),
           characterTypes: CHARACTER_TYPE_OPTIONS.map((x) => x.id),
@@ -272,6 +278,83 @@ export function createApp(options: AppOptions) {
           },
         },
       });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/atlas/imports',
+    upload.single('file'),
+    wrap(async (req, res) => {
+      if (!atlasImports) throw new Problem(503, 'database_setup', 'Database is unavailable');
+      if (!req.file) throw new Problem(422, 'atlas_image_missing', 'Attach a PNG or JPEG map');
+      res.status(202).json({
+        data: await atlasImports.start(
+          param(req, 'id'),
+          {
+            requestId: req.body.requestId,
+            ...(req.body.scope ? { scope: req.body.scope } : {}),
+            legend: req.body.legend ?? '',
+          },
+          req.file.buffer
+        ),
+      });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/atlas/imports',
+    wrap(async (req, res) => {
+      if (!atlasImports) throw new Problem(503, 'database_setup', 'Database is unavailable');
+      const cursor = z.coerce
+        .number()
+        .int()
+        .nonnegative()
+        .parse(req.query.cursor ?? 0);
+      res.json({ data: await atlasImports.list(param(req, 'id'), cursor) });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/atlas/imports/:jobId',
+    wrap(async (req, res) => {
+      if (!atlasImports) throw new Problem(503, 'database_setup', 'Database is unavailable');
+      res.json({ data: await atlasImports.get(param(req, 'id'), param(req, 'jobId')) });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/atlas/imports/:jobId/cancel',
+    wrap(async (req, res) => {
+      if (!atlasImports) throw new Problem(503, 'database_setup', 'Database is unavailable');
+      res.json({ data: await atlasImports.cancel(param(req, 'id'), param(req, 'jobId')) });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/atlas/imports/:jobId/accept',
+    wrap(async (req, res) => {
+      if (!atlasImports) throw new Problem(503, 'database_setup', 'Database is unavailable');
+      res.json({
+        data: await atlasImports.accept(param(req, 'id'), param(req, 'jobId'), req.body),
+      });
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/atlas/images/:assetId',
+    wrap(async (req, res) => {
+      if (!atlasImports) throw new Problem(503, 'database_setup', 'Database is unavailable');
+      const image = await atlasImports.image(param(req, 'id'), param(req, 'assetId'));
+      res.set('Cache-Control', 'private, no-store').type(image.mime).send(image.bytes);
+    })
+  );
+  app.get(
+    '/api/campaigns/:id/atlas',
+    wrap(async (req, res) => {
+      if (!atlas) throw new Problem(503, 'database_setup', 'Database is unavailable');
+      const q = atlasQuerySchema.parse(req.query);
+      res.json({ data: await atlas.read(param(req, 'id'), q.scope, q.cursor, q.routeCursor) });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/atlas/changes',
+    wrap(async (req, res) => {
+      if (!atlas) throw new Problem(503, 'database_setup', 'Database is unavailable');
+      res.json({ data: await atlas.edit(param(req, 'id'), req.body) });
     })
   );
   app.get(

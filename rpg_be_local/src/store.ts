@@ -1,3 +1,5 @@
+import { atlasConflict } from './domain/atlasCompatibility.js';
+import { validateAtlas } from './domain/atlas.js';
 import { sourceSections } from './domain/sourceSections.js';
 import { selectInitialSourceSections } from './domain/campaignSourceRecall.js';
 import pg, { type PoolClient } from 'pg';
@@ -42,13 +44,36 @@ export class Store {
     return campaign;
   }
   async save(c: Campaign, client: PoolClient): Promise<void> {
+    validateAtlas(c);
+    await this.validateAtlasAssets(c, client);
     c.updatedAt = new Date().toISOString();
     await client.query(
       'UPDATE campaigns SET document=$2,rule_system_id=$3,updated_at=now() WHERE id=$1',
       [c.id, c, c.ruleSystemId ?? null]
     );
   }
+  private async validateAtlasAssets(c: Campaign, client: PoolClient): Promise<void> {
+    for (const frame of c.atlas?.frames ?? []) {
+      for (const [id, publicImage] of [
+        [frame.privateAssetId, false],
+        [frame.playerAssetId, true],
+      ] as const) {
+        if (!id) continue;
+        const row = await client.query(
+          'SELECT player_safe FROM atlas_assets WHERE id=$1 AND campaign_id=$2',
+          [id, c.id]
+        );
+        if (!row.rows[0] || (publicImage && !row.rows[0].player_safe))
+          throw new Problem(
+            422,
+            'atlas_asset',
+            'Frame image must be owned by this campaign and explicitly approved for player display'
+          );
+      }
+    }
+  }
   async insert(c: Campaign, client?: PoolClient): Promise<void> {
+    validateAtlas(c);
     await (client ?? this.pool).query(
       'INSERT INTO campaigns(id,document,rule_system_id) VALUES($1,$2,$3)',
       [c.id, c, c.ruleSystemId ?? null]
@@ -178,7 +203,8 @@ export class Store {
             ? 'This attempt predates the current game contract; start a new action'
             : latest.rows[0]?.id !== turn.id
               ? 'A later action superseded this attempt'
-              : (continuityConflict(session.frozen_continuity ?? undefined, campaign) ??
+              : (atlasConflict(session.frozen_atlas ?? undefined, campaign) ??
+                continuityConflict(session.frozen_continuity ?? undefined, campaign) ??
                 frozenContextConflict(session.frozen_knowledge, campaign) ??
                 (outdatedRules || campaign.ruleResolution
                   ? 'Rule library changed or is unresolved; start a new action after selecting current rules'
@@ -211,6 +237,7 @@ export class Store {
       ...(root.frozen_sources ? { frozenSources: root.frozen_sources } : {}),
       ...(root.frozen_history ? { frozenHistory: root.frozen_history } : {}),
       ...(root.frozen_continuity ? { frozenContinuity: root.frozen_continuity } : {}),
+      ...(root.frozen_atlas ? { frozenAtlas: root.frozen_atlas } : {}),
       toolDefinitions: root.tool_definitions,
     };
   }
@@ -225,6 +252,7 @@ export class Store {
       delete document.context.frozenSources;
       delete document.context.frozenHistory;
       delete document.context.frozenContinuity;
+      delete document.context.frozenAtlas;
     }
     await client.query('UPDATE turns SET document=$2,status=$3 WHERE id=$1', [
       t.id,
@@ -323,6 +351,9 @@ export class Store {
     c.memory = m;
   }
   async recover(): Promise<number> {
+    await this.pool.query(
+      "UPDATE atlas_imports SET status='interrupted',owner_id=NULL,error='Image extraction was interrupted; start a new import.',updated_at=now() WHERE status='running' AND (lease_until IS NULL OR lease_until < now())"
+    );
     const r = await this.pool.query(
       "UPDATE turns SET status=$1,document=jsonb_set(jsonb_set(document,'{status}',to_jsonb($1::text)),'{error}',to_jsonb(CASE WHEN document->>'editingPending'='true' THEN 'Narrative editing was interrupted; resume editing to finish without repeating gameplay.' ELSE $4::text END)),owner=NULL,lease_until=NULL WHERE status IN ($2,$3) AND (lease_until IS NULL OR lease_until < now())",
       [
@@ -334,6 +365,9 @@ export class Store {
     );
     await this.pool.query(
       "UPDATE npc_preparations SET status='interrupted',owner_id=NULL,updated_at=now() WHERE status='running' AND NOT EXISTS (SELECT 1 FROM turns WHERE id=npc_preparations.owner_turn_id AND status='running' AND lease_until>now())"
+    );
+    await this.pool.query(
+      "UPDATE atlas_preparations SET status='interrupted',owner_id=NULL,updated_at=now() WHERE status='running' AND NOT EXISTS (SELECT 1 FROM turns WHERE id=atlas_preparations.owner_turn_id AND status='running' AND lease_until>now())"
     );
     // Journal jobs whose owner lease expired cannot commit; surface them for an explicit retry.
     const journal = await this.pool.query(

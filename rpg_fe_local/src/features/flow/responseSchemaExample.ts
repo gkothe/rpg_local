@@ -1,4 +1,4 @@
-// Reviewed CLI wire contract; computed citation metadata is required in persisted responses.
+// Literal example generated from the actual gameplay wire schema.
 export const responseSchemaExample = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
@@ -45,6 +45,56 @@ export const responseSchemaExample = {
                 type: 'array',
                 items: {
                   oneOf: [
+                    {
+                      type: 'object',
+                      properties: {
+                        type: {
+                          type: 'string',
+                          const: 'map_asset',
+                        },
+                        assetId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        observationId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        region: {
+                          type: 'object',
+                          properties: {
+                            x: {
+                              type: 'number',
+                              minimum: 0,
+                              maximum: 1,
+                            },
+                            y: {
+                              type: 'number',
+                              minimum: 0,
+                              maximum: 1,
+                            },
+                            width: {
+                              type: 'number',
+                              exclusiveMinimum: 0,
+                              maximum: 1,
+                            },
+                            height: {
+                              type: 'number',
+                              exclusiveMinimum: 0,
+                              maximum: 1,
+                            },
+                          },
+                          required: ['x', 'y', 'width', 'height'],
+                          additionalProperties: false,
+                        },
+                      },
+                      required: ['type', 'assetId', 'observationId', 'region'],
+                      additionalProperties: false,
+                    },
                     {
                       type: 'object',
                       properties: {
@@ -360,6 +410,56 @@ export const responseSchemaExample = {
                 type: 'array',
                 items: {
                   oneOf: [
+                    {
+                      type: 'object',
+                      properties: {
+                        type: {
+                          type: 'string',
+                          const: 'map_asset',
+                        },
+                        assetId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        observationId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        region: {
+                          type: 'object',
+                          properties: {
+                            x: {
+                              type: 'number',
+                              minimum: 0,
+                              maximum: 1,
+                            },
+                            y: {
+                              type: 'number',
+                              minimum: 0,
+                              maximum: 1,
+                            },
+                            width: {
+                              type: 'number',
+                              exclusiveMinimum: 0,
+                              maximum: 1,
+                            },
+                            height: {
+                              type: 'number',
+                              exclusiveMinimum: 0,
+                              maximum: 1,
+                            },
+                          },
+                          required: ['x', 'y', 'width', 'height'],
+                          additionalProperties: false,
+                        },
+                      },
+                      required: ['type', 'assetId', 'observationId', 'region'],
+                      additionalProperties: false,
+                    },
                     {
                       type: 'object',
                       properties: {
@@ -746,6 +846,56 @@ export const responseSchemaExample = {
                       properties: {
                         type: {
                           type: 'string',
+                          const: 'map_asset',
+                        },
+                        assetId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        observationId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        region: {
+                          type: 'object',
+                          properties: {
+                            x: {
+                              type: 'number',
+                              minimum: 0,
+                              maximum: 1,
+                            },
+                            y: {
+                              type: 'number',
+                              minimum: 0,
+                              maximum: 1,
+                            },
+                            width: {
+                              type: 'number',
+                              exclusiveMinimum: 0,
+                              maximum: 1,
+                            },
+                            height: {
+                              type: 'number',
+                              exclusiveMinimum: 0,
+                              maximum: 1,
+                            },
+                          },
+                          required: ['x', 'y', 'width', 'height'],
+                          additionalProperties: false,
+                        },
+                      },
+                      required: ['type', 'assetId', 'observationId', 'region'],
+                      additionalProperties: false,
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        type: {
+                          type: 'string',
                           const: 'campaign_source',
                         },
                         sourceId: {
@@ -972,6 +1122,2545 @@ export const responseSchemaExample = {
         ],
       },
     },
+    atlasChanges: {
+      type: 'object',
+      properties: {
+        createPlaces: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              key: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 200,
+              },
+              title: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 200,
+              },
+              text: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 100000,
+              },
+              visibility: {
+                type: 'string',
+                enum: ['player', 'gm_only'],
+              },
+              certainty: {
+                type: 'string',
+                enum: ['established', 'rumor', 'belief'],
+              },
+            },
+            required: ['key', 'title', 'text', 'visibility', 'certainty'],
+            additionalProperties: false,
+          },
+        },
+        places: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              value: {
+                type: 'object',
+                properties: {
+                  placeId: {
+                    anyOf: [
+                      {
+                        anyOf: [
+                          {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          {
+                            type: 'object',
+                            properties: {
+                              knowledgeChangeIndex: {
+                                type: 'integer',
+                                minimum: 0,
+                                maximum: 9007199254740991,
+                              },
+                            },
+                            required: ['knowledgeChangeIndex'],
+                            additionalProperties: false,
+                          },
+                          {
+                            type: 'object',
+                            properties: {
+                              npcIntroductionOperationIndex: {
+                                type: 'integer',
+                                minimum: 0,
+                                maximum: 9007199254740991,
+                              },
+                            },
+                            required: ['npcIntroductionOperationIndex'],
+                            additionalProperties: false,
+                          },
+                        ],
+                      },
+                      {
+                        type: 'object',
+                        properties: {
+                          localKey: {
+                            type: 'string',
+                            minLength: 1,
+                            maxLength: 200,
+                          },
+                        },
+                        required: ['localKey'],
+                        additionalProperties: false,
+                      },
+                    ],
+                  },
+                  parentPlaceId: {
+                    anyOf: [
+                      {
+                        anyOf: [
+                          {
+                            anyOf: [
+                              {
+                                type: 'string',
+                                format: 'uuid',
+                                pattern:
+                                  '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                              },
+                              {
+                                type: 'object',
+                                properties: {
+                                  knowledgeChangeIndex: {
+                                    type: 'integer',
+                                    minimum: 0,
+                                    maximum: 9007199254740991,
+                                  },
+                                },
+                                required: ['knowledgeChangeIndex'],
+                                additionalProperties: false,
+                              },
+                              {
+                                type: 'object',
+                                properties: {
+                                  npcIntroductionOperationIndex: {
+                                    type: 'integer',
+                                    minimum: 0,
+                                    maximum: 9007199254740991,
+                                  },
+                                },
+                                required: ['npcIntroductionOperationIndex'],
+                                additionalProperties: false,
+                              },
+                            ],
+                          },
+                          {
+                            type: 'object',
+                            properties: {
+                              localKey: {
+                                type: 'string',
+                                minLength: 1,
+                                maxLength: 200,
+                              },
+                            },
+                            required: ['localKey'],
+                            additionalProperties: false,
+                          },
+                        ],
+                      },
+                      {
+                        type: 'null',
+                      },
+                    ],
+                  },
+                  visited: {
+                    type: 'boolean',
+                  },
+                  placement: {
+                    type: 'object',
+                    properties: {
+                      frameId: {
+                        anyOf: [
+                          {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          {
+                            type: 'object',
+                            properties: {
+                              localKey: {
+                                type: 'string',
+                                minLength: 1,
+                                maxLength: 200,
+                              },
+                            },
+                            required: ['localKey'],
+                            additionalProperties: false,
+                          },
+                        ],
+                      },
+                      x: {
+                        type: 'number',
+                        minimum: 0,
+                      },
+                      y: {
+                        type: 'number',
+                        minimum: 0,
+                      },
+                      width: {
+                        type: 'number',
+                        exclusiveMinimum: 0,
+                      },
+                      height: {
+                        type: 'number',
+                        exclusiveMinimum: 0,
+                      },
+                    },
+                    required: ['frameId', 'x', 'y'],
+                    additionalProperties: false,
+                  },
+                },
+                required: ['placeId', 'visited'],
+                additionalProperties: false,
+              },
+              expected: {
+                anyOf: [
+                  {
+                    anyOf: [
+                      {
+                        type: 'object',
+                        properties: {
+                          placeId: {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          parentPlaceId: {
+                            anyOf: [
+                              {
+                                type: 'string',
+                                format: 'uuid',
+                                pattern:
+                                  '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                              },
+                              {
+                                type: 'null',
+                              },
+                            ],
+                          },
+                          visited: {
+                            type: 'boolean',
+                          },
+                          placement: {
+                            type: 'object',
+                            properties: {
+                              frameId: {
+                                type: 'string',
+                                format: 'uuid',
+                                pattern:
+                                  '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                              },
+                              x: {
+                                type: 'number',
+                                minimum: 0,
+                              },
+                              y: {
+                                type: 'number',
+                                minimum: 0,
+                              },
+                              width: {
+                                type: 'number',
+                                exclusiveMinimum: 0,
+                              },
+                              height: {
+                                type: 'number',
+                                exclusiveMinimum: 0,
+                              },
+                            },
+                            required: ['frameId', 'x', 'y'],
+                            additionalProperties: false,
+                          },
+                        },
+                        required: ['placeId', 'visited'],
+                        additionalProperties: false,
+                      },
+                      {
+                        type: 'string',
+                        pattern: '^[a-f0-9]{64}$',
+                      },
+                    ],
+                  },
+                  {
+                    type: 'null',
+                  },
+                ],
+              },
+            },
+            required: ['value', 'expected'],
+            additionalProperties: false,
+          },
+        },
+        routes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              value: {
+                type: 'object',
+                properties: {
+                  id: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  from: {
+                    anyOf: [
+                      {
+                        anyOf: [
+                          {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          {
+                            type: 'object',
+                            properties: {
+                              knowledgeChangeIndex: {
+                                type: 'integer',
+                                minimum: 0,
+                                maximum: 9007199254740991,
+                              },
+                            },
+                            required: ['knowledgeChangeIndex'],
+                            additionalProperties: false,
+                          },
+                          {
+                            type: 'object',
+                            properties: {
+                              npcIntroductionOperationIndex: {
+                                type: 'integer',
+                                minimum: 0,
+                                maximum: 9007199254740991,
+                              },
+                            },
+                            required: ['npcIntroductionOperationIndex'],
+                            additionalProperties: false,
+                          },
+                        ],
+                      },
+                      {
+                        type: 'object',
+                        properties: {
+                          localKey: {
+                            type: 'string',
+                            minLength: 1,
+                            maxLength: 200,
+                          },
+                        },
+                        required: ['localKey'],
+                        additionalProperties: false,
+                      },
+                    ],
+                  },
+                  to: {
+                    anyOf: [
+                      {
+                        anyOf: [
+                          {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          {
+                            type: 'object',
+                            properties: {
+                              knowledgeChangeIndex: {
+                                type: 'integer',
+                                minimum: 0,
+                                maximum: 9007199254740991,
+                              },
+                            },
+                            required: ['knowledgeChangeIndex'],
+                            additionalProperties: false,
+                          },
+                          {
+                            type: 'object',
+                            properties: {
+                              npcIntroductionOperationIndex: {
+                                type: 'integer',
+                                minimum: 0,
+                                maximum: 9007199254740991,
+                              },
+                            },
+                            required: ['npcIntroductionOperationIndex'],
+                            additionalProperties: false,
+                          },
+                        ],
+                      },
+                      {
+                        type: 'object',
+                        properties: {
+                          localKey: {
+                            type: 'string',
+                            minLength: 1,
+                            maxLength: 200,
+                          },
+                        },
+                        required: ['localKey'],
+                        additionalProperties: false,
+                      },
+                    ],
+                  },
+                  bidirectional: {
+                    type: 'boolean',
+                  },
+                  kind: {
+                    type: 'string',
+                    enum: [
+                      'road',
+                      'path',
+                      'passage',
+                      'door',
+                      'stairs',
+                      'ladder',
+                      'waterway',
+                      'other',
+                    ],
+                  },
+                  access: {
+                    type: 'string',
+                    enum: ['open', 'closed', 'locked', 'blocked', 'unknown'],
+                  },
+                  visibility: {
+                    type: 'string',
+                    enum: ['player', 'gm_only'],
+                  },
+                  certainty: {
+                    type: 'string',
+                    enum: ['established', 'rumor', 'belief'],
+                  },
+                  direction: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 200,
+                  },
+                  distance: {
+                    type: 'object',
+                    properties: {
+                      value: {
+                        type: 'number',
+                        exclusiveMinimum: 0,
+                      },
+                      unit: {
+                        type: 'string',
+                        enum: ['m', 'km', 'ft', 'mi'],
+                      },
+                    },
+                    required: ['value', 'unit'],
+                    additionalProperties: false,
+                  },
+                  travel: {
+                    type: 'object',
+                    properties: {
+                      mode: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 200,
+                      },
+                      minutes: {
+                        type: 'number',
+                        exclusiveMinimum: 0,
+                      },
+                      conditions: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 100000,
+                      },
+                    },
+                    required: ['mode', 'minutes'],
+                    additionalProperties: false,
+                  },
+                  drawing: {
+                    type: 'object',
+                    properties: {
+                      frameId: {
+                        anyOf: [
+                          {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          {
+                            type: 'object',
+                            properties: {
+                              localKey: {
+                                type: 'string',
+                                minLength: 1,
+                                maxLength: 200,
+                              },
+                            },
+                            required: ['localKey'],
+                            additionalProperties: false,
+                          },
+                        ],
+                      },
+                      points: {
+                        minItems: 2,
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            x: {
+                              type: 'number',
+                              minimum: 0,
+                            },
+                            y: {
+                              type: 'number',
+                              minimum: 0,
+                            },
+                          },
+                          required: ['x', 'y'],
+                          additionalProperties: false,
+                        },
+                      },
+                    },
+                    required: ['frameId', 'points'],
+                    additionalProperties: false,
+                  },
+                  origin: {
+                    type: 'string',
+                    enum: ['source', 'gm', 'player', 'unknown'],
+                  },
+                  evidence: {
+                    type: 'array',
+                    items: {
+                      oneOf: [
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'map_asset',
+                            },
+                            assetId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            observationId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            region: {
+                              type: 'object',
+                              properties: {
+                                x: {
+                                  type: 'number',
+                                  minimum: 0,
+                                  maximum: 1,
+                                },
+                                y: {
+                                  type: 'number',
+                                  minimum: 0,
+                                  maximum: 1,
+                                },
+                                width: {
+                                  type: 'number',
+                                  exclusiveMinimum: 0,
+                                  maximum: 1,
+                                },
+                                height: {
+                                  type: 'number',
+                                  exclusiveMinimum: 0,
+                                  maximum: 1,
+                                },
+                              },
+                              required: ['x', 'y', 'width', 'height'],
+                              additionalProperties: false,
+                            },
+                          },
+                          required: ['type', 'assetId', 'observationId', 'region'],
+                          additionalProperties: false,
+                        },
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'campaign_source',
+                            },
+                            sourceId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            version: {
+                              type: 'integer',
+                              exclusiveMinimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                            sourceName: {
+                              type: 'string',
+                            },
+                            quote: {
+                              type: 'string',
+                              minLength: 1,
+                              maxLength: 100000,
+                            },
+                            start: {
+                              type: 'integer',
+                              minimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                            end: {
+                              type: 'integer',
+                              exclusiveMinimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                          },
+                          required: ['type', 'sourceId', 'version', 'sourceName', 'quote'],
+                          additionalProperties: false,
+                          description:
+                            'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                        },
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'book',
+                            },
+                            citation: {
+                              type: 'object',
+                              properties: {
+                                receiptId: {
+                                  type: 'string',
+                                  format: 'uuid',
+                                  pattern:
+                                    '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                },
+                                path: {
+                                  type: 'string',
+                                  minLength: 1,
+                                  maxLength: 512,
+                                },
+                                quote: {
+                                  type: 'string',
+                                  minLength: 1,
+                                  maxLength: 600,
+                                },
+                                start: {
+                                  type: 'integer',
+                                  minimum: 0,
+                                  maximum: 9007199254740991,
+                                },
+                                end: {
+                                  type: 'integer',
+                                  exclusiveMinimum: 0,
+                                  maximum: 9007199254740991,
+                                },
+                                source: {
+                                  type: 'string',
+                                  maxLength: 80,
+                                  pattern: '^[a-z0-9][a-z0-9_-]*$',
+                                },
+                                systemId: {
+                                  type: 'string',
+                                  format: 'uuid',
+                                  pattern:
+                                    '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                },
+                                revision: {
+                                  type: 'integer',
+                                  exclusiveMinimum: 0,
+                                  maximum: 9007199254740991,
+                                },
+                                contentHash: {
+                                  type: 'string',
+                                  pattern: '^[a-f0-9]{64}$',
+                                },
+                                precision: {
+                                  type: 'string',
+                                  enum: ['exact', 'approximate', 'unknown'],
+                                },
+                                pdfPages: {
+                                  maxItems: 2000,
+                                  type: 'array',
+                                  items: {
+                                    type: 'integer',
+                                    minimum: 1,
+                                    maximum: 2000,
+                                  },
+                                },
+                                printedPages: {
+                                  maxItems: 2000,
+                                  type: 'array',
+                                  items: {
+                                    type: 'string',
+                                    maxLength: 120,
+                                  },
+                                },
+                              },
+                              required: [
+                                'receiptId',
+                                'path',
+                                'quote',
+                                'source',
+                                'systemId',
+                                'revision',
+                                'contentHash',
+                              ],
+                              additionalProperties: false,
+                              description:
+                                'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                            },
+                          },
+                          required: ['type', 'citation'],
+                          additionalProperties: false,
+                        },
+                      ],
+                    },
+                  },
+                },
+                required: [
+                  'from',
+                  'to',
+                  'bidirectional',
+                  'kind',
+                  'access',
+                  'visibility',
+                  'certainty',
+                  'origin',
+                  'evidence',
+                ],
+                additionalProperties: false,
+              },
+              expected: {
+                anyOf: [
+                  {
+                    anyOf: [
+                      {
+                        type: 'object',
+                        properties: {
+                          id: {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          from: {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          to: {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          bidirectional: {
+                            type: 'boolean',
+                          },
+                          kind: {
+                            type: 'string',
+                            enum: [
+                              'road',
+                              'path',
+                              'passage',
+                              'door',
+                              'stairs',
+                              'ladder',
+                              'waterway',
+                              'other',
+                            ],
+                          },
+                          access: {
+                            type: 'string',
+                            enum: ['open', 'closed', 'locked', 'blocked', 'unknown'],
+                          },
+                          visibility: {
+                            type: 'string',
+                            enum: ['player', 'gm_only'],
+                          },
+                          certainty: {
+                            type: 'string',
+                            enum: ['established', 'rumor', 'belief'],
+                          },
+                          direction: {
+                            type: 'string',
+                            minLength: 1,
+                            maxLength: 200,
+                          },
+                          distance: {
+                            type: 'object',
+                            properties: {
+                              value: {
+                                type: 'number',
+                                exclusiveMinimum: 0,
+                              },
+                              unit: {
+                                type: 'string',
+                                enum: ['m', 'km', 'ft', 'mi'],
+                              },
+                            },
+                            required: ['value', 'unit'],
+                            additionalProperties: false,
+                          },
+                          travel: {
+                            type: 'object',
+                            properties: {
+                              mode: {
+                                type: 'string',
+                                minLength: 1,
+                                maxLength: 200,
+                              },
+                              minutes: {
+                                type: 'number',
+                                exclusiveMinimum: 0,
+                              },
+                              conditions: {
+                                type: 'string',
+                                minLength: 1,
+                                maxLength: 100000,
+                              },
+                            },
+                            required: ['mode', 'minutes'],
+                            additionalProperties: false,
+                          },
+                          drawing: {
+                            type: 'object',
+                            properties: {
+                              frameId: {
+                                type: 'string',
+                                format: 'uuid',
+                                pattern:
+                                  '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                              },
+                              points: {
+                                minItems: 2,
+                                type: 'array',
+                                items: {
+                                  type: 'object',
+                                  properties: {
+                                    x: {
+                                      type: 'number',
+                                      minimum: 0,
+                                    },
+                                    y: {
+                                      type: 'number',
+                                      minimum: 0,
+                                    },
+                                  },
+                                  required: ['x', 'y'],
+                                  additionalProperties: false,
+                                },
+                              },
+                            },
+                            required: ['frameId', 'points'],
+                            additionalProperties: false,
+                          },
+                          origin: {
+                            type: 'string',
+                            enum: ['source', 'gm', 'player', 'unknown'],
+                          },
+                          evidence: {
+                            type: 'array',
+                            items: {
+                              oneOf: [
+                                {
+                                  type: 'object',
+                                  properties: {
+                                    type: {
+                                      type: 'string',
+                                      const: 'map_asset',
+                                    },
+                                    assetId: {
+                                      type: 'string',
+                                      format: 'uuid',
+                                      pattern:
+                                        '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                    },
+                                    observationId: {
+                                      type: 'string',
+                                      format: 'uuid',
+                                      pattern:
+                                        '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                    },
+                                    region: {
+                                      type: 'object',
+                                      properties: {
+                                        x: {
+                                          type: 'number',
+                                          minimum: 0,
+                                          maximum: 1,
+                                        },
+                                        y: {
+                                          type: 'number',
+                                          minimum: 0,
+                                          maximum: 1,
+                                        },
+                                        width: {
+                                          type: 'number',
+                                          exclusiveMinimum: 0,
+                                          maximum: 1,
+                                        },
+                                        height: {
+                                          type: 'number',
+                                          exclusiveMinimum: 0,
+                                          maximum: 1,
+                                        },
+                                      },
+                                      required: ['x', 'y', 'width', 'height'],
+                                      additionalProperties: false,
+                                    },
+                                  },
+                                  required: ['type', 'assetId', 'observationId', 'region'],
+                                  additionalProperties: false,
+                                },
+                                {
+                                  type: 'object',
+                                  properties: {
+                                    type: {
+                                      type: 'string',
+                                      const: 'campaign_source',
+                                    },
+                                    sourceId: {
+                                      type: 'string',
+                                      format: 'uuid',
+                                      pattern:
+                                        '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                    },
+                                    version: {
+                                      type: 'integer',
+                                      exclusiveMinimum: 0,
+                                      maximum: 9007199254740991,
+                                    },
+                                    sourceName: {
+                                      type: 'string',
+                                    },
+                                    quote: {
+                                      type: 'string',
+                                      minLength: 1,
+                                      maxLength: 100000,
+                                    },
+                                    start: {
+                                      type: 'integer',
+                                      minimum: 0,
+                                      maximum: 9007199254740991,
+                                    },
+                                    end: {
+                                      type: 'integer',
+                                      exclusiveMinimum: 0,
+                                      maximum: 9007199254740991,
+                                    },
+                                  },
+                                  required: ['type', 'sourceId', 'version', 'sourceName', 'quote'],
+                                  additionalProperties: false,
+                                  description:
+                                    'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                                },
+                                {
+                                  type: 'object',
+                                  properties: {
+                                    type: {
+                                      type: 'string',
+                                      const: 'book',
+                                    },
+                                    citation: {
+                                      type: 'object',
+                                      properties: {
+                                        receiptId: {
+                                          type: 'string',
+                                          format: 'uuid',
+                                          pattern:
+                                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                        },
+                                        path: {
+                                          type: 'string',
+                                          minLength: 1,
+                                          maxLength: 512,
+                                        },
+                                        quote: {
+                                          type: 'string',
+                                          minLength: 1,
+                                          maxLength: 600,
+                                        },
+                                        start: {
+                                          type: 'integer',
+                                          minimum: 0,
+                                          maximum: 9007199254740991,
+                                        },
+                                        end: {
+                                          type: 'integer',
+                                          exclusiveMinimum: 0,
+                                          maximum: 9007199254740991,
+                                        },
+                                        source: {
+                                          type: 'string',
+                                          maxLength: 80,
+                                          pattern: '^[a-z0-9][a-z0-9_-]*$',
+                                        },
+                                        systemId: {
+                                          type: 'string',
+                                          format: 'uuid',
+                                          pattern:
+                                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                        },
+                                        revision: {
+                                          type: 'integer',
+                                          exclusiveMinimum: 0,
+                                          maximum: 9007199254740991,
+                                        },
+                                        contentHash: {
+                                          type: 'string',
+                                          pattern: '^[a-f0-9]{64}$',
+                                        },
+                                        precision: {
+                                          type: 'string',
+                                          enum: ['exact', 'approximate', 'unknown'],
+                                        },
+                                        pdfPages: {
+                                          maxItems: 2000,
+                                          type: 'array',
+                                          items: {
+                                            type: 'integer',
+                                            minimum: 1,
+                                            maximum: 2000,
+                                          },
+                                        },
+                                        printedPages: {
+                                          maxItems: 2000,
+                                          type: 'array',
+                                          items: {
+                                            type: 'string',
+                                            maxLength: 120,
+                                          },
+                                        },
+                                      },
+                                      required: [
+                                        'receiptId',
+                                        'path',
+                                        'quote',
+                                        'source',
+                                        'systemId',
+                                        'revision',
+                                        'contentHash',
+                                      ],
+                                      additionalProperties: false,
+                                      description:
+                                        'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                                    },
+                                  },
+                                  required: ['type', 'citation'],
+                                  additionalProperties: false,
+                                },
+                              ],
+                            },
+                          },
+                        },
+                        required: [
+                          'id',
+                          'from',
+                          'to',
+                          'bidirectional',
+                          'kind',
+                          'access',
+                          'visibility',
+                          'certainty',
+                          'origin',
+                          'evidence',
+                        ],
+                        additionalProperties: false,
+                      },
+                      {
+                        type: 'string',
+                        pattern: '^[a-f0-9]{64}$',
+                      },
+                    ],
+                  },
+                  {
+                    type: 'null',
+                  },
+                ],
+              },
+            },
+            required: ['value', 'expected'],
+            additionalProperties: false,
+          },
+        },
+        frames: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              value: {
+                type: 'object',
+                properties: {
+                  id: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  placeId: {
+                    anyOf: [
+                      {
+                        anyOf: [
+                          {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          {
+                            type: 'object',
+                            properties: {
+                              knowledgeChangeIndex: {
+                                type: 'integer',
+                                minimum: 0,
+                                maximum: 9007199254740991,
+                              },
+                            },
+                            required: ['knowledgeChangeIndex'],
+                            additionalProperties: false,
+                          },
+                          {
+                            type: 'object',
+                            properties: {
+                              npcIntroductionOperationIndex: {
+                                type: 'integer',
+                                minimum: 0,
+                                maximum: 9007199254740991,
+                              },
+                            },
+                            required: ['npcIntroductionOperationIndex'],
+                            additionalProperties: false,
+                          },
+                        ],
+                      },
+                      {
+                        type: 'object',
+                        properties: {
+                          localKey: {
+                            type: 'string',
+                            minLength: 1,
+                            maxLength: 200,
+                          },
+                        },
+                        required: ['localKey'],
+                        additionalProperties: false,
+                      },
+                    ],
+                  },
+                  label: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 200,
+                  },
+                  floor: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 200,
+                  },
+                  width: {
+                    type: 'number',
+                    exclusiveMinimum: 0,
+                  },
+                  height: {
+                    type: 'number',
+                    exclusiveMinimum: 0,
+                  },
+                  calibration: {
+                    type: 'object',
+                    properties: {
+                      distancePerUnit: {
+                        type: 'number',
+                        exclusiveMinimum: 0,
+                      },
+                      unit: {
+                        type: 'string',
+                        enum: ['m', 'km', 'ft', 'mi'],
+                      },
+                    },
+                    required: ['distancePerUnit', 'unit'],
+                    additionalProperties: false,
+                  },
+                  visibility: {
+                    type: 'string',
+                    enum: ['player', 'gm_only'],
+                  },
+                  origin: {
+                    type: 'string',
+                    enum: ['source', 'gm', 'player', 'unknown'],
+                  },
+                  evidence: {
+                    type: 'array',
+                    items: {
+                      oneOf: [
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'map_asset',
+                            },
+                            assetId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            observationId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            region: {
+                              type: 'object',
+                              properties: {
+                                x: {
+                                  type: 'number',
+                                  minimum: 0,
+                                  maximum: 1,
+                                },
+                                y: {
+                                  type: 'number',
+                                  minimum: 0,
+                                  maximum: 1,
+                                },
+                                width: {
+                                  type: 'number',
+                                  exclusiveMinimum: 0,
+                                  maximum: 1,
+                                },
+                                height: {
+                                  type: 'number',
+                                  exclusiveMinimum: 0,
+                                  maximum: 1,
+                                },
+                              },
+                              required: ['x', 'y', 'width', 'height'],
+                              additionalProperties: false,
+                            },
+                          },
+                          required: ['type', 'assetId', 'observationId', 'region'],
+                          additionalProperties: false,
+                        },
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'campaign_source',
+                            },
+                            sourceId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            version: {
+                              type: 'integer',
+                              exclusiveMinimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                            sourceName: {
+                              type: 'string',
+                            },
+                            quote: {
+                              type: 'string',
+                              minLength: 1,
+                              maxLength: 100000,
+                            },
+                            start: {
+                              type: 'integer',
+                              minimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                            end: {
+                              type: 'integer',
+                              exclusiveMinimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                          },
+                          required: ['type', 'sourceId', 'version', 'sourceName', 'quote'],
+                          additionalProperties: false,
+                          description:
+                            'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                        },
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'book',
+                            },
+                            citation: {
+                              type: 'object',
+                              properties: {
+                                receiptId: {
+                                  type: 'string',
+                                  format: 'uuid',
+                                  pattern:
+                                    '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                },
+                                path: {
+                                  type: 'string',
+                                  minLength: 1,
+                                  maxLength: 512,
+                                },
+                                quote: {
+                                  type: 'string',
+                                  minLength: 1,
+                                  maxLength: 600,
+                                },
+                                start: {
+                                  type: 'integer',
+                                  minimum: 0,
+                                  maximum: 9007199254740991,
+                                },
+                                end: {
+                                  type: 'integer',
+                                  exclusiveMinimum: 0,
+                                  maximum: 9007199254740991,
+                                },
+                                source: {
+                                  type: 'string',
+                                  maxLength: 80,
+                                  pattern: '^[a-z0-9][a-z0-9_-]*$',
+                                },
+                                systemId: {
+                                  type: 'string',
+                                  format: 'uuid',
+                                  pattern:
+                                    '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                },
+                                revision: {
+                                  type: 'integer',
+                                  exclusiveMinimum: 0,
+                                  maximum: 9007199254740991,
+                                },
+                                contentHash: {
+                                  type: 'string',
+                                  pattern: '^[a-f0-9]{64}$',
+                                },
+                                precision: {
+                                  type: 'string',
+                                  enum: ['exact', 'approximate', 'unknown'],
+                                },
+                                pdfPages: {
+                                  maxItems: 2000,
+                                  type: 'array',
+                                  items: {
+                                    type: 'integer',
+                                    minimum: 1,
+                                    maximum: 2000,
+                                  },
+                                },
+                                printedPages: {
+                                  maxItems: 2000,
+                                  type: 'array',
+                                  items: {
+                                    type: 'string',
+                                    maxLength: 120,
+                                  },
+                                },
+                              },
+                              required: [
+                                'receiptId',
+                                'path',
+                                'quote',
+                                'source',
+                                'systemId',
+                                'revision',
+                                'contentHash',
+                              ],
+                              additionalProperties: false,
+                              description:
+                                'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                            },
+                          },
+                          required: ['type', 'citation'],
+                          additionalProperties: false,
+                        },
+                      ],
+                    },
+                  },
+                  privateAssetId: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  playerAssetId: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  key: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 200,
+                  },
+                },
+                required: [
+                  'placeId',
+                  'label',
+                  'floor',
+                  'width',
+                  'height',
+                  'visibility',
+                  'origin',
+                  'evidence',
+                ],
+                additionalProperties: false,
+              },
+              expected: {
+                anyOf: [
+                  {
+                    anyOf: [
+                      {
+                        type: 'object',
+                        properties: {
+                          id: {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          placeId: {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          label: {
+                            type: 'string',
+                            minLength: 1,
+                            maxLength: 200,
+                          },
+                          floor: {
+                            type: 'string',
+                            minLength: 1,
+                            maxLength: 200,
+                          },
+                          width: {
+                            type: 'number',
+                            exclusiveMinimum: 0,
+                          },
+                          height: {
+                            type: 'number',
+                            exclusiveMinimum: 0,
+                          },
+                          calibration: {
+                            type: 'object',
+                            properties: {
+                              distancePerUnit: {
+                                type: 'number',
+                                exclusiveMinimum: 0,
+                              },
+                              unit: {
+                                type: 'string',
+                                enum: ['m', 'km', 'ft', 'mi'],
+                              },
+                            },
+                            required: ['distancePerUnit', 'unit'],
+                            additionalProperties: false,
+                          },
+                          visibility: {
+                            type: 'string',
+                            enum: ['player', 'gm_only'],
+                          },
+                          origin: {
+                            type: 'string',
+                            enum: ['source', 'gm', 'player', 'unknown'],
+                          },
+                          evidence: {
+                            type: 'array',
+                            items: {
+                              oneOf: [
+                                {
+                                  type: 'object',
+                                  properties: {
+                                    type: {
+                                      type: 'string',
+                                      const: 'map_asset',
+                                    },
+                                    assetId: {
+                                      type: 'string',
+                                      format: 'uuid',
+                                      pattern:
+                                        '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                    },
+                                    observationId: {
+                                      type: 'string',
+                                      format: 'uuid',
+                                      pattern:
+                                        '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                    },
+                                    region: {
+                                      type: 'object',
+                                      properties: {
+                                        x: {
+                                          type: 'number',
+                                          minimum: 0,
+                                          maximum: 1,
+                                        },
+                                        y: {
+                                          type: 'number',
+                                          minimum: 0,
+                                          maximum: 1,
+                                        },
+                                        width: {
+                                          type: 'number',
+                                          exclusiveMinimum: 0,
+                                          maximum: 1,
+                                        },
+                                        height: {
+                                          type: 'number',
+                                          exclusiveMinimum: 0,
+                                          maximum: 1,
+                                        },
+                                      },
+                                      required: ['x', 'y', 'width', 'height'],
+                                      additionalProperties: false,
+                                    },
+                                  },
+                                  required: ['type', 'assetId', 'observationId', 'region'],
+                                  additionalProperties: false,
+                                },
+                                {
+                                  type: 'object',
+                                  properties: {
+                                    type: {
+                                      type: 'string',
+                                      const: 'campaign_source',
+                                    },
+                                    sourceId: {
+                                      type: 'string',
+                                      format: 'uuid',
+                                      pattern:
+                                        '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                    },
+                                    version: {
+                                      type: 'integer',
+                                      exclusiveMinimum: 0,
+                                      maximum: 9007199254740991,
+                                    },
+                                    sourceName: {
+                                      type: 'string',
+                                    },
+                                    quote: {
+                                      type: 'string',
+                                      minLength: 1,
+                                      maxLength: 100000,
+                                    },
+                                    start: {
+                                      type: 'integer',
+                                      minimum: 0,
+                                      maximum: 9007199254740991,
+                                    },
+                                    end: {
+                                      type: 'integer',
+                                      exclusiveMinimum: 0,
+                                      maximum: 9007199254740991,
+                                    },
+                                  },
+                                  required: ['type', 'sourceId', 'version', 'sourceName', 'quote'],
+                                  additionalProperties: false,
+                                  description:
+                                    'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                                },
+                                {
+                                  type: 'object',
+                                  properties: {
+                                    type: {
+                                      type: 'string',
+                                      const: 'book',
+                                    },
+                                    citation: {
+                                      type: 'object',
+                                      properties: {
+                                        receiptId: {
+                                          type: 'string',
+                                          format: 'uuid',
+                                          pattern:
+                                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                        },
+                                        path: {
+                                          type: 'string',
+                                          minLength: 1,
+                                          maxLength: 512,
+                                        },
+                                        quote: {
+                                          type: 'string',
+                                          minLength: 1,
+                                          maxLength: 600,
+                                        },
+                                        start: {
+                                          type: 'integer',
+                                          minimum: 0,
+                                          maximum: 9007199254740991,
+                                        },
+                                        end: {
+                                          type: 'integer',
+                                          exclusiveMinimum: 0,
+                                          maximum: 9007199254740991,
+                                        },
+                                        source: {
+                                          type: 'string',
+                                          maxLength: 80,
+                                          pattern: '^[a-z0-9][a-z0-9_-]*$',
+                                        },
+                                        systemId: {
+                                          type: 'string',
+                                          format: 'uuid',
+                                          pattern:
+                                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                        },
+                                        revision: {
+                                          type: 'integer',
+                                          exclusiveMinimum: 0,
+                                          maximum: 9007199254740991,
+                                        },
+                                        contentHash: {
+                                          type: 'string',
+                                          pattern: '^[a-f0-9]{64}$',
+                                        },
+                                        precision: {
+                                          type: 'string',
+                                          enum: ['exact', 'approximate', 'unknown'],
+                                        },
+                                        pdfPages: {
+                                          maxItems: 2000,
+                                          type: 'array',
+                                          items: {
+                                            type: 'integer',
+                                            minimum: 1,
+                                            maximum: 2000,
+                                          },
+                                        },
+                                        printedPages: {
+                                          maxItems: 2000,
+                                          type: 'array',
+                                          items: {
+                                            type: 'string',
+                                            maxLength: 120,
+                                          },
+                                        },
+                                      },
+                                      required: [
+                                        'receiptId',
+                                        'path',
+                                        'quote',
+                                        'source',
+                                        'systemId',
+                                        'revision',
+                                        'contentHash',
+                                      ],
+                                      additionalProperties: false,
+                                      description:
+                                        'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                                    },
+                                  },
+                                  required: ['type', 'citation'],
+                                  additionalProperties: false,
+                                },
+                              ],
+                            },
+                          },
+                          privateAssetId: {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                          playerAssetId: {
+                            type: 'string',
+                            format: 'uuid',
+                            pattern:
+                              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                          },
+                        },
+                        required: [
+                          'id',
+                          'placeId',
+                          'label',
+                          'floor',
+                          'width',
+                          'height',
+                          'visibility',
+                          'origin',
+                          'evidence',
+                        ],
+                        additionalProperties: false,
+                      },
+                      {
+                        type: 'string',
+                        pattern: '^[a-f0-9]{64}$',
+                      },
+                    ],
+                  },
+                  {
+                    type: 'null',
+                  },
+                ],
+              },
+            },
+            required: ['value', 'expected'],
+            additionalProperties: false,
+          },
+        },
+        removePlaces: {
+          type: 'array',
+          items: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: {
+                  placeId: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  parentPlaceId: {
+                    anyOf: [
+                      {
+                        type: 'string',
+                        format: 'uuid',
+                        pattern:
+                          '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                      },
+                      {
+                        type: 'null',
+                      },
+                    ],
+                  },
+                  visited: {
+                    type: 'boolean',
+                  },
+                  placement: {
+                    type: 'object',
+                    properties: {
+                      frameId: {
+                        type: 'string',
+                        format: 'uuid',
+                        pattern:
+                          '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                      },
+                      x: {
+                        type: 'number',
+                        minimum: 0,
+                      },
+                      y: {
+                        type: 'number',
+                        minimum: 0,
+                      },
+                      width: {
+                        type: 'number',
+                        exclusiveMinimum: 0,
+                      },
+                      height: {
+                        type: 'number',
+                        exclusiveMinimum: 0,
+                      },
+                    },
+                    required: ['frameId', 'x', 'y'],
+                    additionalProperties: false,
+                  },
+                },
+                required: ['placeId', 'visited'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  placeId: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  expected: {
+                    type: 'string',
+                    pattern: '^[a-f0-9]{64}$',
+                  },
+                },
+                required: ['placeId', 'expected'],
+                additionalProperties: false,
+              },
+            ],
+          },
+        },
+        removeRoutes: {
+          type: 'array',
+          items: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: {
+                  id: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  from: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  to: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  bidirectional: {
+                    type: 'boolean',
+                  },
+                  kind: {
+                    type: 'string',
+                    enum: [
+                      'road',
+                      'path',
+                      'passage',
+                      'door',
+                      'stairs',
+                      'ladder',
+                      'waterway',
+                      'other',
+                    ],
+                  },
+                  access: {
+                    type: 'string',
+                    enum: ['open', 'closed', 'locked', 'blocked', 'unknown'],
+                  },
+                  visibility: {
+                    type: 'string',
+                    enum: ['player', 'gm_only'],
+                  },
+                  certainty: {
+                    type: 'string',
+                    enum: ['established', 'rumor', 'belief'],
+                  },
+                  direction: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 200,
+                  },
+                  distance: {
+                    type: 'object',
+                    properties: {
+                      value: {
+                        type: 'number',
+                        exclusiveMinimum: 0,
+                      },
+                      unit: {
+                        type: 'string',
+                        enum: ['m', 'km', 'ft', 'mi'],
+                      },
+                    },
+                    required: ['value', 'unit'],
+                    additionalProperties: false,
+                  },
+                  travel: {
+                    type: 'object',
+                    properties: {
+                      mode: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 200,
+                      },
+                      minutes: {
+                        type: 'number',
+                        exclusiveMinimum: 0,
+                      },
+                      conditions: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 100000,
+                      },
+                    },
+                    required: ['mode', 'minutes'],
+                    additionalProperties: false,
+                  },
+                  drawing: {
+                    type: 'object',
+                    properties: {
+                      frameId: {
+                        type: 'string',
+                        format: 'uuid',
+                        pattern:
+                          '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                      },
+                      points: {
+                        minItems: 2,
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            x: {
+                              type: 'number',
+                              minimum: 0,
+                            },
+                            y: {
+                              type: 'number',
+                              minimum: 0,
+                            },
+                          },
+                          required: ['x', 'y'],
+                          additionalProperties: false,
+                        },
+                      },
+                    },
+                    required: ['frameId', 'points'],
+                    additionalProperties: false,
+                  },
+                  origin: {
+                    type: 'string',
+                    enum: ['source', 'gm', 'player', 'unknown'],
+                  },
+                  evidence: {
+                    type: 'array',
+                    items: {
+                      oneOf: [
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'map_asset',
+                            },
+                            assetId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            observationId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            region: {
+                              type: 'object',
+                              properties: {
+                                x: {
+                                  type: 'number',
+                                  minimum: 0,
+                                  maximum: 1,
+                                },
+                                y: {
+                                  type: 'number',
+                                  minimum: 0,
+                                  maximum: 1,
+                                },
+                                width: {
+                                  type: 'number',
+                                  exclusiveMinimum: 0,
+                                  maximum: 1,
+                                },
+                                height: {
+                                  type: 'number',
+                                  exclusiveMinimum: 0,
+                                  maximum: 1,
+                                },
+                              },
+                              required: ['x', 'y', 'width', 'height'],
+                              additionalProperties: false,
+                            },
+                          },
+                          required: ['type', 'assetId', 'observationId', 'region'],
+                          additionalProperties: false,
+                        },
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'campaign_source',
+                            },
+                            sourceId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            version: {
+                              type: 'integer',
+                              exclusiveMinimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                            sourceName: {
+                              type: 'string',
+                            },
+                            quote: {
+                              type: 'string',
+                              minLength: 1,
+                              maxLength: 100000,
+                            },
+                            start: {
+                              type: 'integer',
+                              minimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                            end: {
+                              type: 'integer',
+                              exclusiveMinimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                          },
+                          required: ['type', 'sourceId', 'version', 'sourceName', 'quote'],
+                          additionalProperties: false,
+                          description:
+                            'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                        },
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'book',
+                            },
+                            citation: {
+                              type: 'object',
+                              properties: {
+                                receiptId: {
+                                  type: 'string',
+                                  format: 'uuid',
+                                  pattern:
+                                    '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                },
+                                path: {
+                                  type: 'string',
+                                  minLength: 1,
+                                  maxLength: 512,
+                                },
+                                quote: {
+                                  type: 'string',
+                                  minLength: 1,
+                                  maxLength: 600,
+                                },
+                                start: {
+                                  type: 'integer',
+                                  minimum: 0,
+                                  maximum: 9007199254740991,
+                                },
+                                end: {
+                                  type: 'integer',
+                                  exclusiveMinimum: 0,
+                                  maximum: 9007199254740991,
+                                },
+                                source: {
+                                  type: 'string',
+                                  maxLength: 80,
+                                  pattern: '^[a-z0-9][a-z0-9_-]*$',
+                                },
+                                systemId: {
+                                  type: 'string',
+                                  format: 'uuid',
+                                  pattern:
+                                    '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                },
+                                revision: {
+                                  type: 'integer',
+                                  exclusiveMinimum: 0,
+                                  maximum: 9007199254740991,
+                                },
+                                contentHash: {
+                                  type: 'string',
+                                  pattern: '^[a-f0-9]{64}$',
+                                },
+                                precision: {
+                                  type: 'string',
+                                  enum: ['exact', 'approximate', 'unknown'],
+                                },
+                                pdfPages: {
+                                  maxItems: 2000,
+                                  type: 'array',
+                                  items: {
+                                    type: 'integer',
+                                    minimum: 1,
+                                    maximum: 2000,
+                                  },
+                                },
+                                printedPages: {
+                                  maxItems: 2000,
+                                  type: 'array',
+                                  items: {
+                                    type: 'string',
+                                    maxLength: 120,
+                                  },
+                                },
+                              },
+                              required: [
+                                'receiptId',
+                                'path',
+                                'quote',
+                                'source',
+                                'systemId',
+                                'revision',
+                                'contentHash',
+                              ],
+                              additionalProperties: false,
+                              description:
+                                'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                            },
+                          },
+                          required: ['type', 'citation'],
+                          additionalProperties: false,
+                        },
+                      ],
+                    },
+                  },
+                },
+                required: [
+                  'id',
+                  'from',
+                  'to',
+                  'bidirectional',
+                  'kind',
+                  'access',
+                  'visibility',
+                  'certainty',
+                  'origin',
+                  'evidence',
+                ],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  id: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  expected: {
+                    type: 'string',
+                    pattern: '^[a-f0-9]{64}$',
+                  },
+                },
+                required: ['id', 'expected'],
+                additionalProperties: false,
+              },
+            ],
+          },
+        },
+        removeFrames: {
+          type: 'array',
+          items: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: {
+                  id: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  placeId: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  label: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 200,
+                  },
+                  floor: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 200,
+                  },
+                  width: {
+                    type: 'number',
+                    exclusiveMinimum: 0,
+                  },
+                  height: {
+                    type: 'number',
+                    exclusiveMinimum: 0,
+                  },
+                  calibration: {
+                    type: 'object',
+                    properties: {
+                      distancePerUnit: {
+                        type: 'number',
+                        exclusiveMinimum: 0,
+                      },
+                      unit: {
+                        type: 'string',
+                        enum: ['m', 'km', 'ft', 'mi'],
+                      },
+                    },
+                    required: ['distancePerUnit', 'unit'],
+                    additionalProperties: false,
+                  },
+                  visibility: {
+                    type: 'string',
+                    enum: ['player', 'gm_only'],
+                  },
+                  origin: {
+                    type: 'string',
+                    enum: ['source', 'gm', 'player', 'unknown'],
+                  },
+                  evidence: {
+                    type: 'array',
+                    items: {
+                      oneOf: [
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'map_asset',
+                            },
+                            assetId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            observationId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            region: {
+                              type: 'object',
+                              properties: {
+                                x: {
+                                  type: 'number',
+                                  minimum: 0,
+                                  maximum: 1,
+                                },
+                                y: {
+                                  type: 'number',
+                                  minimum: 0,
+                                  maximum: 1,
+                                },
+                                width: {
+                                  type: 'number',
+                                  exclusiveMinimum: 0,
+                                  maximum: 1,
+                                },
+                                height: {
+                                  type: 'number',
+                                  exclusiveMinimum: 0,
+                                  maximum: 1,
+                                },
+                              },
+                              required: ['x', 'y', 'width', 'height'],
+                              additionalProperties: false,
+                            },
+                          },
+                          required: ['type', 'assetId', 'observationId', 'region'],
+                          additionalProperties: false,
+                        },
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'campaign_source',
+                            },
+                            sourceId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            version: {
+                              type: 'integer',
+                              exclusiveMinimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                            sourceName: {
+                              type: 'string',
+                            },
+                            quote: {
+                              type: 'string',
+                              minLength: 1,
+                              maxLength: 100000,
+                            },
+                            start: {
+                              type: 'integer',
+                              minimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                            end: {
+                              type: 'integer',
+                              exclusiveMinimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                          },
+                          required: ['type', 'sourceId', 'version', 'sourceName', 'quote'],
+                          additionalProperties: false,
+                          description:
+                            'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                        },
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'book',
+                            },
+                            citation: {
+                              type: 'object',
+                              properties: {
+                                receiptId: {
+                                  type: 'string',
+                                  format: 'uuid',
+                                  pattern:
+                                    '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                },
+                                path: {
+                                  type: 'string',
+                                  minLength: 1,
+                                  maxLength: 512,
+                                },
+                                quote: {
+                                  type: 'string',
+                                  minLength: 1,
+                                  maxLength: 600,
+                                },
+                                start: {
+                                  type: 'integer',
+                                  minimum: 0,
+                                  maximum: 9007199254740991,
+                                },
+                                end: {
+                                  type: 'integer',
+                                  exclusiveMinimum: 0,
+                                  maximum: 9007199254740991,
+                                },
+                                source: {
+                                  type: 'string',
+                                  maxLength: 80,
+                                  pattern: '^[a-z0-9][a-z0-9_-]*$',
+                                },
+                                systemId: {
+                                  type: 'string',
+                                  format: 'uuid',
+                                  pattern:
+                                    '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                                },
+                                revision: {
+                                  type: 'integer',
+                                  exclusiveMinimum: 0,
+                                  maximum: 9007199254740991,
+                                },
+                                contentHash: {
+                                  type: 'string',
+                                  pattern: '^[a-f0-9]{64}$',
+                                },
+                                precision: {
+                                  type: 'string',
+                                  enum: ['exact', 'approximate', 'unknown'],
+                                },
+                                pdfPages: {
+                                  maxItems: 2000,
+                                  type: 'array',
+                                  items: {
+                                    type: 'integer',
+                                    minimum: 1,
+                                    maximum: 2000,
+                                  },
+                                },
+                                printedPages: {
+                                  maxItems: 2000,
+                                  type: 'array',
+                                  items: {
+                                    type: 'string',
+                                    maxLength: 120,
+                                  },
+                                },
+                              },
+                              required: [
+                                'receiptId',
+                                'path',
+                                'quote',
+                                'source',
+                                'systemId',
+                                'revision',
+                                'contentHash',
+                              ],
+                              additionalProperties: false,
+                              description:
+                                'Provide an exact quote and source identity. The application calculates offsets and page metadata.',
+                            },
+                          },
+                          required: ['type', 'citation'],
+                          additionalProperties: false,
+                        },
+                      ],
+                    },
+                  },
+                  privateAssetId: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  playerAssetId: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                },
+                required: [
+                  'id',
+                  'placeId',
+                  'label',
+                  'floor',
+                  'width',
+                  'height',
+                  'visibility',
+                  'origin',
+                  'evidence',
+                ],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  id: {
+                    type: 'string',
+                    format: 'uuid',
+                    pattern:
+                      '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                  },
+                  expected: {
+                    type: 'string',
+                    pattern: '^[a-f0-9]{64}$',
+                  },
+                },
+                required: ['id', 'expected'],
+                additionalProperties: false,
+              },
+            ],
+          },
+        },
+        position: {
+          type: 'object',
+          properties: {
+            placeId: {
+              anyOf: [
+                {
+                  anyOf: [
+                    {
+                      anyOf: [
+                        {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        {
+                          type: 'object',
+                          properties: {
+                            knowledgeChangeIndex: {
+                              type: 'integer',
+                              minimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                          },
+                          required: ['knowledgeChangeIndex'],
+                          additionalProperties: false,
+                        },
+                        {
+                          type: 'object',
+                          properties: {
+                            npcIntroductionOperationIndex: {
+                              type: 'integer',
+                              minimum: 0,
+                              maximum: 9007199254740991,
+                            },
+                          },
+                          required: ['npcIntroductionOperationIndex'],
+                          additionalProperties: false,
+                        },
+                      ],
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        localKey: {
+                          type: 'string',
+                          minLength: 1,
+                          maxLength: 200,
+                        },
+                      },
+                      required: ['localKey'],
+                      additionalProperties: false,
+                    },
+                  ],
+                },
+                {
+                  type: 'null',
+                },
+              ],
+            },
+            expected: {
+              anyOf: [
+                {
+                  type: 'string',
+                  format: 'uuid',
+                  pattern:
+                    '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                },
+                {
+                  type: 'null',
+                },
+              ],
+            },
+            exception: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 100000,
+            },
+          },
+          required: ['placeId', 'expected'],
+          additionalProperties: false,
+        },
+        preparedReceiptIds: {
+          type: 'array',
+          items: {
+            type: 'string',
+            format: 'uuid',
+            pattern:
+              '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+          },
+        },
+      },
+      additionalProperties: false,
+    },
     narrative: {
       type: 'string',
       minLength: 1,
@@ -1039,6 +3728,56 @@ export const responseSchemaExample = {
                     type: 'array',
                     items: {
                       oneOf: [
+                        {
+                          type: 'object',
+                          properties: {
+                            type: {
+                              type: 'string',
+                              const: 'map_asset',
+                            },
+                            assetId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            observationId: {
+                              type: 'string',
+                              format: 'uuid',
+                              pattern:
+                                '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                            },
+                            region: {
+                              type: 'object',
+                              properties: {
+                                x: {
+                                  type: 'number',
+                                  minimum: 0,
+                                  maximum: 1,
+                                },
+                                y: {
+                                  type: 'number',
+                                  minimum: 0,
+                                  maximum: 1,
+                                },
+                                width: {
+                                  type: 'number',
+                                  exclusiveMinimum: 0,
+                                  maximum: 1,
+                                },
+                                height: {
+                                  type: 'number',
+                                  exclusiveMinimum: 0,
+                                  maximum: 1,
+                                },
+                              },
+                              required: ['x', 'y', 'width', 'height'],
+                              additionalProperties: false,
+                            },
+                          },
+                          required: ['type', 'assetId', 'observationId', 'region'],
+                          additionalProperties: false,
+                        },
                         {
                           type: 'object',
                           properties: {
@@ -1482,6 +4221,56 @@ export const responseSchemaExample = {
                       properties: {
                         type: {
                           type: 'string',
+                          const: 'map_asset',
+                        },
+                        assetId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        observationId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        region: {
+                          type: 'object',
+                          properties: {
+                            x: {
+                              type: 'number',
+                              minimum: 0,
+                              maximum: 1,
+                            },
+                            y: {
+                              type: 'number',
+                              minimum: 0,
+                              maximum: 1,
+                            },
+                            width: {
+                              type: 'number',
+                              exclusiveMinimum: 0,
+                              maximum: 1,
+                            },
+                            height: {
+                              type: 'number',
+                              exclusiveMinimum: 0,
+                              maximum: 1,
+                            },
+                          },
+                          required: ['x', 'y', 'width', 'height'],
+                          additionalProperties: false,
+                        },
+                      },
+                      required: ['type', 'assetId', 'observationId', 'region'],
+                      additionalProperties: false,
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        type: {
+                          type: 'string',
                           const: 'campaign_source',
                         },
                         sourceId: {
@@ -1753,6 +4542,56 @@ export const responseSchemaExample = {
                       properties: {
                         type: {
                           type: 'string',
+                          const: 'map_asset',
+                        },
+                        assetId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        observationId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        region: {
+                          type: 'object',
+                          properties: {
+                            x: {
+                              type: 'number',
+                              minimum: 0,
+                              maximum: 1,
+                            },
+                            y: {
+                              type: 'number',
+                              minimum: 0,
+                              maximum: 1,
+                            },
+                            width: {
+                              type: 'number',
+                              exclusiveMinimum: 0,
+                              maximum: 1,
+                            },
+                            height: {
+                              type: 'number',
+                              exclusiveMinimum: 0,
+                              maximum: 1,
+                            },
+                          },
+                          required: ['x', 'y', 'width', 'height'],
+                          additionalProperties: false,
+                        },
+                      },
+                      required: ['type', 'assetId', 'observationId', 'region'],
+                      additionalProperties: false,
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        type: {
+                          type: 'string',
                           const: 'campaign_source',
                         },
                         sourceId: {
@@ -1932,6 +4771,56 @@ export const responseSchemaExample = {
             type: 'array',
             items: {
               oneOf: [
+                {
+                  type: 'object',
+                  properties: {
+                    type: {
+                      type: 'string',
+                      const: 'map_asset',
+                    },
+                    assetId: {
+                      type: 'string',
+                      format: 'uuid',
+                      pattern:
+                        '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                    },
+                    observationId: {
+                      type: 'string',
+                      format: 'uuid',
+                      pattern:
+                        '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                    },
+                    region: {
+                      type: 'object',
+                      properties: {
+                        x: {
+                          type: 'number',
+                          minimum: 0,
+                          maximum: 1,
+                        },
+                        y: {
+                          type: 'number',
+                          minimum: 0,
+                          maximum: 1,
+                        },
+                        width: {
+                          type: 'number',
+                          exclusiveMinimum: 0,
+                          maximum: 1,
+                        },
+                        height: {
+                          type: 'number',
+                          exclusiveMinimum: 0,
+                          maximum: 1,
+                        },
+                      },
+                      required: ['x', 'y', 'width', 'height'],
+                      additionalProperties: false,
+                    },
+                  },
+                  required: ['type', 'assetId', 'observationId', 'region'],
+                  additionalProperties: false,
+                },
                 {
                   type: 'object',
                   properties: {
@@ -2174,4 +5063,4 @@ export const responseSchemaExample = {
     'participantReferences',
   ],
   additionalProperties: false,
-};
+} as const;

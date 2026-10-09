@@ -1,3 +1,4 @@
+import { freezeAtlas } from '../src/domain/atlasRecall.js';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -134,7 +135,11 @@ test(
     assert.ok(saved.system_prompt.includes(c.instructions));
     assert.deepEqual(
       saved.tool_definitions.map((tool: { name: string }) => tool.name),
-      ownedTools({ prepareNpc: async () => ({}) }).definitions.map((tool) => tool.name)
+      ownedTools({
+        prepareNpc: async () => ({}),
+        atlas: freezeAtlas(c),
+        prepareAtlas: async () => ({}),
+      }).definitions.map((tool) => tool.name)
     );
     await assert.rejects(
       () =>

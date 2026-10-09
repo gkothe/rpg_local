@@ -30,7 +30,11 @@ export function bindResponseCitations<T extends GameplayResponse>(
     const owned =
       operation?.op === 'create' && operation.npcPreparationReceiptId && operation.characterId
         ? (context.preparedNpcEvidence?.get(operation.characterId) ?? context)
-        : context;
+        : path[0] === 'knowledgeChanges'
+          ? (context.preparedKnowledgeEvidence?.get(path[1] as number) ?? context)
+          : path[0] === 'atlasChanges'
+            ? (context.preparedAtlasEvidence?.get(`${path[1]}:${path[2]}`) ?? context)
+            : context;
     const invalid = (message: string): never => {
       throw new ResponseFieldProblem(path, new Problem(502, 'citation_binding', message));
     };

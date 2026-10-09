@@ -1,3 +1,4 @@
+import { atlasImageInfo } from './atlasVision.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -62,6 +63,7 @@ const CLAUDE_CLI_INPUT_TOKENS = 8000;
 const API_SYSTEM_PROMPT =
   'You are a tabletop RPG narrator. The supplied JSON is the entire campaign context. No tools or outside context.';
 export type Provider = {
+  images?: { supported: boolean; reason: string | null };
   id: AnyProviderId;
   /** Backend-owned: CLI rows are installed executables, API rows are configured remote services. */
   transport: ProviderTransport;
@@ -77,6 +79,14 @@ export type Provider = {
   rules?: RulesCapability;
 };
 export interface Generator {
+  imageCapacity?(settings: ProviderSettings): Promise<void>;
+  generateImage?(
+    settings: ProviderSettings,
+    prompt: string,
+    schema: unknown,
+    image: Buffer,
+    signal?: AbortSignal
+  ): Promise<unknown>;
   narrativeEditorSettings?(settings: ProviderSettings): Promise<ProviderSettings>;
   generateOwnedGameplay?(
     settings: ProviderSettings,
@@ -147,6 +157,14 @@ export class ProviderService implements Generator {
     if (this.cache && !refresh) return this.cache;
     const result = await this.discoverCli();
     for (const id of API_PROVIDER_IDS) result.push(this.apiProvider(id));
+    for (const p of result)
+      p.images = {
+        supported: p.id === PROVIDER_ID.Codex && p.available && p.supported,
+        reason:
+          p.id === PROVIDER_ID.Codex && p.available && p.supported
+            ? null
+            : 'Map images require the isolated Codex CLI image adapter.',
+      };
     this.cache = result;
     return result;
   }
@@ -451,6 +469,57 @@ export class ProviderService implements Generator {
       signal,
       trace
     );
+  }
+  async imageCapacity(settings: ProviderSettings): Promise<void> {
+    await this.capacity(settings);
+    if (settings.provider !== PROVIDER_ID.Codex)
+      throw new Problem(
+        503,
+        'atlas_image_provider',
+        'Image import currently requires the isolated Codex CLI image adapter. Select Codex explicitly; other providers are not silently substituted.'
+      );
+    const executable = this.locations.get(settings.provider)!;
+    const help = await runProcess(executable.binary, [...executable.prefix, 'exec', '--help'], '', {
+      timeoutMs: 8000,
+      maxOutputBytes: 100000,
+    });
+    if (!help.includes('--image'))
+      throw new Problem(
+        503,
+        'atlas_image_provider',
+        'Installed Codex does not support image attachments; update the CLI.'
+      );
+  }
+  async generateImage(
+    settings: ProviderSettings,
+    prompt: string,
+    schema: unknown,
+    image: Buffer,
+    signal?: AbortSignal
+  ): Promise<unknown> {
+    const info = atlasImageInfo(image);
+    await this.imageCapacity(settings);
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-map-image-'));
+    try {
+      const imagePath = path.join(dir, info.mime === 'image/png' ? 'map.png' : 'map.jpg');
+      const schemaPath = path.join(dir, 'response.schema.json');
+      await writeFile(imagePath, image);
+      await writeFile(schemaPath, JSON.stringify(schema));
+      const output = await generateCodex(
+        this.locations.get(settings.provider)!,
+        settings,
+        prompt,
+        schemaPath,
+        dir,
+        process.env,
+        signal,
+        undefined,
+        [imagePath]
+      );
+      return parseProviderOutput(settings.provider, output);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   }
   async narrativeEditorSettings(settings: ProviderSettings): Promise<ProviderSettings> {
     const defaults = { ...settings, effort: null };

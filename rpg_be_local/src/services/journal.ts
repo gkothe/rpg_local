@@ -74,6 +74,7 @@ import { HistoryStore } from './historyStore.js';
 const JOURNAL_HEARTBEAT_MS = 15_000;
 
 export type JournalEvidenceDetail =
+  | { kind: 'map_asset'; label: string; available: boolean; quote: string }
   | { kind: 'turn'; label: string; turnId: string; available: boolean }
   | { kind: 'campaign_source'; label: string; quote: string; available: true }
   | { kind: 'book'; label: string; quote: string; source: string; available: true };
@@ -191,6 +192,14 @@ export class JournalService {
       };
     const index = Number(evidenceId.replace('evidence-', ''));
     const e = record.evidence[index]!;
+    if (e.type === 'map_asset')
+      return {
+        kind: 'map_asset',
+        label: 'Map observation',
+        available: false,
+        quote:
+          'Open the atlas for reviewed image previews and accepted geography. Original image observations are kept private.',
+      };
     // Only the recorded quote is exposed, never the whole private source document.
     return e.type === 'campaign_source'
       ? { kind: 'campaign_source', label: ref.label, quote: e.quote, available: true }

@@ -1,3 +1,4 @@
+import { frozenAtlasSchema } from './atlasRecall.js';
 import { frozenCampaignSourcesSchema } from './campaignSourceRecall.js';
 import { frozenKnowledgeSchema } from './knowledgeRecall.js';
 import { frozenContinuitySchema } from './continuity.js';
@@ -160,6 +161,7 @@ export const diceSessionSchema = z
     systemPrompt: z.string().optional(),
     frozenKnowledge: frozenKnowledgeSchema.optional(),
     frozenContinuity: frozenContinuitySchema.optional(),
+    frozenAtlas: frozenAtlasSchema.optional(),
     frozenSources: frozenCampaignSourcesSchema.optional(),
     frozenHistory: frozenHistorySchema.optional(),
     toolDefinitions: z

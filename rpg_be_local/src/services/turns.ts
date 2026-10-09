@@ -1,3 +1,7 @@
+import { atlasObservations } from '../domain/atlasRecall.js';
+import { assertAtlas } from '../domain/atlasCompatibility.js';
+import { AtlasPreparationService } from './atlasPreparation.js';
+import { compileAtlas } from '../domain/atlasCommit.js';
 import { turnRuleReads } from './ruleReadRecords.js';
 import { bindResponseCitations } from '../domain/citationBinding.js';
 import { gameplayAdvancementContext } from './advancement.js';
@@ -214,6 +218,7 @@ export class TurnService {
     // A saved attempt must not replay facts a Journal correction has since superseded.
     assertFrozenContext(t.context?.frozenKnowledge, campaign);
     assertContinuity(t.context?.frozenContinuity, campaign);
+    assertAtlas(t.context?.frozenAtlas, campaign);
     return { campaign, turn };
   }
   async retry(
@@ -285,6 +290,7 @@ export class TurnService {
         );
       assertFrozenContext(saved.frozen_knowledge, campaign);
       assertContinuity(saved.frozen_continuity ?? undefined, campaign);
+      assertAtlas(saved.frozen_atlas, campaign);
       const turn: Turn = {
         ...previous,
         id: randomUUID(),
@@ -306,6 +312,7 @@ export class TurnService {
           systemPrompt: saved.system_prompt,
           frozenKnowledge: saved.frozen_knowledge,
           ...(saved.frozen_continuity ? { frozenContinuity: saved.frozen_continuity } : {}),
+          ...(saved.frozen_atlas ? { frozenAtlas: saved.frozen_atlas } : {}),
           ...(saved.frozen_sources ? { frozenSources: saved.frozen_sources } : {}),
           ...(saved.frozen_history ? { frozenHistory: saved.frozen_history } : {}),
         },
@@ -367,6 +374,7 @@ export class TurnService {
       if (!session?.system_prompt) throw conflict('Saved editing context is missing');
       assertFrozenContext(session.frozen_knowledge, campaign);
       assertContinuity(session.frozen_continuity ?? undefined, campaign);
+      assertAtlas(session.frozen_atlas, campaign);
       t.context = {
         ...t.context!,
         prompt: session.frozen_prompt,
@@ -374,6 +382,7 @@ export class TurnService {
         systemPrompt: session.system_prompt,
         frozenKnowledge: session.frozen_knowledge,
         ...(session.frozen_continuity ? { frozenContinuity: session.frozen_continuity } : {}),
+        ...(session.frozen_atlas ? { frozenAtlas: session.frozen_atlas } : {}),
         frozenSources: session.frozen_sources,
         ...(session.frozen_history ? { frozenHistory: session.frozen_history } : {}),
       };
@@ -559,6 +568,7 @@ export class TurnService {
           const dice = new DiceService(this.store);
           const combat = new CombatPreparationService(this.store);
           const npcPreparation = new NpcPreparationService(this.store, this.generator);
+          const atlasPreparation = new AtlasPreparationService(this.store, this.generator);
           let frozenDefinitions: GameplayToolDefinition[] | undefined;
           if (t.diceSessionId) {
             const saved = await this.store.pool.query(
@@ -571,6 +581,7 @@ export class TurnService {
             t.context!.systemPrompt = root.system_prompt;
             t.context!.frozenKnowledge = root.frozen_knowledge;
             t.context!.frozenContinuity = root.frozen_continuity ?? undefined;
+            t.context!.frozenAtlas = root.frozen_atlas ?? undefined;
             t.context!.frozenSources = root.frozen_sources ?? undefined;
             t.context!.frozenHistory = root.frozen_history ?? undefined;
             frozenDefinitions = root.tool_definitions;
@@ -588,6 +599,13 @@ export class TurnService {
           const registry = new GameplayTools({
             book: t.ruleContext?.kind === RuleSystemKind.Library,
             knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c, true),
+            ...(t.context!.frozenAtlas
+              ? {
+                  atlas: t.context!.frozenAtlas,
+                  prepareAtlas: (input: unknown) =>
+                    atlasPreparation.prepare(t, input, ctl.signal, trace),
+                }
+              : {}),
             readCampaignSource: (tool, input, requestId) =>
               sourceLookup.read(t, tool, input, `repair:${attempt}:${requestId}`, ctl.signal),
             signal: ctl.signal,
@@ -672,10 +690,18 @@ export class TurnService {
               ],
               {
                 frozenContinuity: t.context!.frozenContinuity,
+                frozenAtlas: t.context!.frozenAtlas,
                 frozenSources: t.context!.frozenSources,
                 frozenHistory: t.context!.frozenHistory,
                 systemPrompt: t.context!.systemPrompt!,
                 knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c, true),
+                ...(t.context!.frozenAtlas
+                  ? {
+                      atlas: t.context!.frozenAtlas,
+                      prepareAtlas: (input: unknown) =>
+                        atlasPreparation.prepare(t, input, ctl.signal, trace),
+                    }
+                  : {}),
                 toolDefinitions: registry.definitions,
               }
             );
@@ -783,6 +809,10 @@ export class TurnService {
                     knowledge: campaign.knowledge,
                     state: campaign.state,
                     continuity: campaign.continuity,
+                    atlas: t.context?.frozenAtlas,
+                    atlasPreparations: t.context?.frozenAtlas
+                      ? await atlasPreparation.ready(t.diceSessionId!, client)
+                      : [],
                     npcPreparations: t.context?.frozenContinuity
                       ? await npcPreparation.ready(t.diceSessionId!, client)
                       : [],
@@ -899,7 +929,7 @@ export class TurnService {
   }
   private async persistResponse(
     t: Turn,
-    response: GameplayResponse,
+    wireResponse: GameplayResponse,
     prepare = false,
     editedNarrative?: string
   ): Promise<void> {
@@ -907,6 +937,17 @@ export class TurnService {
     await this.store.transaction(async (client) => {
       const { campaign, turn } = await this.lockedOwned(t, client);
       const sessionId = t.diceSessionId!;
+      const atlasPreparations = t.context?.frozenAtlas
+        ? await new AtlasPreparationService(this.store).ready(sessionId, client)
+        : [];
+      const compiled = compileAtlas(wireResponse, atlasPreparations);
+      const response = compiled.response;
+      const atlasEvidence = {
+        mapObservations: atlasObservations(t.context?.frozenAtlas),
+        preparedKnowledgeIds: compiled.ids,
+        preparedKnowledgeEvidence: compiled.knowledgeEvidence,
+        preparedAtlasEvidence: compiled.atlasEvidence,
+      };
       const sourceReads = await new CampaignSourceLookup(this.store).records(
         t.campaignId,
         t.id,
@@ -935,6 +976,7 @@ export class TurnService {
           sourceSpans,
           ruleReads,
           preparedNpcEvidence,
+          ...atlasEvidence,
         })
       );
       const records = await dice.records(sessionId, client);
@@ -978,6 +1020,7 @@ export class TurnService {
         ruleReads,
         npcPreparations,
         preparedNpcEvidence,
+        ...atlasEvidence,
         combat: {
           authorization: await new CombatPreparationService(this.store).authorization(
             sessionId,
@@ -994,7 +1037,7 @@ export class TurnService {
             campaignRevision: campaign.revision,
             ruleContext: t.ruleContext ?? null,
             settings: t.settings,
-            rawResponse: response,
+            rawResponse: wireResponse,
             rawNarrative: response.narrative,
             owner: ownerId,
           },

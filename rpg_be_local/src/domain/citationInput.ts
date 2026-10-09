@@ -23,6 +23,13 @@ export function mapResponseCitations(
     if (Array.isArray(response[key]))
       response[key].forEach((item, index) => evidence(item?.evidence, [key, index, 'evidence']));
   }
+  const atlas = response.atlasChanges as Record<string, unknown> | undefined;
+  for (const collection of ['frames', 'routes']) {
+    if (Array.isArray(atlas?.[collection]))
+      atlas[collection].forEach((item, index) =>
+        evidence(item?.value?.evidence, ['atlasChanges', collection, index, 'value', 'evidence'])
+      );
+  }
   if (Array.isArray(response.operations))
     response.operations.forEach((item, index) => {
       if (item?.op === 'create')

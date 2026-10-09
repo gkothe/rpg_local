@@ -1,3 +1,12 @@
+import {
+  atlasRecall,
+  atlasSearchSchema,
+  atlasGetSchema,
+  atlasRoutesSchema,
+  type FrozenAtlas,
+} from '../domain/atlasRecall.js';
+import { ATLAS_PREPARE_TOOL, atlasPrepareSchema } from '../domain/atlasPreparation.js';
+import { ATLAS_LIMITS } from '../domain/atlas.js';
 import type { RuleDeliveredEvidence } from '../domain/ruleReadCoverage.js';
 import { z } from 'zod';
 import {
@@ -85,7 +94,7 @@ export type GameplayToolRegistration = {
   description: string;
   schema: z.ZodType;
   purpose: 'default' | 'book';
-  capability: 'dice' | 'rules' | 'knowledge' | 'sources' | 'characters' | 'history';
+  capability: 'dice' | 'rules' | 'knowledge' | 'sources' | 'characters' | 'history' | 'atlas';
   handler: (input: unknown, requestId: string | number) => Promise<GameplayToolResult>;
   delivered?: (result: GameplayToolResult) => void;
   invalid?: (input: unknown, requestId: string | number) => Promise<GameplayToolResult>;
@@ -101,6 +110,7 @@ function definition(registration: GameplayToolRegistration): GameplayToolDefinit
 }
 /** Argument byte ceiling for one owned tool; combat_prepare carries a whole batch of sheets. */
 export function gameplayToolRequestBytes(name: string): number {
+  if (name === ATLAS_PREPARE_TOOL) return ATLAS_LIMITS.prepareRequestBytes;
   if (name === NPC_PREPARE_TOOL_NAME) return NPC_PREPARATION_LIMITS.requestBytes;
   return name === COMBAT_PREPARE_TOOL_NAME
     ? COMBAT_PREPARATION_LIMITS.requestBytes
@@ -108,8 +118,11 @@ export function gameplayToolRequestBytes(name: string): number {
 }
 /** Transport body ceiling: the largest owned argument plus its JSON-RPC envelope. */
 export const GAMEPLAY_ENVELOPE_BYTES =
-  Math.max(NPC_PREPARATION_LIMITS.requestBytes, COMBAT_PREPARATION_LIMITS.requestBytes) +
-  COMBAT_PREPARATION_LIMITS.rpcEnvelopeBytes;
+  Math.max(
+    ATLAS_LIMITS.prepareRequestBytes,
+    NPC_PREPARATION_LIMITS.requestBytes,
+    COMBAT_PREPARATION_LIMITS.requestBytes
+  ) + COMBAT_PREPARATION_LIMITS.rpcEnvelopeBytes;
 function ownedRegistrations(
   options: GameplayTools['options'],
   assertActive: () => Promise<void>
@@ -123,6 +136,50 @@ function ownedRegistrations(
   );
   const sourceRead = options.readCampaignSource;
   return [
+    ...(options.atlas
+      ? [
+          {
+            name: 'world_map_search',
+            description:
+              'Search saved frozen Places. Resolve existing identities before creating new geography.',
+            schema: atlasSearchSchema,
+            purpose: 'default' as const,
+            capability: 'atlas' as const,
+            handler: async (input: unknown) => atlasRecall(options.atlas!).search(input),
+          },
+          {
+            name: 'world_map_get',
+            description:
+              'Read one scoped frozen map with hierarchy, rooms, floors, routes and current position. Private facts remain labelled; unknown distances stay unknown.',
+            schema: atlasGetSchema,
+            purpose: 'default' as const,
+            capability: 'atlas' as const,
+            handler: async (input: unknown) => atlasRecall(options.atlas!).get(input),
+          },
+          {
+            name: 'world_map_routes',
+            description:
+              'Find a known open scoped route. Exact totals require known compatible segment facts; absence is not proof no route exists.',
+            schema: atlasRoutesSchema,
+            purpose: 'default' as const,
+            capability: 'atlas' as const,
+            handler: async (input: unknown) => atlasRecall(options.atlas!).routes(input),
+          },
+          ...(options.prepareAtlas
+            ? [
+                {
+                  name: ATLAS_PREPARE_TOOL,
+                  description:
+                    'Ask a cartographer for a context-consistent unpublished geography draft. Same key replays; consume its receipt in final atlasChanges. No movement or time advancement.',
+                  schema: atlasPrepareSchema,
+                  purpose: 'default' as const,
+                  capability: 'atlas' as const,
+                  handler: async (input: unknown) => options.prepareAtlas!(input),
+                },
+              ]
+            : []),
+        ]
+      : []),
     ...(options.prepareNpc
       ? [
           {
@@ -286,6 +343,8 @@ export class GameplayTools {
         input: unknown,
         requestId: string
       ) => Promise<Record<string, unknown>>;
+      atlas?: FrozenAtlas;
+      prepareAtlas?: (input: unknown) => Promise<Record<string, unknown>>;
       prepareNpc?: (input: unknown) => Promise<Record<string, unknown>>;
       npcReader?: () => Promise<ReturnType<typeof createNpcRecall>>;
       prepareCombat: (input: unknown) => Promise<Record<string, unknown>>;

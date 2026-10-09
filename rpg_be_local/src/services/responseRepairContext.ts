@@ -108,6 +108,7 @@ export function selectRepairEvidence(response: unknown, paths: ResponsePath[], e
   };
 
   for (const path of paths) {
+    if (path[0] === 'atlasChanges') return broad('frozen_atlas_preparation_context');
     if (path[0] === 'continuityChanges') return broad('private_continuity_context');
     const [field, index] = path;
     const collection = candidate[String(field)];

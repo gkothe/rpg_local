@@ -6,9 +6,13 @@ export function publicKnowledge(records: readonly CampaignKnowledge[]): Campaign
     .filter((r) => r.visibility !== KnowledgeVisibility.GmOnly)
     .map((r) => {
       const record = structuredClone(r);
+      record.evidence = record.evidence.filter((e) => e.type !== 'map_asset');
       record.attributions = record.attributions
         .filter((a) => a.visibility !== KnowledgeVisibility.GmOnly)
-        .map(({ revealReason: _privateReason, ...a }) => a);
+        .map(({ revealReason: _privateReason, ...a }) => ({
+          ...a,
+          evidence: a.evidence.filter((e) => e.type !== 'map_asset'),
+        }));
       record.characterNames = Object.fromEntries(
         record.characterIds.map((id) => [id, record.characterNames[id]!])
       );
@@ -75,9 +79,9 @@ export function publicTurn(turn: Turn): Turn {
     ...(safe.ruleCitations ? { ruleCitations: safe.ruleCitations } : {}),
     ...(safe.operationExplanations
       ? {
-          operationExplanations: safe.operationExplanations.filter(
-            (e) => e.visibility !== KnowledgeVisibility.GmOnly
-          ),
+          operationExplanations: safe.operationExplanations
+            .filter((e) => e.visibility !== KnowledgeVisibility.GmOnly)
+            .map((e) => ({ ...e, evidence: e.evidence.filter((v) => v.type !== 'map_asset') })),
         }
       : {}),
     // Committed v6 links reference public sheets; preparation receipts never reach players.

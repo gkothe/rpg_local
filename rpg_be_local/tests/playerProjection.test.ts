@@ -151,3 +151,44 @@ test('turn DTO exposes committed combat links but never preparation receipts or 
   assert.deepEqual(projected.combatEffects, raw.combatEffects);
   assert.ok(!JSON.stringify(projected).includes('SECRET'));
 });
+
+test('turn explanations keep public reasoning while withholding map observation identities', () => {
+  const assetId = randomUUID(),
+    observationId = randomUUID();
+  const raw = {
+    id: randomUUID(),
+    campaignId: randomUUID(),
+    requestId: randomUUID(),
+    status: 'completed',
+    action: 'enter',
+    narrative: 'You reach the office.',
+    changes: [],
+    error: null,
+    undone: false,
+    settings: { provider: 'codex', model: 'test', effort: null },
+    context: null,
+    createdAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
+    operationExplanations: [
+      {
+        operationIndex: 0,
+        reason: 'A passage leads to the office.',
+        visibility: V.Player,
+        evidence: [
+          {
+            type: 'map_asset',
+            assetId,
+            observationId,
+            region: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
+          },
+        ],
+      },
+    ],
+  } as unknown as Turn;
+  const result = publicTurn(raw);
+  assert.equal(result.operationExplanations![0]!.reason, 'A passage leads to the office.');
+  assert.deepEqual(result.operationExplanations![0]!.evidence, []);
+  assert.ok(!JSON.stringify(result).includes(assetId));
+  assert.ok(!JSON.stringify(result).includes(observationId));
+  assert.equal(raw.operationExplanations![0]!.evidence.length, 1);
+});

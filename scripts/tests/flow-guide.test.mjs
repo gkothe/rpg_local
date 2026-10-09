@@ -359,3 +359,41 @@ test('compact NPC creator teaching tool matches backend receipt contracts', asyn
   assert.equal(profileChange.expected, null);
   assert.ok(guidance.includes('private'));
 });
+
+test('atlas teaching reads frozen geography and validates the cartographer draft', async () => {
+  const { atlasRecall, freezeAtlas, atlasGetSchema, atlasRoutesSchema } =
+    await import('../../rpg_be_local/src/domain/atlasRecall.ts');
+  const { atlasPrepareSchema, atlasDraftSchema } =
+    await import('../../rpg_be_local/src/domain/atlasPreparation.ts');
+  const read = tools.find((t) => t.id === 'world_map_get');
+  const prepare = tools.find((t) => t.id === 'world_map_prepare');
+  const routes = tools.find((t) => t.id === 'world_map_routes');
+  assert.ok(read && prepare && routes);
+  atlasGetSchema.parse(read.args);
+  atlasPrepareSchema.parse(prepare.args);
+  const draft = atlasDraftSchema.parse(prepare.result.draft);
+  assert.equal(draft.places[0].key, 'warehouse');
+  atlasRoutesSchema.parse(routes.args);
+  const campaign = newCampaign({ name: 'Teaching atlas' });
+  const recall = atlasRecall(freezeAtlas(campaign));
+  assert.deepEqual(recall.get(read.args), read.result);
+  const { mutateAtlas } = await import('../../rpg_be_local/src/domain/atlasMutation.ts');
+  const sites = mutateAtlas(campaign, {
+    createPlaces: ['from', 'to'].map((key) => ({
+      key,
+      title: key,
+      text: 'A known isolated site.',
+      visibility: 'player',
+      certainty: 'established',
+    })),
+    places: ['from', 'to'].map((key) => ({
+      value: { placeId: { localKey: key }, visited: false },
+      expected: null,
+    })),
+  });
+  for (const [index, id] of [routes.args.from, routes.args.to].entries()) {
+    sites.knowledge[index].id = id;
+    sites.atlas.places[index].placeId = id;
+  }
+  assert.deepEqual(atlasRecall(freezeAtlas(sites)).routes(routes.args), routes.result);
+});

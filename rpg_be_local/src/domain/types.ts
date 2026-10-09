@@ -70,6 +70,7 @@ export type Memory = {
   createdAt: string;
 };
 export type Campaign = {
+  atlas?: import('./atlas.js').Atlas;
   continuity?: import('./continuity.js').Continuity;
   advancementPolicy?: { manual: true };
   /** Optional selective-history settings; absent means disabled (full memory in prompts). */
@@ -131,6 +132,7 @@ export type Turn = {
 };
 export type ContextManifest = {
   frozenContinuity?: import('./continuity.js').FrozenContinuity;
+  frozenAtlas?: import('./atlasRecall.js').FrozenAtlas;
   diceSessionId?: string;
   systemPrompt?: string;
   frozenSources?: FrozenCampaignSources;
@@ -167,6 +169,8 @@ export type Operation =
     }
   | { op: typeof OPERATION_KIND.State; expected: JsonObject; value: JsonObject };
 export type Snapshot = {
+  beforeAtlas?: import('./atlas.js').Atlas;
+  afterAtlas?: import('./atlas.js').Atlas;
   beforeContinuity?: import('./continuity.js').NpcProfile[];
   afterContinuity?: import('./continuity.js').NpcProfile[];
   beforeKnowledge?: CampaignKnowledge[];
@@ -183,6 +187,7 @@ export type Snapshot = {
   }[];
 };
 export type Archive = {
+  atlasData?: import('../services/atlasArchive.js').AtlasArchive;
   npcPreparations?: import('../services/npcPreparationArchive.js').NpcPreparationArchive[];
   advancementReviews?: import('../services/advancementArchive.js').AdvancementArchive;
   format: typeof ARCHIVE_FORMAT_ID;

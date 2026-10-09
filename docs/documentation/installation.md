@@ -397,3 +397,9 @@ Treat these files as private campaign data and do not add them to a public repos
 ### Compact NPC creation
 
 Run normal database setup/migrations and restart after updating. Migrations 0022/0023 add frozen private NPC inputs and operational preparation receipts without publishing drafts. Every configured supported gameplay provider can use the on-demand creator with existing settings, including native CLIs. No extra environment flag is needed. No extra NPC model installation or account is required. Default tests mock provider generation and use isolated test schemas.
+
+## Atlas setup
+
+Run the normal root migration command for the intended dedicated local database before starting the updated app. Atlas migrations add manual edit receipts, frozen session geography, cartographer preparations, image assets/import jobs and extended session immutability. Tests continue to require a distinct `RPG_TEST_DATABASE_URL` ending in `_test`; do not use a gameplay database for tests. No atlas feature toggle or new environment variable is required.
+
+Structured maps and cartographer preparations use the campaign's supported gameplay provider. Image conversion currently requires the isolated Codex CLI adapter with native `codex exec --image` support and a configured available model. Other selected adapters report an explicit unsupported image diagnostic; the app never silently changes provider. Uploaded PNG/JPEG files remain private until the whole original is explicitly reviewed for player display. Native image validation is separate from mocked tests and consumes provider account allowance.

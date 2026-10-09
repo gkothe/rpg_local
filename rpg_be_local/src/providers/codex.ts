@@ -185,7 +185,8 @@ export function isolatedCodexConfig(
 export function isolatedCodexArgs(
   settings: ProviderSettings,
   schemaPath: string,
-  config: Record<string, unknown>
+  config: Record<string, unknown>,
+  imagePaths: readonly string[] = []
 ): string[] {
   const args = [
     'exec',
@@ -204,6 +205,7 @@ export function isolatedCodexArgs(
   for (const [key, value] of Object.entries(config))
     args.push('-c', `${key}=${JSON.stringify(value)}`);
   if (settings.effort) args.push('-c', `model_reasoning_effort=${JSON.stringify(settings.effort)}`);
+  for (const image of imagePaths) args.push('--image', image);
   return [...args, '-'];
 }
 export async function generateCodex(
@@ -214,7 +216,8 @@ export async function generateCodex(
   cwd: string,
   env: NodeJS.ProcessEnv,
   signal?: AbortSignal,
-  trace?: PromptTraceContext
+  trace?: PromptTraceContext,
+  imagePaths: readonly string[] = []
 ): Promise<string> {
   if (signal?.aborted) throw new Problem(409, 'cancelled', 'Request cancelled');
   const inspected = await inspectCodex(executable, env);
@@ -255,7 +258,8 @@ export async function generateCodex(
         ...isolatedCodexArgs(
           settings,
           transportSchemaPath,
-          isolatedCodexConfig(catalogPath, instructionsPath)
+          isolatedCodexConfig(catalogPath, instructionsPath),
+          imagePaths
         ),
       ],
       prompt,

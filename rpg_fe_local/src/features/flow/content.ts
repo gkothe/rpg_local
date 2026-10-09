@@ -11,6 +11,10 @@ import {
   combatPrepareResult,
   npcPrepareArgs,
   npcPrepareResult,
+  atlasReadArgs,
+  atlasReadResult,
+  atlasPrepareArgs,
+  atlasPrepareResult,
 } from './examples';
 
 function item(
@@ -72,7 +76,7 @@ export const nodes: FlowItem[] = [
     'The app reads PostgreSQL and copies campaign knowledge into memory for the turn. It leaves private notes out of the gameplay context it builds automatically.',
     '4.3',
     ['rpg_be_local/src/domain/context.ts', 'rpg_be_local/src/domain/knowledgeRecall.ts'],
-    'Every context includes a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Relevant compact NPC motivation cores also reach the GM; full linked histories stay in accepted knowledge and retrieval. Profiles keep goals and secrets private, use explicit holder/witness evidence for awareness, and do not infer presence from mentions. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene, and always includes every participant of an active encounter. It also selects relevant campaign knowledge and searches source text for matching words. Gameplay has no token target: relevant retrieved sections and matching campaign facts are included without size-based omission. History is summarized in consecutive batches independently of gameplay prompt size. Memory summaries request bullet points while preserving the same information as paragraph summaries. Summaries can lose detail, so the app keeps the original turns. With selective history switched on, the memory text is replaced by a short overview plus the most relevant older sections and any items you protected; the full memory and all originals stay stored and the model can search them with history tools. Knowledge follows a priority: open debts and objectives, relationships, protected facts and records named in the scene are always included, while a record that is merely linked to your character competes for a size target by relevance.'
+    'New turns include a compact local atlas view and keep the complete geography frozen for map reads. A cartographer can prepare more geography with a separate tools-free call; only a validated final turn commits it. Map movement requires explicit action, and image imports require human review. Every context includes a catalog of confirmed campaign documents and frozen source tools. The opening turn includes preparation seeds even for a short action such as start. Relevant compact NPC motivation cores also reach the GM; full linked histories stay in accepted knowledge and retrieval. Profiles keep goals and secrets private, use explicit holder/witness evidence for awareness, and do not infer presence from mentions. Both public and hidden knowledge can reach the GM; only public projections reach the player. The prompt includes every player sheet. The app selects NPCs by names or IDs mentioned in the scene, and always includes every participant of an active encounter. It also selects relevant campaign knowledge and searches source text for matching words. Gameplay has no token target: relevant retrieved sections and matching campaign facts are included without size-based omission. History is summarized in consecutive batches independently of gameplay prompt size. Memory summaries request bullet points while preserving the same information as paragraph summaries. Summaries can lose detail, so the app keeps the original turns. With selective history switched on, the memory text is replaced by a short overview plus the most relevant older sections and any items you protected; the full memory and all originals stay stored and the model can search them with history tools. Knowledge follows a priority: open debts and objectives, relationships, protected facts and records named in the scene are always included, while a record that is merely linked to your character competes for a size target by relevance.'
   ),
   item(
     'model',
@@ -304,6 +308,78 @@ export const steps: FlowStep[] = [
   },
 ];
 export const tools: FlowTool[] = [
+  {
+    ...item(
+      'world_map_search',
+      'world_map_search',
+      'Find established campaign Places before creating a duplicate.',
+      'During new gameplay sessions.',
+      'A name query and optional cursor.',
+      'Paged IDs, names, visibility and certainty.',
+      'Reads the frozen Place corpus without a model call.',
+      '4.9',
+      ['rpg_be_local/src/domain/atlasRecall.ts']
+    ),
+    bookOnly: false,
+    args: { query: 'warehouse', cursor: 0 },
+    result: { places: [], nextCursor: null },
+  },
+  {
+    ...item(
+      'world_map_get',
+      'world_map_get',
+      'Read a local area, floor frames and known connections.',
+      'Before describing movement or requesting cartography.',
+      'A scope, Place cursor and route cursor; world selects root Places.',
+      'A bounded scoped map; expected tokens support safe corrections.',
+      'Reads the frozen atlas, including private facts available only to the GM.',
+      '4.9',
+      ['rpg_be_local/src/domain/atlasRecall.ts']
+    ),
+    bookOnly: false,
+    args: atlasReadArgs,
+    result: atlasReadResult,
+  },
+  {
+    ...item(
+      'world_map_routes',
+      'world_map_routes',
+      'Find a known open directed path without inventing distance.',
+      'When considering travel.',
+      'From/to Place IDs, optional scope, travel mode and cursor.',
+      'Paged connections plus known totals and explicit unknown segments.',
+      'Computes over the frozen graph; diagrams do not establish distance.',
+      '4.9',
+      ['rpg_be_local/src/domain/atlasRecall.ts']
+    ),
+    bookOnly: false,
+    args: {
+      from: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      to: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    },
+    result: {
+      found: false,
+      constrainedRoutes: [],
+      reason: 'No known open route in this data; other routes may exist.',
+    },
+  },
+  {
+    ...item(
+      'world_map_prepare',
+      'world_map_prepare',
+      'Ask a cartographer for an unpublished geography draft.',
+      'When a new region, site or interior needs expansion.',
+      'A stable local key, intent and optional known scope.',
+      'A ready receipt and geography draft, with reserved server identities.',
+      'One separate provider call outside locks. atlas_preparations is an immutable audit record once ready.',
+      '4.9',
+      ['rpg_be_local/src/services/atlasPreparation.ts']
+    ),
+    bookOnly: false,
+    args: atlasPrepareArgs,
+    result: atlasPrepareResult,
+  },
+
   {
     ...item(
       'npc_prepare',
@@ -685,6 +761,18 @@ export const tools: FlowTool[] = [
   })),
 ];
 export const storageItems: FlowItem[] = [
+  item(
+    'atlas-storage',
+    'Campaign atlas',
+    'Canonical Places are Knowledge; containment, connections, floor geometry and current position live in campaign.atlas.',
+    'After manual edits, reviewed image acceptance or committed turns.',
+    'Expected-value mutations or ready preparation receipts.',
+    'Validated graph and selective undo snapshots.',
+    'atlas_edits stores manual replay receipts; atlas_preparations stores creator drafts; atlas_assets and atlas_imports store private images and reviewed import jobs. Frozen atlas is part of dice_sessions.',
+    '4.9',
+    ['rpg_be_local/src/domain/atlas.ts', 'rpg_be_local/src/services/atlasArchive.ts']
+  ),
+
   item(
     'campaigns',
     'Campaign document',

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { Problem } from '../errors.js';
 import {
   KnowledgeCertainty,
+  KnowledgeVisibility,
   KnowledgeKind,
   KnowledgeStatus,
   type CampaignKnowledge,
@@ -217,14 +218,21 @@ export function evidenceRefs(
   }
   record.evidence.forEach((e, i) =>
     refs.push(
-      e.type === 'campaign_source'
+      e.type === 'map_asset'
         ? {
             id: `evidence-${i}`,
-            kind: 'campaign_source',
-            label: `${e.sourceName} (version ${e.version})`,
-            available: true,
+            kind: 'map_asset',
+            label: 'Map observation (private source)',
+            available: false,
           }
-        : { id: `evidence-${i}`, kind: 'book', label: 'Rule book excerpt', available: true }
+        : e.type === 'campaign_source'
+          ? {
+              id: `evidence-${i}`,
+              kind: 'campaign_source',
+              label: `${e.sourceName} (version ${e.version})`,
+              available: true,
+            }
+          : { id: `evidence-${i}`, kind: 'book', label: 'Rule book excerpt', available: true }
     )
   );
   return refs;
@@ -350,13 +358,21 @@ export function entryDetail(
   const visible = journalSources(records);
   const record = visible.find((r) => r.id === id);
   if (!record) throw new Problem(404, 'journal_not_found', 'Journal entry not found');
+  const canonical = records.find((r) => r.id === id)!;
+  const evidenceRecord = {
+    ...record,
+    evidence:
+      canonical.introductionVisibility === KnowledgeVisibility.GmOnly
+        ? record.evidence
+        : canonical.evidence,
+  };
   const entry = toEntry(record, visible, characters, ledgerLinks(ledger));
   return {
-    record,
+    record: evidenceRecord,
     entry: {
       ...entry,
       text: record.text,
-      evidence: evidenceRefs(record, ledger),
+      evidence: evidenceRefs(evidenceRecord, ledger),
       history: historyFor(record, characters, snapshots, ledger),
     },
   };

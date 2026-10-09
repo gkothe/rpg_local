@@ -1,3 +1,4 @@
+import AtlasPanel from '../features/atlas/AtlasPanel';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import {
@@ -39,6 +40,7 @@ const CAMPAIGN_TABS = [
   'play',
   'characters',
   'npcs',
+  'atlas',
   'journal',
   'sources',
   'game master',
@@ -658,6 +660,19 @@ export default function PlayPage() {
           layout={ruleSystem.data?.sheetLayout}
         />
       </div>
+      {tab === 'atlas' && (
+        <AtlasPanel
+          campaignId={campaign.id}
+          revision={campaign.revision}
+          options={settings.data?.atlas}
+          onSaved={resource.reload}
+          onTravel={(text) => {
+            setDraft((current) => (current ? `${current}\n${text}` : text));
+            setTab('play');
+            setFeedback('Travel action added to your draft. Review and submit when ready.');
+          }}
+        />
+      )}
       <div hidden={tab !== 'journal'}>
         <Journal
           campaign={campaign}

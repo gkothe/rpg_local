@@ -1,3 +1,17 @@
+import { atlasSchema, validateAtlas, atlasExpected } from '../domain/atlas.js';
+import {
+  atlasCollections,
+  registerAtlasRecords,
+  remapAtlas,
+  atlasArchiveSchema,
+  atlasFrozenCollections,
+  validateAtlasArchive,
+  registerAtlasAudit,
+  remapAtlasAudit,
+  exportAtlas,
+  importAtlas,
+} from './atlasArchive.js';
+import { frozenAtlasSchema } from '../domain/atlasRecall.js';
 import { isDeepStrictEqual } from 'node:util';
 import { npcArgumentDigest } from './npcPreparation.js';
 import { operationExplanationSchema } from '../domain/operationExplanations.js';
@@ -23,7 +37,7 @@ import {
 } from './npcPreparationArchive.js';
 import { Store } from '../store.js';
 import { newCampaign } from '../domain/campaign.js';
-import type { Campaign, Archive, Snapshot, Memory } from '../domain/types.js';
+import type { Campaign, Archive, Snapshot, Memory, ContextManifest } from '../domain/types.js';
 import { Problem } from '../errors.js';
 import { sourceSections } from '../domain/sourceSections.js';
 import {
@@ -138,6 +152,7 @@ const settings = z
 const campaign = z
   .object({
     continuity: continuitySchema.optional(),
+    atlas: atlasSchema.optional(),
     ruleSystemId: uuid.nullable().optional(),
     ruleReference: ruleReferenceSchema.optional(),
     ruleResolution: z
@@ -230,6 +245,7 @@ const context = z
     frozenKnowledge: frozenKnowledgeSchema.optional(),
     frozenHistory: frozenHistorySchema.optional(),
     frozenContinuity: frozenContinuitySchema.optional(),
+    frozenAtlas: frozenAtlasSchema.optional(),
     sourceSpans: z.array(sourceSpanSchema).optional(),
     frozenSources: frozenCampaignSourcesSchema.optional(),
     sourceSelection: z
@@ -287,6 +303,8 @@ const turn = z
 const snapshot = z
   .object({
     beforeContinuity: z.array(npcProfileSchema).optional(),
+    beforeAtlas: atlasSchema.optional(),
+    afterAtlas: atlasSchema.optional(),
     afterContinuity: z.array(npcProfileSchema).optional(),
     turnId: uuid,
     beforeCharacters: z.array(character),
@@ -317,6 +335,7 @@ const archiveSchema = z
     memories: z.array(memory),
     diceSessions: z.array(diceSessionSchema).max(MAX_ARCHIVE_TURNS),
     diceRecords: z.array(diceRecordSchema).max(MAX_ARCHIVE_TURNS * DICE_LIMITS.slots),
+    atlasData: atlasArchiveSchema.optional(),
     npcPreparations: z.array(npcPreparationArchiveSchema).optional(),
     combatPreparations: z.array(combatPreparationArchiveSchema),
     combatPreparedCharacters: z.array(combatPreparedCharacterArchiveSchema),
@@ -452,6 +471,7 @@ export function remapArchive(raw: unknown): Archive {
   const parsed = archiveSchema.parse(raw);
   validateJournalArchive(parsed);
   validateHistoryArchive(parsed);
+  validateAtlasArchive(parsed);
   const metadata = ['systemPrompt', 'frozenKnowledge', 'toolDefinitions'] as const;
   for (const session of parsed.diceSessions) {
     const count = metadata.filter((key) => session[key] !== undefined).length;
@@ -474,6 +494,7 @@ export function remapArchive(raw: unknown): Archive {
   validateAdvancementArchive(archive.advancementReviews ?? [], archive.turns);
   const old = archive.campaign;
   validateContinuity(old);
+  validateAtlas(old);
   const ids = new Map<string, string>();
   const register = (id: string) => {
     if (ids.has(id)) throw new Problem(422, 'archive_invalid', 'Duplicate entity ID in archive');
@@ -521,10 +542,16 @@ export function remapArchive(raw: unknown): Archive {
   ]);
   const knowledgeCollections = [
     old.knowledge,
+    ...atlasFrozenCollections(archive).map((f) => f.records),
     ...archive.snapshots.flatMap((snap) => [snap.beforeKnowledge ?? [], snap.afterKnowledge ?? []]),
     ...archive.diceSessions.map((session) => session.frozenKnowledge?.records ?? []),
     ...archive.turns.map((turn) => turn.context?.frozenKnowledge?.records ?? []),
   ];
+  registerAtlasRecords(
+    [...atlasCollections(archive), ...atlasFrozenCollections(archive).map((f) => f.atlas)],
+    ids,
+    register
+  );
   const knowledgeIds = new Set<string>();
   for (const records of knowledgeCollections) {
     if (new Set(records.map((record) => record.id)).size !== records.length)
@@ -537,6 +564,7 @@ export function remapArchive(raw: unknown): Archive {
       }
     }
   }
+  registerAtlasAudit(archive, ids, register);
   const historicalSources = new Set(sids);
   const historicalCharacters = new Set(old.characters.map((char) => char.id));
   for (const snap of archive.snapshots)
@@ -750,7 +778,10 @@ export function remapArchive(raw: unknown): Archive {
           );
         for (const evidence of e.evidence) {
           if (evidence.type === 'campaign_source') sourceLink(evidence.sourceId);
-          else if (!turn.ruleReads?.some((r) => r.id === evidence.citation.receiptId))
+          else if (
+            evidence.type === 'book' &&
+            !turn.ruleReads?.some((r) => r.id === evidence.citation.receiptId)
+          )
             throw new Problem(422, 'archive_invalid', 'Unresolved explanation book receipt');
         }
       }
@@ -835,7 +866,9 @@ export function remapArchive(raw: unknown): Archive {
             'Knowledge origin and evidence are inconsistent'
           );
         for (const evidence of entry.evidence) {
-          if (evidence.type === 'campaign_source') {
+          if (evidence.type === 'map_asset') {
+            continue; // Validated against owned asset observations by validateAtlasArchive.
+          } else if (evidence.type === 'campaign_source') {
             sourceLink(evidence.sourceId);
             const source = old.sources.find(
               (source) => source.id === evidence.sourceId && source.version === evidence.version
@@ -1143,7 +1176,12 @@ export function remapArchive(raw: unknown): Archive {
       ...record.attributions.flatMap((entry) => entry.evidence),
     ]) {
       if (evidence.type === 'campaign_source') evidence.sourceId = mapped(evidence.sourceId);
-      else evidence.citation.receiptId = mapped(evidence.citation.receiptId);
+      else if (evidence.type === 'book')
+        evidence.citation.receiptId = mapped(evidence.citation.receiptId);
+      else {
+        evidence.assetId = mapped(evidence.assetId);
+        evidence.observationId = mapped(evidence.observationId);
+      }
     }
   };
   const remapFrozen = (captured: FrozenKnowledge) => {
@@ -1158,6 +1196,19 @@ export function remapArchive(raw: unknown): Archive {
     captured.sourceIds = captured.sourceIds.map(mapped);
     for (const source of captured.sourceVersions ?? []) source.id = mapped(source.id);
   };
+  for (const atlas of atlasCollections(out)) {
+    const rows = [...atlas.places, ...atlas.frames, ...atlas.routes];
+    const hashes = rows.map(atlasExpected);
+    remapAtlas(atlas, mapped);
+    rows.forEach((row, i) => ids.set(hashes[i]!, atlasExpected(row)));
+  }
+  const remapFrozenAtlas = (f: NonNullable<ContextManifest['frozenAtlas']>) => {
+    f.campaignId = mapped(f.campaignId);
+    f.records.forEach(remapKnowledge);
+  };
+  for (const s of out.diceSessions) if (s.frozenAtlas) remapFrozenAtlas(s.frozenAtlas);
+  for (const t of out.turns) if (t.context?.frozenAtlas) remapFrozenAtlas(t.context.frozenAtlas);
+  remapAtlasAudit(out, mapped, ids);
   out.campaign.knowledge.forEach(remapKnowledge);
   if (out.campaign.journal) {
     // Journal ids that name removed (undone) records still need one consistent new identity.
@@ -1336,7 +1387,12 @@ export function remapArchive(raw: unknown): Archive {
       e.rollIds = e.rollIds.map(mapped);
       for (const evidence of e.evidence)
         if (evidence.type === 'campaign_source') evidence.sourceId = mapped(evidence.sourceId);
-        else evidence.citation.receiptId = mapped(evidence.citation.receiptId);
+        else if (evidence.type === 'book')
+          evidence.citation.receiptId = mapped(evidence.citation.receiptId);
+        else {
+          evidence.assetId = mapped(evidence.assetId);
+          evidence.observationId = mapped(evidence.observationId);
+        }
     }
     if (t.context?.frozenSources) {
       t.context.frozenSources.campaignId = mapped(t.context.frozenSources.campaignId);
@@ -1397,6 +1453,11 @@ export function remapArchive(raw: unknown): Archive {
   }
   out.campaign.createdAt = new Date().toISOString();
   out.campaign.updatedAt = out.campaign.createdAt;
+  for (const p of out.atlasData?.preparations ?? []) {
+    const owned = new Map(out.turns.flatMap((t) => t.ruleReads ?? []).map((r) => [r.id, r]));
+    for (const e of [p.frozenInput.evidence, ...(p.result ? [p.result.evidence] : [])])
+      e.ruleReads = e.ruleReads.map((r) => structuredClone(owned.get(r.id) ?? r));
+  }
   return out;
 }
 export class LibraryService {
@@ -1551,6 +1612,7 @@ export class LibraryService {
       };
       return {
         format: ARCHIVE_FORMAT_ID,
+        atlasData: await exportAtlas(client, id),
         advancementReviews: await exportAdvancement(client, id),
         diceSessions: sessions.rows.map((row) => ({
           id: row.id,
@@ -1572,6 +1634,7 @@ export class LibraryService {
                 ...(row.frozen_continuity != null
                   ? { frozenContinuity: row.frozen_continuity }
                   : {}),
+                ...(row.frozen_atlas != null ? { frozenAtlas: row.frozen_atlas } : {}),
                 toolDefinitions: row.tool_definitions,
               }
             : {}),
@@ -1698,7 +1761,7 @@ export class LibraryService {
       for (const session of archive.diceSessions)
         await client.query(
           session.systemPrompt !== undefined
-            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history,frozen_continuity) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13,$14,$15)'
+            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history,frozen_continuity,frozen_atlas) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13,$14,$15,$16)'
             : 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9)',
           [
             session.id,
@@ -1718,6 +1781,7 @@ export class LibraryService {
                   session.frozenSources ? JSON.stringify(session.frozenSources) : null,
                   session.frozenHistory ? JSON.stringify(session.frozenHistory) : null,
                   session.frozenContinuity ?? null,
+                  session.frozenAtlas ?? null,
                 ]
               : []),
           ]
@@ -1811,6 +1875,7 @@ export class LibraryService {
             draft.createdAt,
           ]
         );
+      await importAtlas(client, archive.atlasData);
       await this.store.reindex(archive.campaign, client);
       return archive.campaign;
     });
@@ -1851,6 +1916,7 @@ export class LibraryService {
       delete setup.advancementReviews;
       delete setup.advancementPolicy;
       delete setup.continuity;
+      delete setup.atlas;
       delete setup.npcPreparations;
       const c = { ...newCampaign({ name: name ?? template.name }), ...setup } as Campaign;
       // Even an externally stored template cannot transplant another campaign's timeline.

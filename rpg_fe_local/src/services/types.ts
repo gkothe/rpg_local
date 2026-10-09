@@ -118,6 +118,7 @@ export interface RuleImportPreview {
   columns: string[];
 }
 export interface Provider {
+  images?: { supported: boolean; reason: string | null };
   /** Backend-served: CLI rows are installed executables, API rows are configured remote services. */
   transport: 'cli' | 'api';
   compatibilityWarning?: string | null;
@@ -311,7 +312,7 @@ export interface JournalConnection {
 }
 export interface JournalEvidenceRef {
   id: string;
-  kind: 'turn' | 'campaign_source' | 'book';
+  kind: 'turn' | 'campaign_source' | 'book' | 'map_asset';
   label: string;
   turnId?: string;
   available: boolean;
@@ -376,6 +377,7 @@ export interface JournalJobView {
   updatedAt: string;
 }
 export type JournalEvidenceDetail =
+  | { kind: 'map_asset'; label: string; available: boolean; quote: string }
   | { kind: 'turn'; label: string; turnId: string; available: boolean }
   | { kind: 'campaign_source' | 'book'; label: string; quote: string; available: true };
 export interface MemoryRebuildJobView {
@@ -450,6 +452,7 @@ export interface HistoryDetail {
   correctionGuidance: { instruction: string; items: unknown[] };
 }
 export interface Settings {
+  atlas?: import('../features/atlas/types').AtlasOptions;
   history?: {
     kindOptions: { id: string; label: string }[];
     reasonOptions: { id: string; label: string }[];
