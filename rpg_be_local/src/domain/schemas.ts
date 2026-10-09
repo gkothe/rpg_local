@@ -37,6 +37,18 @@ export const characterInput = z
     notes: z.string().max(MAX_LONG_TEXT_CHARS).default(''),
   })
   .strict();
+// PATCH must not apply creation defaults to fields the user did not send.
+export const characterPatchSchema = characterInput
+  .omit({ type: true })
+  .extend({
+    attributes: characterInput.shape.attributes.removeDefault(),
+    inventory: characterInput.shape.inventory.removeDefault(),
+    description: characterInput.shape.description.removeDefault(),
+    notes: characterInput.shape.notes.removeDefault(),
+  })
+  .partial()
+  .extend({ revision: z.number().int().nonnegative() })
+  .strict();
 export const operationSchema = z.discriminatedUnion('op', [
   z
     .object({

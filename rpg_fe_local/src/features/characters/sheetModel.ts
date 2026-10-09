@@ -3,7 +3,7 @@ import type { SheetFieldHint, SheetLayout } from '../../services/types';
 /** Text at least this long reads as a paragraph rather than a value. */
 export const PROSE_MIN_CHARS = 140;
 
-export type SheetNode = { key: string; label: string; mismatch?: boolean } & (
+export type SheetNode = { key: string; label: string; mismatch?: boolean; path?: string[] } & (
   | { kind: 'number'; value: number }
   | { kind: 'dots'; value: number; max: number }
   | { kind: 'checks'; value: number; max: number }
@@ -62,7 +62,13 @@ export function buildSheetModel(
   );
   if (rootValues.length && !hinted && rootValues.every(isNamedObject))
     return [
-      { key: section, label: '', kind: 'items', items: rootValues as Record<string, unknown>[] },
+      {
+        key: section,
+        label: '',
+        path: [section],
+        kind: 'items',
+        items: rootValues as Record<string, unknown>[],
+      },
     ];
   return children(root, [section], undefined);
 
@@ -150,7 +156,7 @@ export function buildSheetModel(
           : null;
       case 'items':
         return Array.isArray(value) && value.length && value.every(isNamedObject)
-          ? { ...base, kind: 'items', items: value as Record<string, unknown>[] }
+          ? { ...base, path, kind: 'items', items: value as Record<string, unknown>[] }
           : null;
       case 'prose':
         return typeof value === 'string' ? { ...base, kind: 'prose', text: value } : null;
@@ -180,7 +186,7 @@ export function buildSheetModel(
       if (value.every((item) => typeof item === 'string'))
         return { ...base, kind: 'tags', values: value as string[] };
       if (value.every(isNamedObject))
-        return { ...base, kind: 'items', items: value as Record<string, unknown>[] };
+        return { ...base, path, kind: 'items', items: value as Record<string, unknown>[] };
       return { ...base, kind: 'raw', value };
     }
     if (isObject(value)) {

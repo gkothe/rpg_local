@@ -34,6 +34,7 @@ Campaigns also include `pinnedSourceSections: {sourceId:string,version:number,in
 - PATCH `/campaigns/:id/notes` `{notes,notesRevision}` => Campaign (private notes don't enter prompt).
 - POST `/campaigns/:id/characters` `{revision,name,type?,attributes?,inventory?,description?,notes?}` => Campaign.
 - PATCH `/campaigns/:id/characters/:characterId` `{revision,name?,attributes?,inventory?,description?,notes?}` => Campaign. DELETE same path `{revision}` => Campaign.
+  PATCH preserves omitted fields and does not apply character-creation defaults. An explicitly supplied section object replaces only that section; `{}` clears that section.
 - POST `/campaigns/:id/sources` JSON `{revision,name,text}` => Campaign with a confirmed source, immediately eligible for GM context.
 - POST `/campaigns/:id/sources/extract` multipart `file`, `revision`, `language` ('eng'/'por'/'eng+por') => Campaign with a confirmed extracted source; or JSON `{revision,url,name?}` public Google Docs only. Text/MD/PDF up to20MiB; PDF requires configured local Python dependencies. No browser file paths.
 - PATCH `/campaigns/:id/sources/:sourceId` `{revision,text,name?,confirmed:boolean}` => Campaign; confirmation/correction bumps source version.

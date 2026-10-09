@@ -1696,10 +1696,16 @@ p.dice-interpretation {
   text-transform: uppercase;
 }
 .character-page input,
-.character-page textarea {
+.character-page textarea,
+.character-page select {
+  color-scheme: light;
   border-color: #a8916a;
   background: #f3e8d0;
   color: var(--ink);
+}
+.character-page select:disabled {
+  color: var(--ink-muted);
+  opacity: 1;
 }
 .character-page button:not(.primary) {
   border-color: var(--ink-muted);
@@ -1891,6 +1897,58 @@ p.dice-interpretation {
 .sheet-item-body > strong {
   font-family: var(--display);
   font-size: 1rem;
+}
+.sheet-item {
+  position: relative;
+  padding-bottom: 3.5rem;
+}
+.character-page .sheet-item {
+  padding-bottom: 3.5rem;
+}
+.sheet-item-actions {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  display: flex;
+  gap: 0.3rem;
+}
+.sheet-item-edit,
+.sheet-item-delete {
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+}
+.sheet-item-sort {
+  align-items: end;
+}
+.sheet-item-dialog {
+  width: min(640px, calc(100% - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  background: #f3e8d0;
+  color: var(--ink);
+  border: 1px solid #b9a47c;
+  border-radius: 8px;
+  padding: 1.5rem;
+  overflow-wrap: anywhere;
+}
+.sheet-item-dialog::backdrop {
+  background: #0009;
+}
+.item-fields {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+@media (max-width: 600px) {
+  .sheet-item-sort {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .character-page .sheet-items {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 @media (max-width: 600px) {
   .character-page {

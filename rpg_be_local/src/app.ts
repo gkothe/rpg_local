@@ -71,6 +71,7 @@ import {
   campaignCreateSchema,
   campaignPatchSchema,
   characterInput,
+  characterPatchSchema,
   idSchema,
   turnInputSchema,
   ocrLanguageSchema,
@@ -674,12 +675,7 @@ export function createApp(options: AppOptions) {
   app.patch(
     '/api/campaigns/:id/characters/:characterId',
     wrap(async (req, res) => {
-      const { revision, ...patch } = characterInput
-        .omit({ type: true })
-        .partial()
-        .extend({ revision: z.number().int().nonnegative() })
-        .strict()
-        .parse(req.body);
+      const { revision, ...patch } = characterPatchSchema.parse(req.body);
       const characterId = param(req, 'characterId');
       const c = await campaigns!.patchCharacter(param(req, 'id'), characterId, revision, patch);
       res.json({ data: publicCampaign(c) });

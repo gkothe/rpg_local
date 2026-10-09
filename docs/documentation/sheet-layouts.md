@@ -211,3 +211,9 @@ Ability scores show their modifiers; hit points are a track.
   ]
 }
 ```
+
+Item lists offer sorting by every key present in their cards, in ascending or descending order. Numbers sort numerically; missing or null values stay last. Sorting is local to the view and does not change saved inventory order.
+
+On character sheets, the pencil at the bottom right of each item opens a modal with editable values, including nested fields. Numbers and booleans retain their types. Save item persists the edited fields while keeping the modal open with feedback; unrelated refreshed values are preserved. Close discards unsaved changes. The section JSON editor remains available for adding or removing keys and items.
+
+The trash button beside the pencil opens a confirmation modal. Cancel or Escape leaves the item unchanged. Delete item removes the keyed entry or list element and refreshes the sheet; failures remain visible in the modal. If the item changed while confirmation was open, cancel and review it before confirming again.

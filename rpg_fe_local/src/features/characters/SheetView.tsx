@@ -1,15 +1,9 @@
-import { Package, Shield, Sword, Wrench, type LucideIcon } from 'lucide-react';
 import type { SheetLayout } from '../../services/types';
 import CharacterData from './CharacterData';
+import SheetItems from './SheetItems';
+import { valueAt, type ItemDelete, type ItemSave } from './itemValues';
 import { buildSheetModel, type SheetNode } from './sheetModel';
 
-// Decorative medallion per item kind; unknown kinds get the generic pack.
-const ITEM_ICONS: Record<string, LucideIcon> = {
-  weapon: Sword,
-  shield: Shield,
-  armor: Shield,
-  tool: Wrench,
-};
 const clamp = (value: number, max: number) => Math.max(0, Math.min(value, max));
 const signed = (value: number) => (value > 0 ? `+${value}` : String(value));
 
@@ -34,7 +28,17 @@ function Pips({
   );
 }
 
-function Value({ node }: { node: SheetNode }) {
+function Value({
+  node,
+  sections,
+  onSave,
+  onDelete,
+}: {
+  node: SheetNode;
+  sections: Record<string, unknown>;
+  onSave?: ItemSave;
+  onDelete?: ItemDelete;
+}) {
   switch (node.kind) {
     case 'number':
       return <span className="character-value sheet-number">{node.value}</span>;
@@ -105,26 +109,18 @@ function Value({ node }: { node: SheetNode }) {
       );
     case 'items':
       return (
-        <ul className="sheet-items">
-          {node.items.map((item, index) => {
-            const { name, ...rest } = item;
-            const Icon = ITEM_ICONS[String(rest.type).toLowerCase()] ?? Package;
-            return (
-              <li key={index} className="sheet-item">
-                <span className="sheet-item-icon" aria-hidden="true">
-                  <Icon size={22} strokeWidth={1.8} />
-                </span>
-                <div className="sheet-item-body">
-                  <strong>{String(name)}</strong>
-                  {Object.keys(rest).length > 0 && <CharacterData value={rest} />}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        <SheetItems
+          items={node.items}
+          path={node.path ?? []}
+          source={valueAt(sections, node.path ?? [])}
+          onSave={onSave}
+          onDelete={onDelete}
+        />
       );
     case 'group':
-      return <Nodes nodes={node.children} />;
+      return (
+        <Nodes nodes={node.children} sections={sections} onSave={onSave} onDelete={onDelete} />
+      );
     case 'empty':
       return <span className="muted">{node.text}</span>;
     case 'raw':
@@ -132,7 +128,17 @@ function Value({ node }: { node: SheetNode }) {
   }
 }
 
-function Nodes({ nodes }: { nodes: SheetNode[] }) {
+function Nodes({
+  nodes,
+  sections,
+  onSave,
+  onDelete,
+}: {
+  nodes: SheetNode[];
+  sections: Record<string, unknown>;
+  onSave?: ItemSave;
+  onDelete?: ItemDelete;
+}) {
   return (
     <div className="sheet-nodes">
       {nodes.map((node) => (
@@ -142,7 +148,7 @@ function Nodes({ nodes }: { nodes: SheetNode[] }) {
         >
           <span className="sheet-label">{node.label}</span>
           <div className="sheet-value">
-            <Value node={node} />
+            <Value node={node} sections={sections} onSave={onSave} onDelete={onDelete} />
             {node.mismatch && (
               <small className="muted sheet-note">Layout hint does not fit this value.</small>
             )}
@@ -158,12 +164,16 @@ export default function SheetView({
   section,
   sections,
   layout,
+  onSave,
+  onDelete,
 }: {
   section: string;
   sections: Record<string, unknown>;
   layout?: SheetLayout;
+  onSave?: ItemSave;
+  onDelete?: ItemDelete;
 }) {
   const nodes = buildSheetModel(section, sections, layout);
   if (!nodes.length) return <p className="muted">Nothing recorded.</p>;
-  return <Nodes nodes={nodes} />;
+  return <Nodes nodes={nodes} sections={sections} onSave={onSave} onDelete={onDelete} />;
 }
