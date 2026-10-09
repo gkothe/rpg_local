@@ -312,7 +312,7 @@ export const tools: FlowTool[] = [
       'Before the first interaction of a likely recurring NPC; ordinary background creates remain available.',
       'A stable local key, creation intent, established public data, introduction evidence and optional frozen context IDs.',
       'A reserved identity, public character, private profile and exact paired create/profile operations.',
-      'One tools-free creator call outside database transactions; the same completed key replays its saved result. The npc_preparations table holds unpublished drafts. Native-provider creation requires explicit opt-in.',
+      'One tools-free creator call outside database transactions; the same completed key replays its saved result. The npc_preparations table holds unpublished drafts. Available through every configured supported gameplay provider.',
       '4.8',
       ['rpg_be_local/src/services/npcPreparation.ts', 'rpg_be_local/src/domain/npcPreparation.ts'],
       'Aim for roughly 80-150 words across the core, with concrete want, motive, boundary and optional tension/secret. Only relevant cores reach the GM; history and mechanics stay separate. Cancellation commits nothing. Public narrative editing never receives the private profile.'

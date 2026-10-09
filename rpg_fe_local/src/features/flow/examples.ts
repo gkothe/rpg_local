@@ -154,7 +154,7 @@ export const ruleRead = {
 export function examplePayload(pinned: boolean, mentioned: boolean, book: boolean) {
   return {
     mandatory: {
-      npcPreparation: false,
+      npcPreparation: true,
       npcCores: [],
       ruleContext: {
         systemId: ids.system,

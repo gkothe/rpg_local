@@ -1,3 +1,4 @@
+import { API_PROVIDER_IDS, PROVIDER_IDS, type AnyProviderId } from '../src/providers/options.js';
 import { RuleStore } from '../src/services/ruleStore.js';
 import { emptyRuleColumns, RuleReview } from '../src/domain/rules.js';
 import type { NpcPrepareInput } from '../src/domain/npcPreparation.js';
@@ -52,10 +53,10 @@ async function terminal(campaignId: string, turnId: string) {
   }
   throw new Error('Synthetic NPC turn did not finish');
 }
-async function campaign() {
+async function campaign(provider: AnyProviderId = 'openrouter') {
   const c = newCampaign({
     name: 'Flooded crossroads',
-    settings: { provider: 'openrouter', model: 'mock', effort: null },
+    settings: { provider, model: 'mock', effort: null },
   });
   await store.insert(c);
   return c;
@@ -313,55 +314,59 @@ test(
     assert.equal(done.diceSessionId, failed.diceSessionId);
   }
 );
-test(
-  'cancellation after generation starts prevents receipt publication and character creation',
-  { skip: !enabled },
-  async () => {
-    const c = await campaign();
-    const count = { creator: 0 };
-    let started!: () => void;
-    const childStarted = new Promise<void>((resolve) => {
-      started = resolve;
-    });
-    let finish!: (value: unknown) => void;
-    const gen = generator(
-      async (_s, _p, _sc, _sy, tools: GameplayToolDispatch) => {
-        await tools('npc_prepare', args, 'prepare');
-        return emptyResponse;
-      },
-      count,
-      async () => {
-        started();
-        return new Promise((resolve) => {
-          finish = resolve;
-        });
+for (const provider of ['openrouter', ...PROVIDER_IDS] as const)
+  test(
+    `cancellation after generation starts prevents receipt publication and character creation (${provider})`,
+    { skip: !enabled },
+    async () => {
+      const c = await campaign(provider);
+      const count = { creator: 0 };
+      let started!: () => void;
+      const childStarted = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let childSignal: AbortSignal | undefined;
+      let finish!: (value: unknown) => void;
+      const gen = generator(
+        async (_s, _p, _sc, _sy, tools: GameplayToolDispatch) => {
+          await tools('npc_prepare', args, 'prepare');
+          return emptyResponse;
+        },
+        count,
+        async (_settings, _prompt, _schema, signal) => {
+          childSignal = signal;
+          started();
+          return new Promise((resolve) => {
+            finish = resolve;
+          });
+        }
+      );
+      const turns = new TurnService(store, gen);
+      const first = await turns.submit(c.id, {
+        requestId: randomUUID(),
+        revision: 0,
+        action: 'Meet Mara',
+      });
+      await childStarted;
+      await turns.cancel(c.id, first.id);
+      assert.equal(childSignal?.aborted, true);
+      finish({ name: 'Mara', description: { role: 'Innkeeper' }, profile: core });
+      for (let i = 0; i < 100; i++) {
+        const row = await store.pool.query('SELECT status FROM npc_preparations WHERE turn_id=$1', [
+          first.id,
+        ]);
+        if (row.rows[0]?.status !== 'running') break;
+        await delay(20);
       }
-    );
-    const turns = new TurnService(store, gen);
-    const first = await turns.submit(c.id, {
-      requestId: randomUUID(),
-      revision: 0,
-      action: 'Meet Mara',
-    });
-    await childStarted;
-    await turns.cancel(c.id, first.id);
-    finish({ name: 'Mara', description: { role: 'Innkeeper' }, profile: core });
-    for (let i = 0; i < 100; i++) {
-      const row = await store.pool.query('SELECT status FROM npc_preparations WHERE turn_id=$1', [
-        first.id,
-      ]);
-      if (row.rows[0]?.status !== 'running') break;
-      await delay(20);
+      const rows = await store.pool.query(
+        'SELECT status,result FROM npc_preparations WHERE turn_id=$1',
+        [first.id]
+      );
+      assert.equal(rows.rows[0]!.result, null);
+      assert.notEqual(rows.rows[0]!.status, 'ready');
+      assert.equal((await store.campaign(c.id)).characters.length, 0);
     }
-    const rows = await store.pool.query(
-      'SELECT status,result FROM npc_preparations WHERE turn_id=$1',
-      [first.id]
-    );
-    assert.equal(rows.rows[0]!.result, null);
-    assert.notEqual(rows.rows[0]!.status, 'ready');
-    assert.equal((await store.campaign(c.id)).characters.length, 0);
-  }
-);
+  );
 
 for (const failChild of [false, true])
   test(
@@ -470,5 +475,51 @@ for (const failChild of [false, true])
       const importedArchive = await library.export(imported.id);
       remapArchive(importedArchive);
       assert.equal(imported.characters[0]!.name, 'Mara');
+    }
+  );
+
+for (const provider of [...PROVIDER_IDS, ...API_PROVIDER_IDS])
+  test(
+    `NPC creation is available without extra configuration and awaited inside gameplay (${provider})`,
+    { skip: !enabled },
+    async () => {
+      const c = await campaign(provider);
+      const count = { creator: 0 };
+      let parentWaiting = false;
+      let parentSignal: AbortSignal | undefined;
+      const gen = generator(
+        async (settings, prompt, _schema, _sys, tools, signal) => {
+          assert.equal(JSON.parse(prompt).mandatory.npcPreparation, true);
+          assert.ok(tools.definitions?.some((d) => d.name === 'npc_prepare'));
+          parentWaiting = true;
+          parentSignal = signal;
+          const p = (await tools('npc_prepare', args, 'prepare')) as Result;
+          parentWaiting = false;
+          assert.deepEqual(await tools('npc_prepare', args, 'replay'), p);
+          assert.deepEqual(settings, c.settings);
+          return gmResponse('Mara offers an escort contract.', [p.createOperation], {
+            continuityChanges: [p.profileChange],
+          });
+        },
+        count,
+        async (settings, prompt, _schema, signal) => {
+          assert.equal(parentWaiting, true);
+          assert.deepEqual(settings, c.settings);
+          assert.equal(signal, parentSignal);
+          assert.match(JSON.parse(prompt).task, /no tools/);
+          assert.equal((await store.campaign(c.id)).characters.length, 0);
+          return { name: 'Mara', description: { role: 'Innkeeper' }, profile: core };
+        }
+      );
+      const turns = new TurnService(store, gen);
+      const turn = await turns.submit(c.id, {
+        requestId: randomUUID(),
+        revision: 0,
+        action: 'Meet Mara',
+      });
+      const done = await terminal(c.id, turn.id);
+      assert.equal(done.status, TurnStatus.Completed, done.error ?? '');
+      assert.equal(count.creator, 1);
+      assert.equal((await store.campaign(c.id)).continuity!.npcProfiles.length, 1);
     }
   );

@@ -1,3 +1,4 @@
+import { NPC_PREPARATION_LIMITS } from '../src/domain/npcPreparation.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
@@ -10,6 +11,10 @@ test('HTTP boundary serves backend-owned capabilities, rejects foreign Host/Orig
   const options = await request(app).get('/api/settings').set('Host', 'localhost:4100').expect(200);
   assert.equal(options.body.data.defaults.characterType, 'player');
   assert.equal(options.body.data.dice.enabled, true);
+  assert.deepEqual(options.body.data.npc.preparation, {
+    enabled: true,
+    limits: NPC_PREPARATION_LIMITS,
+  });
   assert.equal(options.body.data.dice.limits.requestsPerAttempt, 24);
   for (const retired of ['version', 'gameplay'])
     assert.equal(retired in options.body.data, false, retired);

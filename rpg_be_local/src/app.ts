@@ -259,8 +259,7 @@ export function createApp(options: AppOptions) {
             continuity: true,
             profileLimits: NPC_CONTINUITY_LIMITS,
             preparation: {
-              api: true,
-              nativeOptIn: process.env.RPG_NPC_PREPARATION_NATIVE === '1',
+              enabled: true,
               limits: NPC_PREPARATION_LIMITS,
             },
           },

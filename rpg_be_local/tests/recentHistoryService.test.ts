@@ -96,7 +96,7 @@ async function execute(
           'INSERT INTO dice_attempts',
           'SELECT * FROM dice_records',
         ].some((prefix) => sql.startsWith(prefix)) ||
-        /FROM combat_prepar/.test(sql)
+        /FROM (combat_prepar|npc_preparations)/.test(sql)
       )
         return { rows: [] };
       throw new Error(`Unexpected synthetic query: ${sql}`);

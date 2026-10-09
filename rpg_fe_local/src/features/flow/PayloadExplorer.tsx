@@ -57,8 +57,8 @@ export default function PayloadExplorer() {
         <p>
           The optional creator makes one additional call when preparing a meaningful new NPC. This
           synthetic result includes private GM guidance. In play, only relevant concise cores enter
-          context; the player receives public narrative and revealed Journal facts. Native creation
-          requires explicit opt-in.
+          context; the player receives public narrative and revealed Journal facts. Creation uses
+          the campaign’s configured provider, including native CLIs.
         </p>
         <pre aria-label="Synthetic NPC preparation JSON">
           {JSON.stringify(npcPrepareResult, null, 2)}

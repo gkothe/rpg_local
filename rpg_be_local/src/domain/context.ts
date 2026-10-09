@@ -1,4 +1,3 @@
-import { isApiProvider } from '../providers/options.js';
 import { npcCore } from './npcContext.js';
 import { sourceSections } from './sourceSections.js';
 import type { Campaign, Turn, ContextManifest } from './types.js';
@@ -192,17 +191,8 @@ export function buildContext(
     relevantCharacters.some((x) => x.id === p.characterId)
   );
   const base = {
-    ...(c.continuity
-      ? {
-          npcCores: selectedProfiles.map(npcCore),
-          npcPreparation:
-            isApiProvider(c.settings.provider) || process.env.RPG_NPC_PREPARATION_NATIVE === '1',
-        }
-      : {
-          npcPreparation:
-            isApiProvider(c.settings.provider) || process.env.RPG_NPC_PREPARATION_NATIVE === '1',
-          npcCores: [],
-        }),
+    npcPreparation: true,
+    npcCores: selectedProfiles.map(npcCore),
     ...(rulePrompt
       ? {
           ruleContext: rulePrompt.context,

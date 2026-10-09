@@ -463,7 +463,7 @@ Decision request IDs replay the original result; reusing an ID with different co
 
 ### Compact NPC preparation and private continuity
 
-`GET /api/settings` includes `npc.continuity`, `npc.profileLimits` and `npc.preparation.{api,nativeOptIn,limits}`. These describe backend capabilities and structural/transport limits. Native creation is opt-in through `RPG_NPC_PREPARATION_NATIVE=1`; API providers use their existing configuration. Ordinary NPC creation remains available. There is no new public profile mutation endpoint or new NPC interface.
+`GET /api/settings` includes `npc.continuity`, `npc.profileLimits` and `npc.preparation.{enabled,limits}`. These describe backend capabilities and structural/transport limits. NPC creation is enabled for every configured supported gameplay provider, including native CLIs, using the campaign’s existing provider/model/effort. Ordinary NPC creation remains available. There is no new public profile mutation endpoint or new NPC interface.
 
 Owned `npc_prepare` accepts `{localKey,intent,roleHint?,establishedCharacter?,introduction,relevantCharacterIds?,relevantKnowledgeIds?,distinctFromCharacterIds?}`. The key is trimmed 1–200 characters and scoped to the logical dice session; input strings use existing text limits, ID arrays are unique with at most 1000 entries, and aggregate UTF-8 arguments are limited to 4 MiB across registry/native/API boundaries. This is a transport bound, not an AI output limit. `distinctFromCharacterIds` explicitly identifies known same-name characters when a different individual is intended. References must belong to captured inputs. Introduction evidence is bound to owned supplied originals/receipts. Public mechanical fields are preserved; the creator does not invent trusted mechanics.
 

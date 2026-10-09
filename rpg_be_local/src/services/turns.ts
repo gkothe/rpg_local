@@ -40,7 +40,7 @@ import { composeMemory } from '../domain/memory.js';
 import { HistoryReader, HistoryStore } from './historyStore.js';
 import { HistoryMaintenance } from './historyMaintenance.js';
 import { historySettingsOf } from '../domain/historyRecall.js';
-import { NpcPreparationService, npcPreparationAvailable } from './npcPreparation.js';
+import { NpcPreparationService } from './npcPreparation.js';
 import {
   preparationOperations,
   NPC_PREPARE_TOOL_NAME,
@@ -609,9 +609,7 @@ export class TurnService {
               });
             },
             ...(t.context!.frozenContinuity &&
-            (!frozenDefinitions
-              ? npcPreparationAvailable(t.settings.provider)
-              : frozenDefinitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME))
+            (!frozenDefinitions || frozenDefinitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME))
               ? {
                   prepareNpc: (input: unknown) =>
                     npcPreparation.prepare(t, input, ctl.signal, trace),
@@ -637,9 +635,8 @@ export class TurnService {
                     }));
                     const drafts =
                       t.diceSessionId &&
-                      (!frozenDefinitions
-                        ? npcPreparationAvailable(t.settings.provider)
-                        : frozenDefinitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME))
+                      (!frozenDefinitions ||
+                        frozenDefinitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME))
                         ? await npcPreparation.ready(t.diceSessionId)
                         : [];
                     return createNpcRecall(

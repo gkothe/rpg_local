@@ -1,6 +1,5 @@
 import { validateProfileKnowledge } from '../domain/continuity.js';
 import { isDeepStrictEqual } from 'node:util';
-import { isApiProvider } from '../providers/options.js';
 import { turnRuleReads } from './ruleReadRecords.js';
 import { CampaignSourceLookup } from './campaignSourceLookup.js';
 import { gameplayResponseSchema } from '../domain/gameplayResponse.js';
@@ -28,10 +27,6 @@ import {
 
 export const npcArgumentDigest = (value: unknown): string =>
   createHash('sha256').update(canonicalRuleJson(value)).digest('hex');
-/** The native child-tool wait is explicitly opt-in until live isolation compatibility is verified. */
-export function npcPreparationAvailable(provider: string): boolean {
-  return isApiProvider(provider) || process.env.RPG_NPC_PREPARATION_NATIVE === '1';
-}
 export class NpcPreparationService {
   constructor(
     readonly store: Store,
@@ -62,11 +57,11 @@ export class NpcPreparationService {
     signal?: AbortSignal,
     trace?: PromptTraceContext
   ): Promise<Record<string, unknown>> {
-    if (!this.generator || !npcPreparationAvailable(turn.settings.provider))
+    if (!this.generator)
       throw new Problem(
         503,
         'npc_creation_unavailable',
-        'NPC creation is unavailable for this provider; native providers require explicit opt-in'
+        'NPC creation requires a configured generation service'
       );
     let input = npcPrepareSchema.parse(raw);
     if (input.introduction.visibility === KnowledgeVisibility.GmOnly)

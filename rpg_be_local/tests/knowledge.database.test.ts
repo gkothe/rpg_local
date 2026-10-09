@@ -134,7 +134,7 @@ test(
     assert.ok(saved.system_prompt.includes(c.instructions));
     assert.deepEqual(
       saved.tool_definitions.map((tool: { name: string }) => tool.name),
-      ownedTools().definitions.map((tool) => tool.name)
+      ownedTools({ prepareNpc: async () => ({}) }).definitions.map((tool) => tool.name)
     );
     await assert.rejects(
       () =>
