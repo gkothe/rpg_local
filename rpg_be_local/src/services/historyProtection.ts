@@ -84,7 +84,10 @@ export class HistoryRecallService {
       coveredTurns: turns.filter((t) => covered.has(t.id)).length,
       totalTurns: turns.length,
       searchableSections: sections.length,
-      pendingRefresh: settings.enabled && (!overview || older.some((t) => !covered.has(t.id))),
+      pendingRefresh:
+        settings.enabled &&
+        ((!overview && !c.gmIndex?.document.dependencyState.historyBootstrapPending) ||
+          older.some((t) => !covered.has(t.id))),
       unavailableProtectedIds: unavailable,
       diagnostics: selectHistory(valid, settings, '').diagnostics,
     };
@@ -346,10 +349,11 @@ export class HistoryRecallService {
       input.requestId,
       HistorySettingsAction.Disable,
       { expectedEnabled: input.expectedEnabled },
-      async (_c, s) => {
+      async (c, s) => {
         if (s.enabled !== input.expectedEnabled)
           throw new Problem(409, 'history_changed', 'Selective history changed; review its state');
         s.enabled = false;
+        if (c.gmIndex) c.gmIndex.settings.enabled = false;
       }
     );
   }

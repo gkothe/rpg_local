@@ -205,7 +205,13 @@ export default function HistoryMemory({
       <div className="journal-job-actions">
         {!status?.enabled || status?.pendingRefresh ? (
           <button
-            disabled={rebuild.busy || !rebuild.loaded || !!job?.active || reviewing}
+            disabled={
+              rebuild.busy ||
+              !rebuild.loaded ||
+              !!job?.active ||
+              !!rebuild.foreign?.active ||
+              reviewing
+            }
             onClick={() => void rebuild.start()}
           >
             Prepare compact history
@@ -224,9 +230,15 @@ export default function HistoryMemory({
         )}
       </div>
       <small className="muted">
-        Preparing summarizes your history with your provider allowance and shows a draft first.
-        Nothing is switched on until you activate it.
+        Turning off selective history also disables an active GM index. Preparing summarizes your
+        history with your provider allowance and shows a draft first. Nothing is switched on until
+        you activate it.
       </small>
+      {rebuild.foreign?.active && (
+        <small className="muted">
+          Another preparation task is running. Manage it in its Journal panel.
+        </small>
+      )}
       <p role="status" aria-live="polite">
         {job
           ? `${job.statusLabel}${

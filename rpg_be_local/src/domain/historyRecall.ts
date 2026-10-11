@@ -25,6 +25,7 @@ export enum HistoryReason {
   SearchableOnly = 'searchable_only',
 }
 export enum HistorySettingsAction {
+  DisableGmIndex = 'disable_gm_index',
   Disable = 'disable',
   ProtectKnowledge = 'protect_knowledge',
   ProtectSection = 'protect_section',
@@ -80,6 +81,22 @@ export const historyGetSchema = z
     cursor: z.string().max(HISTORY_DEFAULTS.cursorMaxChars).optional(),
   })
   .strict();
+/** Index-enabled executions advertise these extensions; old frozen registries retain legacy schemas. */
+export const originalHistorySearchSchema = historySearchSchema
+  .extend({
+    mode: z.enum(['fragments', 'originals']).optional(),
+  })
+  .strict();
+export const originalHistoryGetSchema = historyGetSchema
+  .extend({
+    id: uuid.optional(),
+    turnId: uuid.optional(),
+  })
+  .strict()
+  .refine(
+    (input) => (input.id !== undefined) !== (input.turnId !== undefined),
+    'Provide exactly one of id or turnId'
+  );
 export const historyListQuerySchema = z
   .object({
     query: z.string().trim().max(HISTORY_DEFAULTS.queryMaxChars).default(''),

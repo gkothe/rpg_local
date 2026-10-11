@@ -53,6 +53,8 @@ import {
   HISTORY_SEARCH_TOOL_NAME,
   historyGetSchema,
   historySearchSchema,
+  originalHistoryGetSchema,
+  originalHistorySearchSchema,
 } from '../domain/historyRecall.js';
 /** Frozen-corpus reader; supplied only for attempts that captured history metadata. */
 export type HistoryToolReader = {
@@ -304,7 +306,7 @@ function ownedRegistrations(
             name: HISTORY_SEARCH_TOOL_NAME,
             description:
               'Search the frozen campaign history (older sections and chapters left out of the prompt). Empty query lists chronologically. Summaries are navigation aids; read originals with campaign_history_get before relying on a detail.',
-            schema: historySearchSchema,
+            schema: options.historyOriginals ? originalHistorySearchSchema : historySearchSchema,
             purpose: 'default',
             capability: 'history',
             handler: (input: unknown) => options.history!.search(input),
@@ -313,7 +315,7 @@ function ownedRegistrations(
             name: HISTORY_GET_TOOL_NAME,
             description:
               'Read one frozen history item; includeOriginals returns the exact original player/GM pairs it summarizes (paged). Corrected facts override older transcript text.',
-            schema: historyGetSchema,
+            schema: options.historyOriginals ? originalHistoryGetSchema : historyGetSchema,
             purpose: 'default',
             capability: 'history',
             handler: (input: unknown) => options.history!.get(input),
@@ -353,6 +355,7 @@ export class GameplayTools {
       npcReader?: () => Promise<ReturnType<typeof createNpcRecall>>;
       prepareCombat: (input: unknown) => Promise<Record<string, unknown>>;
       history?: HistoryToolReader;
+      historyOriginals?: boolean;
     }
   ) {
     if (options.book && !options.read)

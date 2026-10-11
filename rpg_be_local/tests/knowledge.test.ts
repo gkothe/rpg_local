@@ -441,7 +441,7 @@ test('compaction carries only batch-linked knowledge with its original certainty
       latest,
       [
         turn,
-        ...Array.from({ length: 3 }, () => ({
+        ...Array.from({ length: 5 }, () => ({
           ...turn,
           id: randomUUID(),
           narrative: 'Later event',

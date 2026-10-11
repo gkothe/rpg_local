@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Memory } from './types.js';
+import { GmIndexPreparationMode, type GmIndexPreview } from './gmIndexGeneration.js';
 
 export enum MemoryRebuildStatus {
   Pending = 'pending',
@@ -16,10 +17,12 @@ export enum MemoryRebuildPurpose {
   Memory = 'memory',
   /** Stage a compact, reversible history index; Apply activates it. */
   CompactHistory = 'compact_history',
+  GmIndex = 'gm_index',
 }
 export const MEMORY_REBUILD_PURPOSE_OPTIONS = [
   { id: MemoryRebuildPurpose.Memory, label: 'Rebuild memory' },
   { id: MemoryRebuildPurpose.CompactHistory, label: 'Prepare compact history' },
+  { id: MemoryRebuildPurpose.GmIndex, label: 'Prepare GM index' },
 ] as const;
 export enum MemoryRebuildAction {
   Cancel = 'cancel',
@@ -96,6 +99,7 @@ export const memoryRebuildStartSchema = z
   .object({
     requestId: z.uuid(),
     purpose: z.enum(MemoryRebuildPurpose).default(MemoryRebuildPurpose.Memory),
+    mode: z.enum(GmIndexPreparationMode).optional(),
   })
   .strict();
 export const memoryRebuildApplySchema = z
@@ -129,6 +133,7 @@ export type MemoryRebuildDecision = {
   memoryId: string | null;
 };
 export type MemoryRebuildJobView = {
+  gmIndex?: { mode: GmIndexPreparationMode; preview: GmIndexPreview | null };
   id: string;
   campaignId: string;
   purpose: MemoryRebuildPurpose;
@@ -149,6 +154,7 @@ export type MemoryRebuildJobView = {
   decision: MemoryRebuildDecision | null;
 };
 export type MemoryRebuildPage = {
+  attentionByPurpose?: MemoryRebuildJobView[];
   jobs: MemoryRebuildJobView[];
   /** Newest job that still needs the player's attention (active, ready, failed or interrupted). */
   current: MemoryRebuildJobView | null;

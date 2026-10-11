@@ -62,6 +62,29 @@ import { memoryJsonSchema, memorySchema } from '../domain/schemas.js';
 import type { Campaign, Memory } from '../domain/types.js';
 import type { Store } from '../store.js';
 import { MemoryRebuildJobStore, type MemoryRebuildJobRow } from './memoryRebuildJobs.js';
+import {
+  GmIndexPreparationMode,
+  captureGmIndexGeneration,
+  gmIndexGenerationSourceIdentity,
+  gmIndexGenerationTargetIdentity,
+  gmIndexPreview,
+  gmIndexScanBatches,
+  gmIndexScanSchema,
+  gmIndexPreparationSchema,
+  gmIndexPreparedDocument,
+  gmIndexPreparationDigest,
+  GM_INDEX_PREPARATION_INSTRUCTIONS,
+  type GmIndexGenerationCapture,
+} from '../domain/gmIndexGeneration.js';
+import { requireGmIndexTransport } from './gmIndexUpdater.js';
+import {
+  createGmIndexReadTools,
+  restoreGmIndexSourceReads,
+  type GmIndexReadReceipt,
+} from './gmIndexReadTools.js';
+import { HISTORY_DEFAULTS } from '../domain/historyRecall.js';
+import { turnVersionOf } from '../domain/historyRecall.js';
+import { correctionGuidance } from '../domain/journalCompatibility.js';
 
 const cancelled = () => new Problem(409, 'cancelled', 'Memory rebuild is no longer active');
 const identityOf = (action: MemoryRebuildAction, extra: Record<string, unknown> = {}) =>
@@ -90,9 +113,11 @@ export class MemoryRebuildService {
     await this.store.campaign(campaignId);
     const rows = await this.jobs.list(campaignId, limit + 1, offset);
     const attention = await this.jobs.attention(campaignId);
+    const attentionByPurpose = await this.jobs.attentionByPurpose(campaignId);
     return {
       jobs: rows.slice(0, limit).map((row) => this.view(row)),
       current: attention ? this.view(attention) : null,
+      attentionByPurpose: attentionByPurpose.map((row) => this.view(row)),
       nextCursor: rows.length > limit ? String(offset + limit) : null,
     };
   }
@@ -105,6 +130,14 @@ export class MemoryRebuildService {
       job.proposalDigest !== null;
     return {
       id: job.id,
+      ...(job.purpose === MemoryRebuildPurpose.GmIndex
+        ? {
+            gmIndex: {
+              mode: (job.frozenInput as unknown as GmIndexGenerationCapture).mode,
+              preview: showCandidate ? (job.gmIndexProposal?.preview ?? null) : null,
+            },
+          }
+        : {}),
       campaignId: job.campaignId,
       purpose: job.purpose,
       status: job.status,
@@ -117,10 +150,10 @@ export class MemoryRebuildService {
       errorCode: job.errorCode,
       safeError: job.safeError,
       allowedActions: [...option.actions],
-      baseline: job.baseline,
+      baseline: job.purpose === MemoryRebuildPurpose.GmIndex ? null : job.baseline,
       candidate: showCandidate
         ? {
-            text: job.candidateText!,
+            text: job.purpose === MemoryRebuildPurpose.GmIndex ? '' : job.candidateText!,
             coveredTurnIds: job.candidateCoveredTurnIds ?? [],
             proposalDigest: job.proposalDigest!,
           }
@@ -172,20 +205,27 @@ export class MemoryRebuildService {
   async start(
     campaignId: string,
     requestId: string,
-    purpose: MemoryRebuildPurpose = MemoryRebuildPurpose.Memory
+    purpose: MemoryRebuildPurpose = MemoryRebuildPurpose.Memory,
+    mode: GmIndexPreparationMode = GmIndexPreparationMode.Prepare
   ): Promise<MemoryRebuildJobView> {
     // The original identity is kept for full-memory rebuilds so earlier requests still replay.
     const identity = sha256(
       canonicalJson(
         purpose === MemoryRebuildPurpose.Memory
           ? { operation: 'start' }
-          : { operation: 'start', purpose }
+          : {
+              operation: 'start',
+              purpose,
+              ...(purpose === MemoryRebuildPurpose.GmIndex ? { mode } : {}),
+            }
       )
     );
     const prior = await this.jobs.find(campaignId, requestId);
     if (prior) return this.replay(prior, identity);
     const initial = await this.store.campaign(campaignId);
     await this.requireProvider(initial.settings);
+    const gm = purpose === MemoryRebuildPurpose.GmIndex;
+    if (gm) await requireGmIndexTransport(this.generator!, initial.settings);
     let launch: { job: MemoryRebuildJobRow; owner: string } | null = null;
     const job = await this.store
       .transaction(async (client) => {
@@ -194,16 +234,16 @@ export class MemoryRebuildService {
         if (again) return again;
         await this.store.assertIdle(campaignId, client);
         const turns = await this.store.activeTurns(campaignId, client);
-        if (!turns.length)
+        if (!turns.length && !gm)
           throw new Problem(
             422,
             MemoryRebuildError.Invalid,
             'There are no completed turns to rebuild memory from yet'
           );
         const input = captureRebuildInput(c, turns);
-        const compact = purpose === MemoryRebuildPurpose.CompactHistory;
+        const compact = purpose === MemoryRebuildPurpose.CompactHistory || gm;
         const steps = compact ? planHistory(input.turns, RECENT_GAMEPLAY_TURN_COUNT) : [];
-        if (compact && !steps.length)
+        if (compact && !steps.length && !gm)
           throw new Problem(
             422,
             MemoryRebuildError.Invalid,
@@ -215,6 +255,20 @@ export class MemoryRebuildService {
           : [];
         const id = randomUUID();
         const owner = randomUUID();
+        if (gm && canonicalJson(c.settings) !== canonicalJson(initial.settings))
+          throw new Problem(
+            409,
+            MemoryRebuildError.Stale,
+            'Provider settings changed during index preflight.'
+          );
+        const gmCapture = gm
+          ? captureGmIndexGeneration(
+              c,
+              turns,
+              mode,
+              versions.map(({ turnId, contentHash }) => ({ turnId, contentHash }))
+            )
+          : null;
         await this.jobs.insertRunning(client, {
           id,
           campaignId,
@@ -222,21 +276,31 @@ export class MemoryRebuildService {
           identityDigest: identity,
           owner,
           purpose,
-          frozenInput: compact
-            ? {
-                ...input,
-                purpose,
-                versions: versions.map(({ turnId, contentHash }) => ({ turnId, contentHash })),
-                protectedKnowledgeIds: historySettingsOf(c).protectedKnowledgeIds,
-              }
-            : input,
-          sourceIdentity: sourceIdentity(input),
-          targetIdentity: compact ? compactTargetIdentity(c) : targetIdentity(c.memory),
+          frozenInput:
+            gmCapture ??
+            (compact
+              ? {
+                  ...input,
+                  purpose,
+                  versions: versions.map(({ turnId, contentHash }) => ({ turnId, contentHash })),
+                  protectedKnowledgeIds: historySettingsOf(c).protectedKnowledgeIds,
+                }
+              : input),
+          sourceIdentity: gm ? gmIndexGenerationSourceIdentity(c, turns) : sourceIdentity(input),
+          targetIdentity: gm
+            ? gmIndexGenerationTargetIdentity(c)
+            : compact
+              ? compactTargetIdentity(c)
+              : targetIdentity(c.memory),
           baseline: c.memory?.valid ? c.memory : null,
           checkpoint: {
             nextIndex: 0,
             processedTurns: 0,
-            totalTurns: compact ? steps.length : input.turns.length,
+            totalTurns: gmCapture
+              ? gmIndexScanBatches(gmCapture).length + 1 + steps.length
+              : compact
+                ? steps.length
+                : input.turns.length,
           },
         });
         const row = await this.jobs.get(campaignId, id, client);
@@ -311,7 +375,11 @@ export class MemoryRebuildService {
         );
       await this.store.assertIdle(campaignId, client);
       const turns = await this.store.activeTurns(campaignId, client);
-      if (sourceIdentity(captureRebuildInput(c, turns)) !== job.sourceIdentity)
+      if (
+        (job.purpose === MemoryRebuildPurpose.GmIndex
+          ? gmIndexGenerationSourceIdentity(c, turns)
+          : sourceIdentity(captureRebuildInput(c, turns))) !== job.sourceIdentity
+      )
         throw new Problem(
           409,
           MemoryRebuildError.Stale,
@@ -394,7 +462,13 @@ export class MemoryRebuildService {
         });
     }, MEMORY_REBUILD_HEARTBEAT_MS);
     try {
-      const frozen = frozenSchema.parse(job.frozenInput);
+      const gmCapture =
+        job.purpose === MemoryRebuildPurpose.GmIndex
+          ? (job.frozenInput as unknown as GmIndexGenerationCapture)
+          : null;
+      const frozen = gmCapture
+        ? captureRebuildInput(gmCapture.campaign, gmCapture.turns)
+        : frozenSchema.parse(job.frozenInput);
       const { settings } = frozen;
       const generator = await this.requireProvider(settings);
       const root: PromptTraceContext = {
@@ -404,6 +478,10 @@ export class MemoryRebuildService {
         purpose: 'memory_rebuild',
       };
       root.trace = await createPromptTrace('memory_rebuild', root);
+      if (gmCapture) {
+        await this.runGmIndex(job, owner, gmCapture, generator, ctl.signal, root);
+        return;
+      }
       if (job.purpose === MemoryRebuildPurpose.CompactHistory) {
         await this.runCompact(job, owner, frozen, generator, ctl.signal, root);
         return;
@@ -511,7 +589,8 @@ export class MemoryRebuildService {
     frozen: FrozenRebuildInput,
     generator: Generator,
     signal: AbortSignal,
-    root: PromptTraceContext
+    root: PromptTraceContext,
+    indexed?: { offset: number }
   ): Promise<void> {
     const plan = planHistory(frozen.turns, RECENT_GAMEPLAY_TURN_COUNT);
     const locators = new Map((frozen.versions ?? []).map((v) => [v.turnId, v] as const));
@@ -523,7 +602,12 @@ export class MemoryRebuildService {
     const corrections = frozen.corrections;
     const correctionDigest = correctionDigestOf(corrections);
     const staged = (job.staged ?? []) as StagedFragment[];
-    let cp = job.checkpoint;
+    const reusable = indexed
+      ? await new HistoryStore(this.store).list(job.campaignId, undefined, true)
+      : [];
+    let cp = indexed
+      ? { ...job.checkpoint, nextIndex: Math.max(0, job.checkpoint.nextIndex - indexed.offset) }
+      : job.checkpoint;
     const linksFor = (indexes: number[]) => {
       const text = indexes
         .map((i) => `${frozen.turns[i]!.player} ${frozen.turns[i]!.gm}`)
@@ -532,6 +616,16 @@ export class MemoryRebuildService {
       return frozen.knowledge
         .filter((k) => k.title && text.includes(k.title.toLocaleLowerCase()))
         .map((k) => k.id);
+    };
+    const reuse = (kind: HistoryFragmentKind, indexes: number[]) => {
+      const sources = indexes.map(locatorOf);
+      return reusable.find(
+        (fragment) =>
+          fragment.kind === kind &&
+          fragment.correctionDigest === correctionDigest &&
+          fragment.derivationDigest === derivationDigest(kind, sources, corrections) &&
+          canonicalJson(fragment.sources) === canonicalJson(sources)
+      );
     };
     const covered = () => [
       ...new Set(
@@ -547,20 +641,22 @@ export class MemoryRebuildService {
       let fragment: StagedFragment;
       if (step.kind === HistoryStepKind.Section) {
         const previous = [...staged].reverse().find((f) => f.kind === HistoryFragmentKind.Section);
-        const out = historySectionSchema.parse(
-          await this.generate(
-            generator,
-            frozen.settings,
-            sectionPrompt(
-              step.turns.map((t) => frozen.turns[t]!),
-              previous?.text ?? '',
-              corrections
-            ),
-            signal,
-            root,
-            historySectionJsonSchema
-          )
-        );
+        const out =
+          reuse(HistoryFragmentKind.Section, step.turns) ??
+          historySectionSchema.parse(
+            await this.generate(
+              generator,
+              frozen.settings,
+              sectionPrompt(
+                step.turns.map((t) => frozen.turns[t]!),
+                previous?.text ?? '',
+                corrections
+              ),
+              signal,
+              root,
+              historySectionJsonSchema
+            )
+          );
         const sources = step.turns.map(locatorOf);
         fragment = {
           kind: HistoryFragmentKind.Section,
@@ -574,20 +670,22 @@ export class MemoryRebuildService {
         };
       } else if (step.kind === HistoryStepKind.Chapter) {
         const turnIndexes = step.sections.flatMap((s) => (plan[s] as { turns: number[] }).turns);
-        const out = historySectionSchema.parse(
-          await this.generate(
-            generator,
-            frozen.settings,
-            chapterPrompt(
-              turnIndexes.map((t) => frozen.turns[t]!),
-              step.sections.map((s) => staged[s]!.title),
-              corrections
-            ),
-            signal,
-            root,
-            historySectionJsonSchema
-          )
-        );
+        const out =
+          reuse(HistoryFragmentKind.Chapter, turnIndexes) ??
+          historySectionSchema.parse(
+            await this.generate(
+              generator,
+              frozen.settings,
+              chapterPrompt(
+                turnIndexes.map((t) => frozen.turns[t]!),
+                step.sections.map((s) => staged[s]!.title),
+                corrections
+              ),
+              signal,
+              root,
+              historySectionJsonSchema
+            )
+          );
         const sources = turnIndexes.map(locatorOf);
         fragment = {
           kind: HistoryFragmentKind.Chapter,
@@ -636,19 +734,26 @@ export class MemoryRebuildService {
         };
       }
       staged.push(fragment);
-      const next = { nextIndex: i + 1, processedTurns: i + 1, totalTurns: plan.length };
+      const next = {
+        nextIndex: i + 1 + (indexed?.offset ?? 0),
+        processedTurns: i + 1 + (indexed?.offset ?? 0),
+        totalTurns: indexed ? job.checkpoint.totalTurns : plan.length,
+      };
       const overview = staged.find((f) => f.kind === HistoryFragmentKind.Overview);
-      const saved = await this.jobs.advance(job.id, owner, i, next, {
+      const saved = await this.jobs.advance(job.id, owner, i + (indexed?.offset ?? 0), next, {
         text: overview?.text ?? '',
         coveredTurnIds: covered(),
         staged,
+        ...(job.gmIndexProposal ? { gmIndex: job.gmIndexProposal } : {}),
+        ...(job.indexReadInvocations ? { indexReadInvocations: job.indexReadInvocations } : {}),
       });
       if (!saved) throw cancelled();
-      cp = next;
+      cp = indexed ? { ...next, nextIndex: next.nextIndex - indexed.offset } : next;
     }
     await this.alive(job, owner, signal);
     const overview = staged.find((f) => f.kind === HistoryFragmentKind.Overview);
     // The digest binds the overview text and every staged fragment the review shows.
+    if (indexed) return;
     await this.finish(
       job,
       owner,
@@ -658,6 +763,172 @@ export class MemoryRebuildService {
   }
 
   // ---------------------------------------------------------------- decisions
+  private async runGmIndex(
+    job: MemoryRebuildJobRow,
+    owner: string,
+    capture: GmIndexGenerationCapture,
+    generator: Generator,
+    signal: AbortSignal,
+    root: PromptTraceContext
+  ): Promise<void> {
+    await requireGmIndexTransport(generator, capture.campaign.settings);
+    const batches = gmIndexScanBatches(capture);
+    let drafts = job.foundationDrafts ?? [];
+    const indexReadInvocations = job.indexReadInvocations ?? [];
+    for (const reads of indexReadInvocations) restoreGmIndexSourceReads(capture.campaign, reads);
+    const alive = () => this.alive(job, owner, signal);
+    const history = {
+      campaignId: job.campaignId,
+      mode: 'compact' as const,
+      turnVersions: capture.versions,
+      fragments: [],
+      correctionGuidance: correctionGuidance(capture.campaign),
+      protectedLocators: [],
+      selectionDiagnostics: {
+        targetBytes: HISTORY_DEFAULTS.optionalHistoryBytes,
+        suppliedBytes: 0,
+        mandatoryBytes: 0,
+        overflowBytes: 0,
+        included: [],
+        omitted: { count: 0, reasonCounts: {} },
+      },
+    };
+    const invoke = async (prompt: string, schema: z.ZodType, purpose: string) => {
+      await alive();
+      const reads: GmIndexReadReceipt[] = [];
+      indexReadInvocations.push(reads);
+      const tools = createGmIndexReadTools(
+        this.store,
+        capture.campaign,
+        history,
+        alive,
+        async (read) => {
+          reads.push(read);
+          const current = await this.jobs.get(job.campaignId, job.id);
+          if (
+            !(await this.jobs.advance(
+              job.id,
+              owner,
+              current.checkpoint.nextIndex,
+              current.checkpoint,
+              {
+                text: current.candidateText ?? '',
+                coveredTurnIds: current.candidateCoveredTurnIds ?? [],
+                staged: current.staged ?? [],
+                foundationDrafts: drafts,
+                ...(current.gmIndexProposal ? { gmIndex: current.gmIndexProposal } : {}),
+                indexReadInvocations,
+              }
+            ))
+          )
+            throw cancelled();
+        }
+      );
+      const result = await generator.generateOwnedGameplay!(
+        capture.campaign.settings,
+        prompt,
+        z.toJSONSchema(schema),
+        GM_INDEX_PREPARATION_INSTRUCTIONS,
+        tools,
+        signal,
+        { ...root, executionId: randomUUID(), purpose }
+      );
+      await alive();
+      return schema.parse(result);
+    };
+    let nextIndex = job.checkpoint.nextIndex;
+    for (let i = nextIndex; i < batches.length; i++) {
+      const out = (await invoke(
+        JSON.stringify({
+          stage: 'scan',
+          batch: batches[i],
+          task: 'Read this complete captured batch. Extract concise source-grounded foundation/navigation AND working entries for unresolved commitments, clues, questions, player intentions and tentative directions. Preserve old pending tasks even when not in the latest turns. Actual history and canonical state outrank authored assumptions; do not call proposed events accomplished facts. Return foundation and entries.',
+        }),
+        gmIndexScanSchema,
+        'gm_index_scan'
+      )) as z.infer<typeof gmIndexScanSchema>;
+      drafts = [
+        ...drafts,
+        ...out.foundation,
+        ...out.entries.map((workingEntry) => ({ workingEntry })),
+      ];
+      nextIndex = i + 1;
+      if (
+        !(await this.jobs.advance(
+          job.id,
+          owner,
+          i,
+          { nextIndex, processedTurns: nextIndex, totalTurns: job.checkpoint.totalTurns },
+          { text: '', coveredTurnIds: [], foundationDrafts: drafts, indexReadInvocations }
+        ))
+      )
+        throw cancelled();
+    }
+    if (nextIndex === batches.length) {
+      const output = await invoke(
+        JSON.stringify({
+          stage: 'synthesize',
+          scannedFoundation: drafts.filter(
+            (draft) => !(draft && typeof draft === 'object' && 'workingEntry' in draft)
+          ),
+          scannedWorkingEntries: drafts.flatMap((draft) =>
+            draft && typeof draft === 'object' && 'workingEntry' in draft
+              ? [draft.workingEntry]
+              : []
+          ),
+          currentState: capture.campaign.state,
+          canonicalKnowledge: capture.campaign.knowledge ?? [],
+          characters: capture.campaign.characters.map(
+            ({ notes: _notes, revision: _revision, ...character }) => character
+          ),
+          npcCores: capture.campaign.continuity?.npcProfiles ?? [],
+          lastTurns: capture.turns.slice(-RECENT_GAMEPLAY_TURN_COUNT).map(turnVersionOf),
+          corrections: correctionGuidance(capture.campaign),
+          task: 'Consolidate a new compact foundation and working index, current pending tasks and clues, campaign-grounded directions and optional creative hooks. Plans are tentative. The entire captured campaign/history has been scanned; retrieve exact originals if needed.',
+        }),
+        gmIndexPreparationSchema,
+        'gm_index_prepare'
+      );
+      const document = gmIndexPreparedDocument(capture, output);
+      const gmIndex = {
+        document,
+        preview: gmIndexPreview(capture.campaign, capture.turns),
+        reads: [],
+      };
+      nextIndex++;
+      if (
+        !(await this.jobs.advance(
+          job.id,
+          owner,
+          batches.length,
+          { nextIndex, processedTurns: nextIndex, totalTurns: job.checkpoint.totalTurns },
+          { text: '', coveredTurnIds: [], gmIndex, indexReadInvocations }
+        ))
+      )
+        throw cancelled();
+    }
+    const row = await this.jobs.get(job.campaignId, job.id);
+    const frozen = {
+      ...captureRebuildInput(capture.campaign, capture.turns),
+      versions: capture.versions,
+      protectedKnowledgeIds: historySettingsOf(capture.campaign).protectedKnowledgeIds,
+    };
+    await this.runCompact(row, owner, frozen, generator, signal, root, {
+      offset: batches.length + 1,
+    });
+    const ready = await this.jobs.get(job.campaignId, job.id);
+    if (!ready.gmIndexProposal)
+      throw new Problem(409, MemoryRebuildError.Invalid, 'Prepared GM index is missing.');
+    await alive();
+    const digest = gmIndexPreparationDigest(
+      ready.gmIndexProposal.document,
+      ready.gmIndexProposal.preview,
+      job.sourceIdentity,
+      job.targetIdentity,
+      ready.staged ?? []
+    );
+    if (!(await this.jobs.ready(job.id, owner, digest))) throw cancelled();
+  }
 
   async apply(
     campaignId: string,
@@ -678,6 +949,12 @@ export class MemoryRebuildService {
       identity
     );
     if (saved) return saved;
+    const beforeApply = await this.jobs.get(campaignId, jobId);
+    if (beforeApply.purpose === MemoryRebuildPurpose.GmIndex)
+      await requireGmIndexTransport(
+        await this.requireProvider((await this.store.campaign(campaignId)).settings),
+        (await this.store.campaign(campaignId)).settings
+      );
     return this.store.transaction(async (client) => {
       const c = await this.store.campaign(campaignId, client, true);
       const job = await this.jobs.get(campaignId, jobId, client, true);
@@ -693,6 +970,64 @@ export class MemoryRebuildService {
       if (job.status !== MemoryRebuildStatus.Ready || job.candidateText === null)
         throw new Problem(409, MemoryRebuildError.Invalid, 'There is no finished draft to apply');
       await this.store.assertIdle(campaignId, client);
+      if (job.purpose === MemoryRebuildPurpose.GmIndex) {
+        const turns = await this.store.activeTurns(campaignId, client);
+        const proposal = job.gmIndexProposal;
+        const capture = job.frozenInput as unknown as GmIndexGenerationCapture;
+        if (
+          !proposal ||
+          gmIndexGenerationSourceIdentity(c, turns) !== job.sourceIdentity ||
+          gmIndexGenerationTargetIdentity(c) !== job.targetIdentity ||
+          gmIndexPreparationDigest(
+            proposal.document,
+            proposal.preview,
+            job.sourceIdentity,
+            job.targetIdentity,
+            job.staged ?? []
+          ) !== digest ||
+          digest !== job.proposalDigest
+        )
+          throw new Problem(
+            409,
+            MemoryRebuildError.Stale,
+            'The campaign or index changed after preparation; rebuild and review again.'
+          );
+        const baseline = { enabled: historySettingsOf(c).enabled, modeDecisionId: requestId };
+        if (capture.mode === GmIndexPreparationMode.Prepare) {
+          if (job.staged?.length) await this.activateHistory(c, job, client, false);
+          else c.historyRecall = { ...historySettingsOf(c), enabled: true, activeOverviewId: null };
+        }
+        c.gmIndex = {
+          settings:
+            capture.mode === GmIndexPreparationMode.FreshRebuild
+              ? (capture.retainedSettings ?? {
+                  enabled: false,
+                  activationHistoryBaseline: baseline,
+                })
+              : {
+                  enabled: true,
+                  activationHistoryBaseline: capture.retainedSettings?.enabled
+                    ? capture.retainedSettings.activationHistoryBaseline
+                    : baseline,
+                },
+          document: proposal.document,
+        };
+        c.revision++;
+        await this.store.save(c, client);
+        await this.jobs.decide(client, jobId, MemoryRebuildAction.Apply, requestId, null);
+        await this.jobs.insertReceipt(client, {
+          jobId,
+          action: MemoryRebuildAction.Apply,
+          requestId,
+          identityDigest: identity,
+          attemptOwner: null,
+          result: { generationId: proposal.document.generationId },
+        });
+        return {
+          campaign: publicCampaign(c),
+          job: this.view(await this.jobs.get(campaignId, jobId, client)),
+        };
+      }
       const turns = await this.store.activeTurns(campaignId, client);
       const coveredNow = turns.map((t) => t.id);
       // Concrete identities, not revision counters: unrelated edits must not reject the draft.
@@ -720,6 +1055,11 @@ export class MemoryRebuildService {
         );
       if (compact) {
         const activated = await this.activateHistory(c, job, client, preserveMemory);
+        if (c.gmIndex)
+          c.gmIndex.settings.activationHistoryBaseline = {
+            enabled: true,
+            modeDecisionId: requestId,
+          };
         c.revision++;
         await this.store.save(c, client);
         await this.jobs.decide(client, jobId, MemoryRebuildAction.Apply, requestId, null);
@@ -780,6 +1120,7 @@ export class MemoryRebuildService {
   ): Promise<string> {
     const history = new HistoryStore(this.store);
     const staged = (job.staged ?? []) as StagedFragment[];
+
     if (!staged.some((f) => f.kind === HistoryFragmentKind.Overview))
       throw new Problem(409, MemoryRebuildError.Invalid, 'The staged index has no overview');
     const previous = (await history.list(c.id, client)).filter(

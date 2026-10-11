@@ -146,7 +146,7 @@ test(
   'a turn summarizes the newest complete block, refreshes the overview and keeps the rest raw',
   { skip: !dbEnabled },
   async () => {
-    const { campaign, overview, history } = await indexed(20, 8);
+    const { campaign, overview, history } = await indexed(22, 8);
     const g = generator();
     const service = new TurnService(store, g.gen);
     const saved = await play(service, campaign.id, 'look around');
@@ -177,7 +177,7 @@ test(
   'four sections become a chapter regenerated from the originals',
   { skip: !dbEnabled },
   async () => {
-    const { campaign, history } = await indexed(35, 24);
+    const { campaign, history } = await indexed(37, 24);
     const g = generator();
     const service = new TurnService(store, g.gen);
     assert.equal((await play(service, campaign.id, 'continue')).status, 'completed');
@@ -195,7 +195,7 @@ test(
   'a failed summary fails the action visibly and keeps the previous index',
   { skip: !dbEnabled },
   async () => {
-    const { campaign, overview, history } = await indexed(20, 8);
+    const { campaign, overview, history } = await indexed(22, 8);
     const g = generator();
     g.control.failSection = true;
     const service = new TurnService(store, g.gen);

@@ -53,7 +53,7 @@ test('selective compaction supplies the short background while legacy mode keeps
 
 function corpus(turnCount: number) {
   const campaignId = randomUUID();
-  const recent = ['r1', 'r2', 'r3'].map(
+  const recent = ['r1', 'r2', 'r3', 'r4', 'r5'].map(
     (w, i): Turn =>
       ({
         id: `00000000-0000-4000-8000-00000000000${i}`,
@@ -64,7 +64,7 @@ function corpus(turnCount: number) {
       }) as unknown as Turn
   );
   const older = Array.from(
-    { length: turnCount - 3 },
+    { length: turnCount - 5 },
     (_, i): Turn =>
       ({
         id: randomUUID(),
@@ -161,9 +161,9 @@ test('the prompt is the same size class at 40 and 4,000 turns; omitted history s
     large.payload.historyRecall.protectedHistory.map((r: { title: string }) => r.title),
     ['The oath']
   );
-  // Only the three newest pairs are raw; everything else is summarized and recallable.
-  assert.equal(large.payload.history.length, 3);
-  assert.equal(small.payload.history.length, 3);
+  // Only the five newest pairs are raw; everything else is summarized and recallable.
+  assert.equal(large.payload.history.length, 5);
+  assert.equal(small.payload.history.length, 5);
   assert.equal(large.payload.memory, small.payload.memory);
   const size = (m: { prompt: string }) => Buffer.byteLength(m.prompt);
   assert.ok(Math.abs(size(large.manifest) - size(small.manifest)) < 64, 'only counters differ');

@@ -17,6 +17,7 @@ import {
   gameplayResponseInputSchema,
   gameplayResponseSchema,
   gameplayResponseWireJsonSchema,
+  gameplayResponseContract,
   type GameplayResponse,
 } from '../domain/gameplayResponse.js';
 import { CombatPreparationService } from './combatPreparation.js';
@@ -35,6 +36,22 @@ import { Problem, conflict } from '../errors.js';
 import type { Campaign, Turn, ProviderSettings, Memory } from '../domain/types.js';
 import type { Generator } from '../providers/service.js';
 import type { GameplayToolDefinition } from '../providers/gameplayTools.js';
+import {
+  GmIndexUpdater,
+  requireGmIndexTransport,
+  type GmIndexCheckpoint,
+} from './gmIndexUpdater.js';
+import { applyGmIndexChanges } from '../domain/gmIndex.js';
+import {
+  gmIndexCanonicalIdentity,
+  gmIndexSourceCoverage,
+  refreshGmIndexDependencies,
+} from '../domain/gmIndexCompatibility.js';
+import { gmIndexUpdatePrompt } from '../domain/gmIndexUpdate.js';
+import { canonicalJson, sha256 } from '../domain/journalLedger.js';
+import { turnVersionOf } from '../domain/historyRecall.js';
+import { TurnFinalizationStage } from '../domain/turnFinalization.js';
+import { validateGmIndexProvenance } from '../domain/gmIndexProvenance.js';
 import {
   buildContext,
   compactionBatch,
@@ -315,6 +332,7 @@ export class TurnService {
           systemPrompt: saved.system_prompt,
           frozenKnowledge: saved.frozen_knowledge,
           ...(saved.frozen_continuity ? { frozenContinuity: saved.frozen_continuity } : {}),
+          ...(saved.frozen_gm_index ? { frozenGmIndex: saved.frozen_gm_index } : {}),
           ...(saved.frozen_atlas ? { frozenAtlas: saved.frozen_atlas } : {}),
           ...(saved.frozen_sources ? { frozenSources: saved.frozen_sources } : {}),
           ...(saved.frozen_history ? { frozenHistory: saved.frozen_history } : {}),
@@ -386,6 +404,7 @@ export class TurnService {
         systemPrompt: session.system_prompt,
         frozenKnowledge: session.frozen_knowledge,
         ...(session.frozen_continuity ? { frozenContinuity: session.frozen_continuity } : {}),
+        ...(session.frozen_gm_index ? { frozenGmIndex: session.frozen_gm_index } : {}),
         ...(session.frozen_atlas ? { frozenAtlas: session.frozen_atlas } : {}),
         frozenSources: session.frozen_sources,
         ...(session.frozen_history ? { frozenHistory: session.frozen_history } : {}),
@@ -453,6 +472,8 @@ export class TurnService {
         await this.store.saveTurn(turn, client);
       });
       let c = await this.store.campaign(t.campaignId);
+      if (t.context?.frozenGmIndex || (!t.retryOfTurnId && c.gmIndex?.settings.enabled))
+        await requireGmIndexTransport(this.generator, t.settings);
       let history = await this.store.activeTurns(c.id);
       await this.selectedCapacity(c, t.settings, Infinity);
       let needs =
@@ -588,6 +609,7 @@ export class TurnService {
             t.context!.systemPrompt = root.system_prompt;
             t.context!.frozenKnowledge = root.frozen_knowledge;
             t.context!.frozenContinuity = root.frozen_continuity ?? undefined;
+            t.context!.frozenGmIndex = root.frozen_gm_index ?? undefined;
             t.context!.frozenAtlas = root.frozen_atlas ?? undefined;
             t.context!.frozenSources = root.frozen_sources ?? undefined;
             t.context!.frozenHistory = root.frozen_history ?? undefined;
@@ -678,7 +700,10 @@ export class TurnService {
               : {}),
             prepareCombat: (input) => combat.prepare(t, input),
             ...(t.context!.frozenHistory
-              ? { history: new HistoryReader(this.store, t.context!.frozenHistory) }
+              ? {
+                  history: new HistoryReader(this.store, t.context!.frozenHistory),
+                  historyOriginals: !!t.context!.frozenGmIndex,
+                }
               : {}),
           });
           if (!t.diceSessionId) {
@@ -698,6 +723,7 @@ export class TurnService {
               ],
               {
                 frozenContinuity: t.context!.frozenContinuity,
+                frozenGmIndex: t.context!.frozenGmIndex,
                 frozenAtlas: t.context!.frozenAtlas,
                 frozenSources: t.context!.frozenSources,
                 frozenHistory: t.context!.frozenHistory,
@@ -774,7 +800,9 @@ export class TurnService {
           const raw = await this.generator.generateOwnedGameplay(
             t.settings,
             prompt,
-            gameplayResponseWireJsonSchema,
+            t.context?.frozenGmIndex
+              ? gameplayResponseContract(t.context.frozenGmIndex.contractVersion).wireJsonSchema
+              : gameplayResponseWireJsonSchema,
             t.context!.systemPrompt!,
             this.tracedTools(registry, trace),
             ctl.signal,
@@ -785,7 +813,11 @@ export class TurnService {
             await validateWithFieldRepair(
               response,
               async (candidate) => {
-                const parsed = gameplayResponseInputSchema.parse(candidate);
+                const parsed = (
+                  t.context?.frozenGmIndex
+                    ? gameplayResponseContract(t.context.frozenGmIndex.contractVersion).inputSchema
+                    : gameplayResponseInputSchema
+                ).parse(candidate);
                 await this.persistResponse(t, parsed, true);
                 response = parsed;
               },
@@ -817,6 +849,9 @@ export class TurnService {
                     knowledge: campaign.knowledge,
                     state: campaign.state,
                     continuity: campaign.continuity,
+                    ...(t.context?.frozenGmIndex
+                      ? { gmIndex: t.context.frozenGmIndex.document }
+                      : {}),
                     atlas: t.context?.frozenAtlas,
                     atlasPreparations: t.context?.frozenAtlas
                       ? await atlasPreparation.ready(t.diceSessionId!, client)
@@ -923,7 +958,7 @@ export class TurnService {
       await this.lockedOwned(t, client);
       await repository.complete(t.id, ownerId, candidate.candidateDigest, narrative, client);
     });
-    await this.persistResponse(t, savedResponse, false, narrative);
+    await this.persistResponse(t, savedResponse, false, narrative, signal, trace);
     await traceEvent(trace, 'committed', { narrative, turnId: t.id });
     if (trace?.trace?.incomplete)
       await this.store.pool.query(
@@ -939,10 +974,13 @@ export class TurnService {
     t: Turn,
     wireResponse: GameplayResponse,
     prepare = false,
-    editedNarrative?: string
+    editedNarrative?: string,
+    signal?: AbortSignal,
+    trace?: PromptTraceContext
   ): Promise<void> {
     if (wireResponse.atlasChanges) requireAtlasFeature();
     const dice = new DiceService(this.store);
+    let pendingIndex: GmIndexCheckpoint | undefined;
     await this.store.transaction(async (client) => {
       const { campaign, turn } = await this.lockedOwned(t, client);
       const sessionId = t.diceSessionId!;
@@ -1020,30 +1058,70 @@ export class TurnService {
           'No original-book citations are available without a library'
         );
       turn.sourceReads = sourceReads;
-      const applied = applyResponse(campaign, response, t.id, {
-        npcSheetVersion: (
-          await client.query(
-            'SELECT npc_sheet_version FROM dice_sessions WHERE id=$1 AND campaign_id=$2',
-            [sessionId, campaign.id]
-          )
-        ).rows[0]?.npc_sheet_version,
-        campaignId: campaign.id,
-        turnId: t.id,
-        sourceSpans,
-        rolls: turn.rolls,
-        ruleContext: t.ruleContext,
-        ruleReads,
-        npcPreparations,
-        preparedNpcEvidence,
-        ...atlasEvidence,
-        combat: {
-          authorization: await new CombatPreparationService(this.store).authorization(
-            sessionId,
-            client
-          ),
-          narrative: editedNarrative ?? response.narrative,
+      const narrativeCandidate =
+        !prepare && t.context?.frozenGmIndex
+          ? await new NarrativeCandidateRepository(this.store.pool).load(t.id, client)
+          : null;
+      const checkpoint = narrativeCandidate?.gmIndexCheckpoint;
+      const reservations =
+        !prepare && t.context?.frozenGmIndex
+          ? (checkpoint?.reservations ?? {
+              characters: response.operations.flatMap((op, index) =>
+                op.op === 'create'
+                  ? [[index, op.characterId ?? randomUUID()] as [number, string]]
+                  : []
+              ),
+              introductions: response.operations.flatMap((op, index) =>
+                op.op === 'create' && op.character.type === 'npc'
+                  ? [[index, randomUUID()] as [number, string]]
+                  : []
+              ),
+              knowledge: response.knowledgeChanges.flatMap((op, index) =>
+                op.op === 'create'
+                  ? [[index, compiled.ids.get(index) ?? randomUUID()] as [number, string]]
+                  : []
+              ),
+              appliedAt: new Date().toISOString(),
+            })
+          : undefined;
+      const applicationReservations = reservations
+        ? {
+            characters: new Map(reservations.characters),
+            introductions: new Map(reservations.introductions),
+            knowledge: new Map(reservations.knowledge),
+            appliedAt: reservations.appliedAt,
+          }
+        : undefined;
+      const applied = applyResponse(
+        campaign,
+        response,
+        t.id,
+        {
+          npcSheetVersion: (
+            await client.query(
+              'SELECT npc_sheet_version FROM dice_sessions WHERE id=$1 AND campaign_id=$2',
+              [sessionId, campaign.id]
+            )
+          ).rows[0]?.npc_sheet_version,
+          campaignId: campaign.id,
+          turnId: t.id,
+          sourceSpans,
+          rolls: turn.rolls,
+          ruleContext: t.ruleContext,
+          ruleReads,
+          npcPreparations,
+          preparedNpcEvidence,
+          ...atlasEvidence,
+          combat: {
+            authorization: await new CombatPreparationService(this.store).authorization(
+              sessionId,
+              client
+            ),
+            narrative: editedNarrative ?? response.narrative,
+          },
         },
-      });
+        applicationReservations
+      );
       if (prepare) {
         await new NarrativeCandidateRepository(this.store.pool).save(
           {
@@ -1059,20 +1137,106 @@ export class TurnService {
           client
         );
         turn.editingPending = true;
+        if (t.context?.frozenGmIndex)
+          turn.finalization = {
+            stage: TurnFinalizationStage.NarrativeEditing,
+            resume: { available: true, reason: null },
+          };
         t.editingPending = true;
         turn.traceId = t.traceId;
         await this.store.saveTurn(turn, client);
         return;
       }
+      if (t.context?.frozenGmIndex) {
+        if (
+          !campaign.gmIndex ||
+          !narrativeCandidate ||
+          !reservations ||
+          !applicationReservations ||
+          !t.context.frozenHistory
+        )
+          throw new Problem(
+            409,
+            'gm_index_context',
+            'Saved index finalization context is incomplete.'
+          );
+        const canonicalIdentity = gmIndexCanonicalIdentity(campaign);
+        const indexIdentity = sha256(canonicalJson(campaign.gmIndex.document));
+        const narrativeIdentity = sha256(editedNarrative ?? response.narrative);
+        if (
+          checkpoint &&
+          (checkpoint.canonicalIdentity !== canonicalIdentity ||
+            checkpoint.indexIdentity !== indexIdentity ||
+            checkpoint.narrativeDigest !== narrativeIdentity)
+        )
+          throw conflict(
+            'Saved GM index finalization inputs changed; resolve the conflicting campaign edits before resuming.'
+          );
+        if (!checkpoint?.result) {
+          const currentOriginal = turnVersionOf({
+            ...turn,
+            narrative: editedNarrative ?? response.narrative,
+            rolls: records,
+            rollInterpretations: response.rollInterpretations,
+          });
+          const after = { ...applied.campaign, settings: t.settings };
+          pendingIndex = checkpoint ?? {
+            contractVersion: 1,
+            candidateDigest: narrativeCandidate.candidateDigest,
+            narrativeDigest: narrativeIdentity,
+            canonicalIdentity,
+            indexIdentity,
+            reservations,
+            campaign: after,
+            history: {
+              ...t.context.frozenHistory,
+              turnVersions: [
+                ...t.context.frozenHistory.turnVersions.filter((v) => v.turnId !== t.id),
+                { turnId: t.id, contentHash: currentOriginal.contentHash },
+              ],
+            },
+            currentOriginal,
+            prompt: gmIndexUpdatePrompt(
+              after,
+              campaign.gmIndex.document,
+              { ...turn, narrative: editedNarrative ?? response.narrative },
+              response.gmIndexHandoff
+            ),
+            invocations: [],
+          };
+          await client.query(
+            `UPDATE narrative_edit_candidates SET gm_index_checkpoint=$2 WHERE turn_id=$1 AND owner=$3 AND campaign_id=$4 AND candidate_digest=$5 AND status='completed'`,
+            [
+              t.id,
+              JSON.stringify(pendingIndex),
+              ownerId,
+              campaign.id,
+              narrativeCandidate.candidateDigest,
+            ]
+          );
+          turn.finalization = {
+            stage: TurnFinalizationStage.IndexUpdating,
+            resume: { available: true, reason: null },
+          };
+          await this.store.saveTurn(turn, client);
+          return;
+        }
+        applied.campaign.gmIndex!.document = checkpoint.result;
+        applied.snapshot.beforeGmIndexDocument = structuredClone(campaign.gmIndex.document);
+        applied.snapshot.afterGmIndexDocument = structuredClone(checkpoint.result);
+      }
       applied.campaign.revision++;
       turn.narrative = editedNarrative ?? response.narrative;
       turn.editingPending = false;
+      delete turn.finalization;
       turn.operationExplanations = response.operationExplanations;
       turn.combatEffects = response.combatEffects;
       turn.participantReferences = response.participantReferences;
       turn.changes = applied.changes;
       turn.status = TurnStatus.Completed;
       turn.completedAt = new Date().toISOString();
+      if (t.context?.frozenGmIndex)
+        await new HistoryStore(this.store).captureVersions(client, campaign.id, [turn]);
       await client.query('INSERT INTO snapshots(turn_id,campaign_id,document) VALUES($1,$2,$3)', [
         t.id,
         campaign.id,
@@ -1081,6 +1245,46 @@ export class TurnService {
       await this.store.save(applied.campaign, client);
       await this.store.saveTurn(turn, client);
     });
+    if (pendingIndex) {
+      if (!signal)
+        throw new Problem(
+          409,
+          'gm_index_context',
+          'Index finalization requires an owned execution signal.'
+        );
+      const updater = new GmIndexUpdater(this.store, this.generator);
+      const checkpoint = pendingIndex;
+      const capture = {
+        campaign: pendingIndex.campaign,
+        turns: pendingIndex.history.turnVersions,
+        currentTurn: pendingIndex.currentOriginal,
+        maps: {
+          characters: new Map(pendingIndex.reservations.characters),
+          knowledge: new Map(pendingIndex.reservations.knowledge),
+          introductions: new Map(pendingIndex.reservations.introductions),
+        },
+      };
+      await updater.generate(t.id, checkpoint, signal, trace, async (update) => {
+        const document = applyGmIndexChanges(
+          checkpoint.campaign.gmIndex!.document,
+          update.gmIndexChanges,
+          update.gmFoundationChanges,
+          capture
+        );
+        validateGmIndexProvenance(
+          document,
+          checkpoint.campaign.gmIndex!.document,
+          checkpoint.campaign,
+          checkpoint.invocations.at(-1)?.reads ?? [],
+          t.id
+        );
+        document.dependencyState.sourceCoverage = gmIndexSourceCoverage(checkpoint.campaign);
+        document.dependencyState.turnCoverage = checkpoint.history.turnVersions;
+        checkpoint.result = refreshGmIndexDependencies(document, capture);
+        await updater.save(t.id, checkpoint);
+      });
+      await this.persistResponse(t, wireResponse, false, editedNarrative, signal, trace);
+    }
   }
   async cancel(campaignId: string, id: string): Promise<Turn> {
     const turn = await this.store.transaction(async (client) => {

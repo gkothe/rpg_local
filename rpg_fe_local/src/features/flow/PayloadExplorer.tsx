@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { npcPrepareResult, combatProposal, examplePayload, proposal } from './examples';
+import { gmIndexValuesExample, indexedProposalExample, gmIndexUpdateExample } from './examples';
+import { indexedResponseSchemaExample } from './responseSchemaExample';
+import { indexedSystemPromptExample } from './systemPromptExample';
 import { systemPromptExamples } from './systemPromptExample';
 export default function PayloadExplorer() {
   const [pinned, setPinned] = useState(false),
@@ -40,8 +43,9 @@ export default function PayloadExplorer() {
         <p>
           <strong>{mentioned ? 'Ivo included' : 'Ivo omitted'}</strong>. Mentioning Ivo selects his
           NPC sheet in this example. In a real turn, the app also checks the saved state, pinned
-          facts, and the last three completed turns that have not been undone. If Ivo is absent, the
-          GM can still search the frozen NPC roster and retrieve his saved sheet with the NPC tools.
+          facts, and the last five completed turns that have not been undone, including recorded
+          rolls and interpretations. If Ivo is absent, the GM can still search the frozen NPC roster
+          and retrieve his saved sheet with the NPC tools.
         </p>
         <p>
           <strong>{pinned ? 'Pinned excerpt included' : 'Pinned excerpt omitted'}</strong>. A pinned
@@ -52,6 +56,34 @@ export default function PayloadExplorer() {
           adds a rulebook overview and makes rulebook tools available.
         </p>
       </div>
+      <details>
+        <summary>GM working index and sequential update example</summary>
+        <p>
+          After you review and enable the index, private notes and retrieval pointers replace bulk
+          archival context. The GM still receives tools, instructions, canonical state and five
+          recent turns with rolls. These synthetic private notes illustrate the model input;
+          campaign review shows only player-known coverage.
+        </p>
+        <pre aria-label="Synthetic GM index JSON">
+          {JSON.stringify(gmIndexValuesExample, null, 2)}
+        </pre>
+        <p>
+          Gameplay returns a brief private handoff. The narrative editor does not receive it. A
+          separate updater checks notes, foundation and direction before the answer and state commit
+          together. Empty deltas mean an explicit check found no necessary changes.
+        </p>
+        <pre aria-label="Indexed gameplay proposal">
+          {JSON.stringify(indexedProposalExample, null, 2)}
+        </pre>
+        <pre aria-label="Separate GM index update">
+          {JSON.stringify(gmIndexUpdateExample, null, 2)}
+        </pre>
+        <details>
+          <summary>Indexed system instructions and response schema</summary>
+          <pre>{indexedSystemPromptExample}</pre>
+          <pre>{JSON.stringify(indexedResponseSchemaExample, null, 2)}</pre>
+        </details>
+      </details>
       <details>
         <summary>Compact NPC preparation example</summary>
         <p>

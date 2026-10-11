@@ -274,7 +274,7 @@ export const steps: FlowStep[] = [
     id: 'prepare',
     label: '4. Freeze context',
     node: 'context',
-    data: 'The app reads character sheets, history, and sources. It always includes the latest three player/GM text pairs, plus any older turns not yet summarized. It summarizes only older turns while keeping their originals. With selective history on, older turns leave the prompt only once a section covers them, and the model can look up the rest with history tools. It saves a fixed prompt and a complete copy of campaign knowledge for this attempt.',
+    data: 'The app reads character sheets, history, and sources. It always includes the latest five player/GM text pairs with recorded rolls and interpretations, plus any older turns not yet summarized. It summarizes only older turns while keeping their originals. With selective history on, older turns leave the prompt only once a section covers them, and the model can look up the rest with history tools. An enabled GM index adds private current notes and retrieval pointers while reducing bulk archival context. It saves a fixed prompt and a complete copy of campaign knowledge for this attempt.',
   },
   {
     id: 'infer',
@@ -304,7 +304,7 @@ export const steps: FlowStep[] = [
     id: 'commit',
     label: '9. Commit and refresh',
     node: 'commit',
-    data: 'The app checks once more that the turn can finish and the campaign version still matches. It saves the changes, snapshot, and story in one transaction, then refreshes the journal.',
+    data: 'The app checks once more that the turn can finish and the campaign version still matches. For an enabled GM index, a separate read-only index updater first checks notes, foundation and possible developments using selected final prose and frozen facts. Failure can resume this stage without repeating gameplay or rolls. The app saves state, index, snapshot and story together, then releases the answer and refreshes the journal.',
   },
 ];
 export const tools: FlowTool[] = [

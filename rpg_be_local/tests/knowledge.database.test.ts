@@ -412,7 +412,7 @@ test(
     };
     const service = new TurnService(store, generator);
     let priorRecord: unknown;
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 9; i++) {
       const current = await store.campaign(c.id);
       const t = await service.submit(c.id, {
         revision: current.revision,

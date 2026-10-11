@@ -12,8 +12,12 @@ import {
 import type { RebuildCheckpoint } from '../domain/memoryRebuildGeneration.js';
 import type { Memory } from '../domain/types.js';
 import type { Store } from '../store.js';
+import type { GmIndexProposal } from '../domain/gmIndexGeneration.js';
 
 export type MemoryRebuildJobRow = {
+  indexReadInvocations?: import('./gmIndexReadTools.js').GmIndexReadReceipt[][];
+  foundationDrafts?: unknown[];
+  gmIndexProposal?: GmIndexProposal;
   id: string;
   campaignId: string;
   requestId: string;
@@ -54,9 +58,16 @@ type Raw = Record<string, unknown>;
 const mapRow = (r: Raw): MemoryRebuildJobRow => {
   const candidate =
     (r.candidate as
-      (Omit<MemoryRebuildCandidate, 'proposalDigest'> & { staged?: unknown[] }) | null) ?? null;
+      | (Omit<MemoryRebuildCandidate, 'proposalDigest'> & {
+          staged?: unknown[];
+          gmIndex?: GmIndexProposal;
+          foundationDrafts?: unknown[];
+        })
+      | null) ?? null;
   return {
     id: r.id as string,
+    ...(candidate?.gmIndex ? { gmIndexProposal: candidate.gmIndex } : {}),
+    ...(candidate?.foundationDrafts ? { foundationDrafts: candidate.foundationDrafts } : {}),
     campaignId: r.campaign_id as string,
     requestId: r.request_id as string,
     identityDigest: r.identity_digest as string,
@@ -151,6 +162,16 @@ export class MemoryRebuildJobStore {
     });
   }
 
+  attentionByPurpose(campaignId: string) {
+    return guarded(async () => {
+      const result = await this.store.pool.query(
+        "SELECT DISTINCT ON (purpose) * FROM memory_rebuild_jobs WHERE campaign_id=$1 AND status IN ('pending','running','ready','failed','interrupted') ORDER BY purpose,created_at DESC,id",
+        [campaignId]
+      );
+      return result.rows.map(mapRow);
+    });
+  }
+
   insertRunning(
     client: PoolClient,
     job: {
@@ -222,7 +243,14 @@ export class MemoryRebuildJobStore {
     owner: string,
     expectedNextIndex: number,
     checkpoint: RebuildCheckpoint,
-    candidate: { text: string; coveredTurnIds: string[]; staged?: unknown[] }
+    candidate: {
+      text: string;
+      coveredTurnIds: string[];
+      staged?: unknown[];
+      gmIndex?: GmIndexProposal;
+      foundationDrafts?: unknown[];
+      indexReadInvocations?: import('./gmIndexReadTools.js').GmIndexReadReceipt[][];
+    }
   ): Promise<boolean> {
     const r = await this.store.pool.query(
       "UPDATE memory_rebuild_jobs SET checkpoint=$4,candidate=$5,lease_until=now()+($6 * interval '1 second'),updated_at=now() WHERE id=$1 AND owner=$2 AND status='running' AND (checkpoint->>'nextIndex')::int=$3",

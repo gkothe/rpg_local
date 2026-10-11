@@ -540,3 +540,41 @@ export const atlasPrepareResult = {
     },
   },
 };
+
+/** Illustrative private notes; these are supplied to the GM, never shown by the campaign review API. */
+export const gmIndexValuesExample = {
+  foundation: [
+    {
+      topic: 'navigation',
+      title: 'River crossing',
+      text: 'Campaign material describes the crossing and ferryman; read the source section before relying on an omitted detail.',
+      refs: [{ kind: 'source_section', sourceId: ids.source, version: 1, sectionIndex: 0 }],
+    },
+  ],
+  entries: [
+    {
+      kind: 'task',
+      status: 'active',
+      title: 'Ask about the crossing',
+      text: "The player wants to hear the ferryman's terms. Address this before suggesting another action.",
+      ownerCharacterId: null,
+      refs: [{ kind: 'character', characterId: ids.player }],
+      direction: null,
+    },
+  ],
+};
+export const indexedProposalExample = {
+  ...proposal,
+  gmIndexHandoff: [
+    {
+      kind: 'task',
+      text: 'Keep the promised ferry conversation available for the next action.',
+      refs: [{ kind: 'turn', current: true }],
+    },
+  ],
+};
+export const gmIndexUpdateExample = {
+  checked: { notes: true, foundation: true, direction: true },
+  gmIndexChanges: [],
+  gmFoundationChanges: [],
+};

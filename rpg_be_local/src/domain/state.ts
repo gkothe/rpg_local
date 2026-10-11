@@ -27,6 +27,13 @@ import { Problem, conflict } from '../errors.js';
 import type { Campaign, Snapshot, Character } from './types.js';
 import { CHARACTER_FIELD, OPERATION_KIND, CharacterType } from './options.js';
 import { MAX_ENTITY_NAME_CHARS, MAX_JSON_OBJECT_CHARS } from './limits.js';
+import { invalidateGmIndexAfterUndo } from './gmIndexCompatibility.js';
+export type CanonicalApplicationReservations = {
+  characters: ReadonlyMap<number, string>;
+  introductions: ReadonlyMap<number, string>;
+  knowledge: ReadonlyMap<number, string>;
+  appliedAt: string;
+};
 const canonical = (c: Character) => ({
   name: c.name,
   type: c.type,
@@ -44,7 +51,8 @@ export function applyResponse(
     combat?: CombatValidation;
     npcPreparations?: NpcPreparationPayload[];
     npcSheetVersion?: number;
-  }
+  },
+  reservations?: CanonicalApplicationReservations
 ): { campaign: Campaign; snapshot: Snapshot; changes: string[] } {
   const response = gameplayResponseSchema.parse(raw);
   const authorization = evidence?.combat?.authorization ?? emptyCombatAuthorization();
@@ -94,7 +102,11 @@ export function applyResponse(
           throw new Problem(422, 'npc_identity', 'Prepared NPC already exists');
         const char: Character = {
           ...op.character,
-          id: npcPrepared?.characterId ?? prepared?.characterId ?? randomUUID(),
+          id:
+            npcPrepared?.characterId ??
+            prepared?.characterId ??
+            reservations?.characters.get(operationIndex) ??
+            randomUUID(),
           notes: '',
           revision: c.revision + 1,
         };
@@ -188,7 +200,27 @@ export function applyResponse(
             'introduction',
           ]
         : ['knowledgeChanges', index - introductions.length],
-    (index) => introductionEvidence.get(index)
+    (index) => introductionEvidence.get(index),
+    reservations
+      ? {
+          appliedAt: reservations.appliedAt,
+          createIds: new Map([
+            ...[...aliases.keys()]
+              .filter(
+                (i) =>
+                  response.operations[i]?.op === 'create' &&
+                  response.operations[i]?.character.type === CharacterType.Npc
+              )
+              .flatMap((operationIndex, introductionIndex) => {
+                const id = reservations.introductions.get(operationIndex);
+                return id ? [[introductionIndex, id] as const] : [];
+              }),
+            ...[...reservations.knowledge].map(
+              ([index, id]) => [index + introductions.length, id] as const
+            ),
+          ]),
+        }
+      : undefined
   );
   const npcIds = new Set(
     introductions.flatMap((op) =>
@@ -354,5 +386,17 @@ export function undoSnapshot(original: Campaign, snapshot: Snapshot): Campaign {
     ];
   }
   c.memory = snapshot.beforeMemory;
+  if (c.gmIndex) {
+    if (
+      snapshot.afterGmIndexDocument &&
+      c.gmIndex.document.generationId === snapshot.afterGmIndexDocument.generationId
+    ) {
+      if (!isDeepStrictEqual(c.gmIndex.document, snapshot.afterGmIndexDocument))
+        throw conflict('GM index changed after this turn');
+      if (snapshot.beforeGmIndexDocument)
+        c.gmIndex.document = structuredClone(snapshot.beforeGmIndexDocument);
+      else invalidateGmIndexAfterUndo(c, snapshot.turnId);
+    } else invalidateGmIndexAfterUndo(c, snapshot.turnId);
+  }
   return c;
 }

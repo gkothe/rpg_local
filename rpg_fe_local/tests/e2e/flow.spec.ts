@@ -16,7 +16,7 @@ test('Flow explains off-prompt NPC retrieval using synthetic data only', async (
   await expect(page.locator('.flow-card pre').filter({ hasText: 'knowledgeLinks' })).toContainText(
     'Ivo'
   );
-  expect(calls.every((path) => path === '/api/lan/status')).toBe(true);
+  expect(calls.every((path) => ['/api/lan/status', '/api/settings'].includes(path))).toBe(true);
 });
 
 test('explores the complete guide without campaign or provider requests', async ({
@@ -69,7 +69,9 @@ test('explores the complete guide without campaign or provider requests', async 
     .click();
   await expect(page.getByLabel('Architecture document')).toContainText('PostgreSQL');
   expect(calls.length).toBeGreaterThan(0);
-  expect(calls.every((call) => call === 'GET /api/lan/status')).toBe(true);
+  expect(calls.every((call) => ['GET /api/lan/status', 'GET /api/settings'].includes(call))).toBe(
+    true
+  );
 });
 
 for (const width of [360, 768, 1440]) {
@@ -144,5 +146,5 @@ test('Flow explains compact NPC creation without campaign or provider calls', as
   await page.getByText('Source code and documentation', { exact: true }).click();
   await page.getByRole('button', { name: 'Read document section 4.8' }).click();
   await expect(page.getByLabel('Architecture document')).toContainText('npc_preparations');
-  expect(calls.every((path) => path === '/api/lan/status')).toBe(true);
+  expect(calls.every((path) => ['/api/lan/status', '/api/settings'].includes(path))).toBe(true);
 });

@@ -402,3 +402,28 @@ test('atlas teaching reads frozen geography and validates the cartographer draft
   }
   assert.deepEqual(atlasRecall(freezeAtlas(sites)).routes(routes.args), routes.result);
 });
+
+import {
+  gmIndexValuesExample,
+  indexedProposalExample,
+  gmIndexUpdateExample,
+} from '../../rpg_fe_local/src/features/flow/examples.ts';
+import { indexedResponseSchemaExample } from '../../rpg_fe_local/src/features/flow/responseSchemaExample.ts';
+import { indexedSystemPromptExample } from '../../rpg_fe_local/src/features/flow/systemPromptExample.ts';
+import { gameplayResponseContract } from '../../rpg_be_local/src/domain/gameplayResponse.ts';
+import { gmIndexEntryValueSchema } from '../../rpg_be_local/src/domain/gmIndex.ts';
+import { gmFoundationValueSchema } from '../../rpg_be_local/src/domain/gmDirection.ts';
+import { gmIndexUpdateSchema } from '../../rpg_be_local/src/domain/gmIndexUpdate.ts';
+
+test('GM index teaching examples match the indexed gameplay and separate updater contracts', () => {
+  assert.deepEqual(indexedResponseSchemaExample, gameplayResponseContract(1).wireJsonSchema);
+  for (const entry of gmIndexValuesExample.entries) gmIndexEntryValueSchema.parse(entry);
+  for (const entry of gmIndexValuesExample.foundation) gmFoundationValueSchema.parse(entry);
+  gameplayResponseContract(1).inputSchema.parse(indexedProposalExample);
+  gmIndexUpdateSchema.parse(gmIndexUpdateExample);
+  assert.ok(indexedSystemPromptExample.includes('Current player action has priority'));
+  assert.ok(indexedSystemPromptExample.includes('Do not write index deltas'));
+  assert.ok(
+    steps.find((step) => step.id === 'commit').data.includes('separate read-only index updater')
+  );
+});

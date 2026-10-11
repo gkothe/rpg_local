@@ -237,6 +237,7 @@ export class Store {
       ...(root.frozen_sources ? { frozenSources: root.frozen_sources } : {}),
       ...(root.frozen_history ? { frozenHistory: root.frozen_history } : {}),
       ...(root.frozen_continuity ? { frozenContinuity: root.frozen_continuity } : {}),
+      ...(root.frozen_gm_index ? { frozenGmIndex: root.frozen_gm_index } : {}),
       ...(root.frozen_atlas ? { frozenAtlas: root.frozen_atlas } : {}),
       toolDefinitions: root.tool_definitions,
     };
@@ -365,7 +366,7 @@ export class Store {
       "UPDATE atlas_imports SET status='interrupted',owner_id=NULL,error='Image extraction was interrupted; start a new import.',updated_at=now() WHERE status='running' AND (lease_until IS NULL OR lease_until < now())"
     );
     const r = await this.pool.query(
-      "UPDATE turns SET status=$1,document=jsonb_set(jsonb_set(document,'{status}',to_jsonb($1::text)),'{error}',to_jsonb(CASE WHEN document->>'editingPending'='true' THEN 'Narrative editing was interrupted; resume editing to finish without repeating gameplay.' ELSE $4::text END)),owner=NULL,lease_until=NULL WHERE status IN ($2,$3) AND (lease_until IS NULL OR lease_until < now())",
+      "UPDATE turns SET status=$1,document=jsonb_set(jsonb_set(document,'{status}',to_jsonb($1::text)),'{error}',to_jsonb(CASE WHEN document->'finalization'->>'stage'='index_updating' THEN 'Index updating was interrupted; resume finalization without repeating gameplay.' WHEN document->>'editingPending'='true' THEN 'Narrative editing was interrupted; resume editing to finish without repeating gameplay.' ELSE $4::text END)),owner=NULL,lease_until=NULL WHERE status IN ($2,$3) AND (lease_until IS NULL OR lease_until < now())",
       [
         TurnStatus.Interrupted,
         TurnStatus.Pending,

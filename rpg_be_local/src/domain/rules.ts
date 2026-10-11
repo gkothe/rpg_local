@@ -137,6 +137,13 @@ export const ruleSlugSchema = z
   .regex(/^[a-z0-9][a-z0-9_-]*$/)
   .refine((key) => !RESERVED_KEYS.has(key), 'Reserved content key');
 export const ruleHashSchema = z.string().regex(/^[a-f0-9]{64}$/);
+export const rulePathSchema = z.string().min(1).max(RULE_LIMITS.pathChars);
+export const ruleQuerySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(RULE_LIMITS.queryChars)
+  .refine((query) => query.split(/\s+/).length <= RULE_LIMITS.queryTerms);
 export const serializedBytes = (value: unknown): number =>
   Buffer.byteLength(JSON.stringify(value), 'utf8');
 const byteString = (bytes: number) =>

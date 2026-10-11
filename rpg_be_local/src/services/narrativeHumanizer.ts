@@ -72,6 +72,7 @@ export async function humanizeNarrative(
 }
 
 export type NarrativeCandidate = {
+  gmIndexCheckpoint?: import('./gmIndexUpdater.js').GmIndexCheckpoint;
   turnId: string;
   campaignId: string;
   candidateDigest: string;
@@ -186,6 +187,12 @@ export class NarrativeCandidateRepository {
       editedNarrative: row.edited_narrative as string | null,
       status: row.status as NarrativeCandidate['status'],
       owner: row.owner as string,
+      ...(row.gm_index_checkpoint
+        ? {
+            gmIndexCheckpoint:
+              row.gm_index_checkpoint as import('./gmIndexUpdater.js').GmIndexCheckpoint,
+          }
+        : {}),
     };
   }
 }

@@ -57,6 +57,8 @@ export function publicCampaign(campaign: Campaign): Campaign {
 /** Frozen context, source receipts and validated-but-uncommitted candidates are diagnostics only. */
 export function publicTurn(turn: Turn): Turn {
   const safe = structuredClone(turn);
+  const withholding =
+    (!!safe.context?.frozenGmIndex || !!safe.finalization) && safe.status !== 'completed';
   // Pick a public DTO explicitly: new internal fields cannot leak through object spreading.
   return {
     id: safe.id,
@@ -64,8 +66,8 @@ export function publicTurn(turn: Turn): Turn {
     requestId: safe.requestId,
     status: safe.status,
     action: safe.action,
-    narrative: safe.narrative,
-    changes: safe.changes,
+    narrative: withholding ? null : safe.narrative,
+    changes: withholding ? [] : safe.changes,
     error: safe.error,
     undone: safe.undone,
     settings: safe.settings,
@@ -75,9 +77,11 @@ export function publicTurn(turn: Turn): Turn {
     ...(safe.diceSessionId ? { diceSessionId: safe.diceSessionId } : {}),
     ...(safe.retryOfTurnId ? { retryOfTurnId: safe.retryOfTurnId } : {}),
     ...(safe.rolls ? { rolls: safe.rolls } : {}),
-    ...(safe.rollInterpretations ? { rollInterpretations: safe.rollInterpretations } : {}),
-    ...(safe.ruleCitations ? { ruleCitations: safe.ruleCitations } : {}),
-    ...(safe.operationExplanations
+    ...(!withholding && safe.rollInterpretations
+      ? { rollInterpretations: safe.rollInterpretations }
+      : {}),
+    ...(!withholding && safe.ruleCitations ? { ruleCitations: safe.ruleCitations } : {}),
+    ...(!withholding && safe.operationExplanations
       ? {
           operationExplanations: safe.operationExplanations
             .filter((e) => e.visibility !== KnowledgeVisibility.GmOnly)
@@ -85,8 +89,11 @@ export function publicTurn(turn: Turn): Turn {
         }
       : {}),
     // Committed v6 links reference public sheets; preparation receipts never reach players.
-    ...(safe.combatEffects ? { combatEffects: safe.combatEffects } : {}),
-    ...(safe.participantReferences ? { participantReferences: safe.participantReferences } : {}),
+    ...(!withholding && safe.combatEffects ? { combatEffects: safe.combatEffects } : {}),
+    ...(!withholding && safe.participantReferences
+      ? { participantReferences: safe.participantReferences }
+      : {}),
+    ...(safe.finalization ? { finalization: safe.finalization } : {}),
     ...(safe.editingPending ? { editingPending: true } : {}),
     ...(safe.editingResume ? { editingResume: safe.editingResume } : {}),
     ...(safe.traceWarning ? { traceWarning: safe.traceWarning } : {}),

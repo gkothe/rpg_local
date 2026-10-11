@@ -8,6 +8,7 @@ import type {
 
 /** Delay between sequential status reads; the next one is scheduled only after the last answers. */
 const POLL_INTERVAL_MS = 1000;
+const REBUILD_CHANGED = 'rpg-memory-rebuild-changed';
 
 const rebuildPath = (campaignId: string) => `/campaigns/${campaignId}/memory/rebuilds`;
 
@@ -40,6 +41,8 @@ export function useMemoryRebuild(
   useEffect(() => {
     scope.current = campaignId;
     pending.current.clear();
+    guard.current = false;
+    setBusy(false);
     setJob(null);
     setForeign(null);
     setError('');
@@ -54,20 +57,32 @@ export function useMemoryRebuild(
   useEffect(() => {
     if (!enabled) return;
     const owner = campaignId;
-    void request<MemoryRebuildPage>(`${rebuildPath(campaignId)}?limit=1`)
-      .then((page) => {
-        if (scope.current !== owner) return;
-        // A job of another purpose belongs to its own panel; this one only reports it.
-        const mine = page.current && (page.current.purpose ?? 'memory') === purpose;
-        setJob((existing) => existing ?? (mine ? page.current : null));
-        setForeign(page.current && !mine ? page.current : null);
-        setLoaded(true);
-      })
-      .catch((e) => {
-        if (scope.current !== owner) return;
-        setError(errorMessage(e));
-        setLoaded(true);
-      });
+    let cancelled = false;
+    const discover = () =>
+      void request<MemoryRebuildPage>(`${rebuildPath(campaignId)}?limit=1`)
+        .then((page) => {
+          if (cancelled || scope.current !== owner) return;
+          // A job of another purpose belongs to its own panel; this one only reports it.
+          const attention = page.attentionByPurpose ?? (page.current ? [page.current] : []);
+          const mine = attention.find((item) => (item.purpose ?? 'memory') === purpose);
+          setJob((existing) => mine ?? existing);
+          setForeign(
+            attention.find((item) => (item.purpose ?? 'memory') !== purpose && item.active) ?? null
+          );
+          setLoaded(true);
+        })
+        .catch((e) => {
+          if (cancelled || scope.current !== owner) return;
+          setError(errorMessage(e));
+          setLoaded(true);
+        });
+    discover();
+    const changed = () => discover();
+    window.addEventListener(REBUILD_CHANGED, changed);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(REBUILD_CHANGED, changed);
+    };
   }, [campaignId, enabled, purpose]);
 
   const act = useCallback(
@@ -85,48 +100,59 @@ export function useMemoryRebuild(
       pending.current.set(key, requestId);
       try {
         const result = await request<unknown>(path, json('POST', { requestId, ...body }));
-        pending.current.delete(key);
         if (scope.current !== owner) return;
+        pending.current.delete(key);
         const next = options.onResult ? options.onResult(result) : (result as MemoryRebuildJobView);
         if (next) setJob(next);
+        setForeign(null);
+        window.dispatchEvent(new Event(REBUILD_CHANGED));
         setPollFailure(false);
         setError('');
       } catch (e) {
-        if (definiteFailure(e)) pending.current.delete(key);
+        if (scope.current === owner && definiteFailure(e)) pending.current.delete(key);
         if (scope.current === owner) setError(errorMessage(e));
       } finally {
-        guard.current = false;
-        if (scope.current === owner) setBusy(false);
+        if (scope.current === owner) {
+          guard.current = false;
+          setBusy(false);
+        }
       }
     },
     [campaignId]
   );
 
   const refresh = useCallback(async () => {
-    if (!job) return;
+    const tracked = foreign?.active ? foreign : job;
+    if (!tracked) return;
     const owner = campaignId;
     try {
-      const next = await request<MemoryRebuildJobView>(`${rebuildPath(campaignId)}/${job.id}`);
+      const next = await request<MemoryRebuildJobView>(`${rebuildPath(campaignId)}/${tracked.id}`);
       if (scope.current !== owner) return;
       setPollFailure(false);
-      setJob(next);
+      if ((next.purpose ?? 'memory') === purpose) setJob(next);
+      else setForeign(next);
+      if (!next.active) window.dispatchEvent(new Event(REBUILD_CHANGED));
     } catch (e) {
       if (scope.current === owner) {
         setPollFailure(true);
         setError(errorMessage(e));
       }
     }
-  }, [campaignId, job]);
+  }, [campaignId, job, foreign, purpose]);
 
   // Sequential polling: one read in flight, the next scheduled after the answer arrives.
   useEffect(() => {
-    if (!job?.active || pollFailure) return;
+    if (!enabled || (!job?.active && !foreign?.active) || pollFailure) return;
     const timer = setTimeout(() => void refresh(), POLL_INTERVAL_MS);
     return () => clearTimeout(timer);
-  }, [job, pollFailure, refresh]);
+  }, [job, foreign, enabled, pollFailure, refresh]);
 
   const start = useCallback(
-    () => act(rebuildPath(campaignId), purpose === 'memory' ? {} : { purpose }),
+    (mode?: string) =>
+      act(
+        rebuildPath(campaignId),
+        purpose === 'memory' ? {} : { purpose, ...(mode ? { mode } : {}) }
+      ),
     [act, campaignId, purpose]
   );
   const command = useCallback(

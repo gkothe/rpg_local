@@ -8,8 +8,9 @@ import {
   fragmentDigest,
   fragmentSummary,
   frozenHistorySchema,
-  historyGetSchema,
-  historySearchSchema,
+  HISTORY_DEFAULTS,
+  originalHistorySearchSchema,
+  originalHistoryGetSchema,
   pageOriginals,
   searchFragments,
   termsOf,
@@ -26,6 +27,7 @@ import { CORRECTION_PROMPT_INSTRUCTION } from '../domain/journalCompatibility.js
 import { TurnStatus } from '../domain/options.js';
 import type { Turn } from '../domain/types.js';
 import type { Store } from '../store.js';
+import { canonicalJson, sha256 } from '../domain/journalLedger.js';
 
 const MISSING_TABLE = '42P01';
 const COLUMN_MISSING = '42703';
@@ -237,7 +239,8 @@ export class HistoryReader {
   private corpus: Promise<HistoryFragment[]> | null = null;
   constructor(
     private db: Store,
-    raw: FrozenHistory
+    raw: FrozenHistory,
+    private overlays: readonly TurnVersion[] = []
   ) {
     this.store = new HistoryStore(db);
     this.frozen = frozenHistorySchema.parse(raw) as FrozenHistory;
@@ -275,7 +278,53 @@ export class HistoryReader {
   }
 
   async search(input: HistoryToolInput) {
-    const args = historySearchSchema.parse(input);
+    const args = originalHistorySearchSchema.parse(input);
+    if (args.mode === 'originals') {
+      const originals = await this.originalDocuments(this.frozen.turnVersions);
+      const key = sha256(canonicalJson({ versions: this.frozen.turnVersions, query: args.query }));
+      let offset = 0;
+      if (args.cursor) {
+        try {
+          const cursor = JSON.parse(Buffer.from(args.cursor, 'base64url').toString('utf8'));
+          if (cursor.key !== key || !Number.isInteger(cursor.offset) || cursor.offset < 0)
+            throw Error();
+          offset = cursor.offset;
+        } catch {
+          throw new Problem(
+            422,
+            'history_cursor',
+            'Cursor does not belong to this frozen original search'
+          );
+        }
+      }
+      const words = termsOf(args.query);
+      const selected = [...originals.values()].filter(
+        (document) =>
+          words.length === 0 ||
+          words.some((word) =>
+            `${document.player} ${document.gm}`.toLocaleLowerCase().includes(word)
+          )
+      );
+      const items = selected
+        .slice(offset, offset + HISTORY_DEFAULTS.searchPageSize)
+        .map((document) => ({
+          turnId: document.turnId,
+          contentHash: versionHashOf(document),
+          createdAt: document.createdAt,
+          excerpt: `${document.player}\n${document.gm}`.slice(0, HISTORY_DEFAULTS.excerptChars),
+        }));
+      return {
+        campaignId: this.frozen.campaignId,
+        items,
+        corpusTurns: originals.size,
+        nextCursor:
+          offset + items.length < selected.length
+            ? Buffer.from(JSON.stringify({ key, offset: offset + items.length })).toString(
+                'base64url'
+              )
+            : null,
+      };
+    }
     const corpus = await this.load();
     const page = searchFragments(corpus, this.frozen, new Map(), args);
     const shown = corpus.filter((f) => page.items.some((i) => i.id === f.id));
@@ -294,7 +343,32 @@ export class HistoryReader {
   }
 
   async get(input: HistoryToolInput) {
-    const args = historyGetSchema.parse(input);
+    const args = originalHistoryGetSchema.parse(input);
+    if (args.turnId) {
+      if (args.cursor)
+        throw new Problem(
+          422,
+          'history_cursor',
+          'Direct original lookup has no continuation cursor'
+        );
+      const locator = this.frozen.turnVersions.find((version) => version.turnId === args.turnId);
+      if (!locator)
+        throw new Problem(
+          404,
+          'history_not_found',
+          'Original turn is outside this frozen campaign'
+        );
+      const originals = await this.originalDocuments([locator]);
+      return {
+        originals: [originals.get(locator.contentHash)!],
+        sourceLocators: [locator],
+        nextCursor: null,
+        correctionGuidance: {
+          instruction: CORRECTION_PROMPT_INSTRUCTION,
+          items: this.frozen.correctionGuidance,
+        },
+      };
+    }
     const corpus = await this.load();
     const fragment = corpus.find((f) => f.id === args.id);
     if (!fragment)
@@ -321,6 +395,31 @@ export class HistoryReader {
           fragment.correctionDigest !== correctionDigestOf(this.frozen.correctionGuidance),
       },
     };
+  }
+  private async originalDocuments(
+    locators: readonly SourceLocator[]
+  ): Promise<Map<string, TurnVersionDocument>> {
+    const overlayHashes = new Set(this.overlays.map((version) => version.contentHash));
+    const result = await this.store.versionDocuments(
+      this.frozen.campaignId,
+      locators.filter((locator) => !overlayHashes.has(locator.contentHash))
+    );
+    for (const overlay of this.overlays) {
+      if (versionHashOf(overlay.document) !== overlay.contentHash)
+        throw new Problem(
+          409,
+          'history_source_corrupt',
+          'Staged original differs from its saved identity'
+        );
+      if (
+        locators.some(
+          (locator) =>
+            locator.contentHash === overlay.contentHash && locator.turnId === overlay.turnId
+        )
+      )
+        result.set(overlay.contentHash, overlay.document);
+    }
+    return result;
   }
 }
 

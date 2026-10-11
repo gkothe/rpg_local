@@ -69,8 +69,8 @@ test('1000-turn synthetic campaign preserves knowledge and excludes player descr
     assert.ok(context.historyIds.length < 30);
     assert.equal(context.historyIds.length, recentGameplayHistory(c, turns).history.length);
     assert.deepEqual(
-      context.historyIds.slice(-3),
-      turns.slice(-3).map((t) => t.id)
+      context.historyIds.slice(-5),
+      turns.slice(-5).map((t) => t.id)
     );
     turns.push({
       id: randomUUID(),

@@ -58,7 +58,7 @@ function generator() {
     },
   };
 }
-async function seed(count = 12) {
+async function seed(count = 14) {
   return seedCampaign(
     store,
     Array.from({ length: count }, (_, i) => ({
@@ -102,7 +102,7 @@ test(
     );
     const ready = await settle(service, campaign.id, started.id);
     assert.equal(ready.status, MemoryRebuildStatus.Ready, ready.safeError ?? '');
-    // 9 older pairs: two sections (8 + 1), one chapter and one overview.
+    // 9 older pairs plus five protected: two sections (8 + 1), one chapter and one overview.
     assert.deepEqual(
       g.calls.map((c) => c.kind),
       ['section', 'section', 'chapter', 'overview']
@@ -246,7 +246,7 @@ test(
       .expect(200);
     assert.deepEqual(
       settings.body.data.memoryRebuild.purposeOptions.map((o: { id: string }) => o.id),
-      ['memory', 'compact_history']
+      ['memory', 'compact_history', 'gm_index']
     );
   }
 );

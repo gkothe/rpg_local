@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { GmIndexRefKind } from '../domain/gmIndexRefs.js';
 import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { Problem } from '../errors.js';
@@ -702,6 +703,28 @@ export class JournalService {
         [campaignId]
       );
       next.memory = null;
+      if (next.gmIndex) {
+        for (const [entries, dependencies] of [
+          [next.gmIndex.document.entries, next.gmIndex.document.dependencyState.entries],
+          [
+            next.gmIndex.document.campaignFoundation,
+            next.gmIndex.document.dependencyState.foundation,
+          ],
+        ] as const) {
+          for (const entry of entries)
+            if (
+              entry.refs.some(
+                (ref) =>
+                  (ref.kind === GmIndexRefKind.Knowledge && ref.id === finding.knowledgeId) ||
+                  (ref.kind === GmIndexRefKind.Turn &&
+                    finding.evidence.some((evidence) => evidence.turnId === ref.turnId))
+              )
+            ) {
+              const dependency = dependencies.find((dependency) => dependency.entryId === entry.id);
+              if (dependency) dependency.stale = true;
+            }
+        }
+      }
       // History summaries may carry the superseded fact too; they wait for a refresh.
       await new HistoryStore(this.store).invalidateAll(client, campaignId);
       await this.store.save(next, client);

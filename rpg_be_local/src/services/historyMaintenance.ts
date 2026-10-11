@@ -89,10 +89,14 @@ export class HistoryMaintenance {
     const campaign = await this.store.campaign(input.campaignId);
     const settings = historySettingsOf(campaign);
     // Without a current overview the whole index needs the explicit Prepare/Review/Activate flow.
-    if (!settings.enabled || !settings.activeOverviewId) return none;
+    const bootstrap =
+      !!campaign.gmIndex?.settings.enabled &&
+      !!campaign.gmIndex.document.dependencyState.historyBootstrapPending;
+    if (!settings.enabled || (!settings.activeOverviewId && !bootstrap)) return none;
     const turns = await this.store.activeTurns(input.campaignId);
     const fragments = await this.history.list(input.campaignId, undefined, true);
-    if (!fragments.some((f) => f.id === settings.activeOverviewId)) return none;
+    if (settings.activeOverviewId && !fragments.some((f) => f.id === settings.activeOverviewId))
+      return none;
     const older = finalizedTurns(turns).slice(
       0,
       Math.max(0, finalizedTurns(turns).length - RECENT_GAMEPLAY_TURN_COUNT)
@@ -250,6 +254,7 @@ export class HistoryMaintenance {
         );
       next.activeOverviewId = created!.id;
       locked.historyRecall = next;
+      if (locked.gmIndex) locked.gmIndex.document.dependencyState.historyBootstrapPending = false;
       locked.revision++;
       await this.store.save(locked, client);
     });

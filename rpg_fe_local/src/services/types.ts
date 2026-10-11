@@ -179,6 +179,7 @@ export interface Source {
   originalAvailable?: boolean;
 }
 export interface Turn {
+  finalization?: { stage: string; resume: { available: boolean; reason: string | null } };
   ruleContext?: RuleContext;
   ruleReads?: RuleRead[];
   ruleCitations?: RuleCitation[];
@@ -393,6 +394,7 @@ export type JournalEvidenceDetail =
   | { kind: 'turn'; label: string; turnId: string; available: boolean }
   | { kind: 'campaign_source' | 'book'; label: string; quote: string; available: true };
 export interface MemoryRebuildJobView {
+  gmIndex?: { mode: string; preview: GmIndexPreview | null };
   id: string;
   campaignId: string;
   purpose?: string;
@@ -412,9 +414,28 @@ export interface MemoryRebuildJobView {
   decision: { action: string; requestId: string; memoryId: string | null } | null;
 }
 export interface MemoryRebuildPage {
+  attentionByPurpose?: MemoryRebuildJobView[];
   jobs: MemoryRebuildJobView[];
   current: MemoryRebuildJobView | null;
   nextCursor: string | null;
+}
+export interface GmIndexPreview {
+  topics: { title: string; text: string }[];
+  coverage: {
+    turns: number;
+    sourceSections: number;
+    knowledge: number;
+    unconfirmedSources?: number;
+    emptyConfirmedSources?: number;
+  };
+}
+export interface GmIndexStatus {
+  prepared: boolean;
+  enabled: boolean;
+  refreshRequired: boolean;
+  canPrepare: boolean;
+  blockedReason: string | null;
+  playerKnown: GmIndexPreview;
 }
 export interface MemoryRebuildApplyResult {
   campaign: CampaignDetail;
@@ -477,6 +498,11 @@ export interface Settings {
   memoryRebuild?: {
     actionOptions: { id: string; label: string }[];
     purposeOptions?: { id: string; label: string }[];
+  };
+  gmIndex?: {
+    purposeId: string;
+    modes: { id: string; label: string }[];
+    finalizationStages: { id: string; label: string }[];
   };
   journal?: {
     limits: { queryMaxChars: number; pageSizeDefault: number; explanationMaxChars: number };

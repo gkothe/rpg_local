@@ -1,4 +1,8 @@
 import { atlasSchema, validateAtlas, atlasExpected } from '../domain/atlas.js';
+import { gmIndexSchema, gmIndexDocumentSchema, frozenGmIndexSchema } from '../domain/gmIndex.js';
+import { turnFinalizationSchema } from '../domain/turnFinalization.js';
+import { gmIndexDocuments, remapGmIndexDocuments } from './gmIndexArchive.js';
+import { GmIndexRefKind } from '../domain/gmIndexRefs.js';
 import {
   atlasCollections,
   registerAtlasRecords,
@@ -152,6 +156,7 @@ const settings = z
 const campaign = z
   .object({
     continuity: continuitySchema.optional(),
+    gmIndex: gmIndexSchema.optional(),
     atlas: atlasSchema.optional(),
     ruleSystemId: uuid.nullable().optional(),
     ruleReference: ruleReferenceSchema.optional(),
@@ -245,6 +250,7 @@ const context = z
     frozenKnowledge: frozenKnowledgeSchema.optional(),
     frozenHistory: frozenHistorySchema.optional(),
     frozenContinuity: frozenContinuitySchema.optional(),
+    frozenGmIndex: frozenGmIndexSchema.optional(),
     frozenAtlas: frozenAtlasSchema.optional(),
     sourceSpans: z.array(sourceSpanSchema).optional(),
     frozenSources: frozenCampaignSourcesSchema.optional(),
@@ -274,6 +280,7 @@ const sourceRead = z
   .strict();
 const turn = z
   .object({
+    finalization: turnFinalizationSchema.optional(),
     ruleContext: ruleContextSchema.optional(),
     ruleReads: z.array(ruleReadSchema).optional(),
     ruleCitations: z.array(ruleCitationSchema).max(RULE_LIMITS.calls).optional(),
@@ -302,6 +309,8 @@ const turn = z
   .strict();
 const snapshot = z
   .object({
+    beforeGmIndexDocument: gmIndexDocumentSchema.nullable().optional(),
+    afterGmIndexDocument: gmIndexDocumentSchema.nullable().optional(),
     beforeContinuity: z.array(npcProfileSchema).optional(),
     beforeAtlas: atlasSchema.optional(),
     afterAtlas: atlasSchema.optional(),
@@ -597,6 +606,45 @@ export function remapArchive(raw: unknown): Archive {
     if (!ids.has(id)) ids.set(id, randomUUID());
     historicalCharacters.add(id);
   };
+  const indexEntityIds = new Set<string>();
+  for (const document of gmIndexDocuments(archive as Archive)) {
+    for (const id of [
+      document.generationId,
+      ...document.entries.map((entry) => entry.id),
+      ...document.campaignFoundation.map((entry) => entry.id),
+    ]) {
+      if (!indexEntityIds.has(id)) {
+        register(id);
+        indexEntityIds.add(id);
+        nonCharacterIds.add(id);
+      }
+    }
+    if (document.lastCheckedTurnId && !tids.has(document.lastCheckedTurnId))
+      throw new Problem(422, 'archive_invalid', 'Index checked turn is outside this archive');
+    for (const entry of [...document.entries, ...document.campaignFoundation]) {
+      if ('ownerCharacterId' in entry && entry.ownerCharacterId)
+        characterLink(entry.ownerCharacterId);
+      for (const ref of entry.refs) {
+        if (ref.kind === GmIndexRefKind.SourceSection) sourceLink(ref.sourceId);
+        else if (ref.kind === GmIndexRefKind.Character) characterLink(ref.characterId);
+        else if (ref.kind === GmIndexRefKind.Knowledge && !ids.has(ref.id)) {
+          ids.set(ref.id, randomUUID());
+          nonCharacterIds.add(ref.id);
+        } else if (ref.kind === GmIndexRefKind.Turn && !tids.has(ref.turnId))
+          throw new Problem(
+            422,
+            'archive_invalid',
+            'Index original reference is outside this archive'
+          );
+      }
+    }
+    document.dependencyState.sourceCoverage.forEach((section) => sourceLink(section.sourceId));
+  }
+  if (
+    old.gmIndex?.settings.activationHistoryBaseline.modeDecisionId &&
+    !ids.has(old.gmIndex.settings.activationHistoryBaseline.modeDecisionId)
+  )
+    ids.set(old.gmIndex.settings.activationHistoryBaseline.modeDecisionId, randomUUID());
   const profiles = [
     ...profileCollections(old, archive.snapshots),
     ...archive.diceSessions.map((s) => s.frozenContinuity?.npcProfiles ?? []),
@@ -1451,6 +1499,7 @@ export function remapArchive(raw: unknown): Archive {
     for (const change of snapshot.changedFields ?? [])
       change.characterId = mapped(change.characterId);
   }
+  remapGmIndexDocuments(out as Archive, mapped, versionMap);
   out.campaign.createdAt = new Date().toISOString();
   out.campaign.updatedAt = out.campaign.createdAt;
   for (const p of out.atlasData?.preparations ?? []) {
@@ -1635,6 +1684,12 @@ export class LibraryService {
                 ...(row.frozen_continuity != null
                   ? { frozenContinuity: row.frozen_continuity }
                   : {}),
+                ...(row.frozen_gm_index != null
+                  ? {
+                      frozenGmIndex: row.frozen_gm_index,
+                      gmIndexContractVersion: row.gm_index_contract_version,
+                    }
+                  : {}),
                 ...(row.frozen_atlas != null ? { frozenAtlas: row.frozen_atlas } : {}),
                 toolDefinitions: row.tool_definitions,
               }
@@ -1762,7 +1817,7 @@ export class LibraryService {
       for (const session of archive.diceSessions)
         await client.query(
           session.systemPrompt !== undefined
-            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history,frozen_continuity,frozen_atlas,npc_sheet_version) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)'
+            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history,frozen_continuity,frozen_atlas,npc_sheet_version,frozen_gm_index,gm_index_contract_version) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)'
             : 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,npc_sheet_version) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10)',
           [
             session.id,
@@ -1786,6 +1841,9 @@ export class LibraryService {
                 ]
               : []),
             session.npcSheetVersion ?? 0,
+            ...(session.systemPrompt !== undefined
+              ? [session.frozenGmIndex ?? null, session.gmIndexContractVersion ?? null]
+              : []),
           ]
         );
       for (const t of archive.turns)
@@ -1919,6 +1977,7 @@ export class LibraryService {
       delete setup.advancementReviews;
       delete setup.advancementPolicy;
       delete setup.continuity;
+      delete setup.gmIndex;
       delete setup.atlas;
       delete setup.npcPreparations;
       const c = { ...newCampaign({ name: name ?? template.name }), ...setup } as Campaign;

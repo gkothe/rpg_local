@@ -44,7 +44,8 @@ export default function MemoryRebuild({
       </small>
       {foreign?.active && (
         <small className="muted">
-          A compact history task is running. Manage it under History recall below.
+          A {foreign.purpose === 'gm_index' ? 'GM index' : 'compact history'} task is running.
+          Manage it in its Journal panel.
         </small>
       )}
       {/* Polite live region: progress is announced without moving focus. */}

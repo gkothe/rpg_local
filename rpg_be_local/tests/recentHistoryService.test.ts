@@ -136,30 +136,30 @@ async function execute(
 }
 
 test('protected-only history never invokes compaction, including a missing initial prompt', async () => {
-  for (const count of [0, 1, 3]) {
+  for (const count of [0, 1, 5]) {
     const result = await execute(count, { missing: true });
     assert.equal(result.current.error, GAMEPLAY_REACHED);
     assert.equal(result.summaries.length, 0);
     assert.equal(JSON.parse(result.gameplay[0]!).history.length, count);
   }
 });
-test('one older turn compacts and multiple batches stop before the latest three', async () => {
-  for (const count of [4, 10]) {
+test('one older turn compacts and multiple batches stop before the latest five', async () => {
+  for (const count of [6, 12]) {
     const result = await execute(count);
     assert.equal(result.current.error, GAMEPLAY_REACHED);
     assert.deepEqual(
       result.summaries.flat(),
-      result.prior.slice(0, -3).map((t) => t.id)
+      result.prior.slice(0, -5).map((t) => t.id)
     );
     assert.deepEqual(
       result.campaign.memory!.coveredTurnIds,
-      result.prior.slice(0, -3).map((t) => t.id)
+      result.prior.slice(0, -5).map((t) => t.id)
     );
     assert.deepEqual(
       JSON.parse(result.gameplay[0]!).history,
-      result.prior.slice(-3).map((t) => ({ player: t.action, gm: t.narrative }))
+      result.prior.slice(-5).map((t) => ({ player: t.action, gm: t.narrative }))
     );
-    assert.ok(result.summaries.length >= (count === 4 ? 1 : 2));
+    assert.ok(result.summaries.length >= (count === 6 ? 1 : 2));
   }
 });
 test('retry retains frozen context and does not compact history', async () => {
@@ -169,10 +169,10 @@ test('retry retains frozen context and does not compact history', async () => {
   assert.equal(result.gameplay[0], result.frozenPrompt);
 });
 test('failed summary does not persist coverage or silently discard old history', async () => {
-  const result = await execute(4, { fail: true });
+  const result = await execute(6, { fail: true });
   assert.equal(result.current.status, TurnStatus.Failed);
   assert.equal(result.checkpoints.length, 0);
   assert.equal(result.campaign.memory, null);
   assert.equal(result.gameplay.length, 0);
-  assert.equal(JSON.parse(result.current.context!.prompt).history.length, 4);
+  assert.equal(JSON.parse(result.current.context!.prompt).history.length, 6);
 });

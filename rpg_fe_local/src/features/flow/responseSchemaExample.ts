@@ -2525,3 +2525,231 @@ export const responseSchemaExample = {
   ],
   additionalProperties: false,
 } as const;
+
+export const indexedResponseSchemaExample = {
+  ...responseSchemaExample,
+  properties: {
+    ...responseSchemaExample.properties,
+    gmIndexHandoff: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          kind: {
+            type: 'string',
+            enum: ['gm_plan', 'task'],
+          },
+          text: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 100000,
+          },
+          refs: {
+            type: 'array',
+            items: {
+              anyOf: [
+                {
+                  anyOf: [
+                    {
+                      type: 'object',
+                      properties: {
+                        kind: {
+                          type: 'string',
+                          const: 'campaign_field',
+                        },
+                        field: {
+                          type: 'string',
+                          enum: ['description', 'instructions'],
+                        },
+                        contentHash: {
+                          type: 'string',
+                          pattern: '^[a-f0-9]{64}$',
+                        },
+                      },
+                      required: ['kind', 'field', 'contentHash'],
+                      additionalProperties: false,
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        kind: {
+                          type: 'string',
+                          const: 'source_section',
+                        },
+                        sourceId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        version: {
+                          type: 'integer',
+                          exclusiveMinimum: 0,
+                          maximum: 9007199254740991,
+                        },
+                        sectionIndex: {
+                          type: 'integer',
+                          minimum: 0,
+                          maximum: 9007199254740991,
+                        },
+                      },
+                      required: ['kind', 'sourceId', 'version', 'sectionIndex'],
+                      additionalProperties: false,
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        kind: {
+                          type: 'string',
+                          const: 'rule_hint',
+                        },
+                        systemKey: {
+                          type: 'string',
+                          maxLength: 80,
+                          pattern: '^[a-z0-9][a-z0-9_-]*$',
+                        },
+                        query: {
+                          type: 'string',
+                          minLength: 1,
+                          maxLength: 240,
+                        },
+                        path: {
+                          type: 'string',
+                          minLength: 1,
+                          maxLength: 512,
+                        },
+                      },
+                      required: ['kind', 'systemKey', 'query'],
+                      additionalProperties: false,
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        kind: {
+                          type: 'string',
+                          const: 'knowledge',
+                        },
+                        id: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                      },
+                      required: ['kind', 'id'],
+                      additionalProperties: false,
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        kind: {
+                          type: 'string',
+                          const: 'character',
+                        },
+                        characterId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                      },
+                      required: ['kind', 'characterId'],
+                      additionalProperties: false,
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        turnId: {
+                          type: 'string',
+                          format: 'uuid',
+                          pattern:
+                            '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
+                        },
+                        contentHash: {
+                          type: 'string',
+                          pattern: '^[0-9a-f]{64}$',
+                        },
+                        kind: {
+                          type: 'string',
+                          const: 'turn',
+                        },
+                      },
+                      required: ['turnId', 'contentHash', 'kind'],
+                      additionalProperties: false,
+                    },
+                  ],
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    kind: {
+                      type: 'string',
+                      const: 'knowledge',
+                    },
+                    knowledgeChangeIndex: {
+                      type: 'integer',
+                      minimum: 0,
+                      maximum: 9007199254740991,
+                    },
+                  },
+                  required: ['kind', 'knowledgeChangeIndex'],
+                  additionalProperties: false,
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    kind: {
+                      type: 'string',
+                      const: 'knowledge',
+                    },
+                    npcIntroductionOperationIndex: {
+                      type: 'integer',
+                      minimum: 0,
+                      maximum: 9007199254740991,
+                    },
+                  },
+                  required: ['kind', 'npcIntroductionOperationIndex'],
+                  additionalProperties: false,
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    kind: {
+                      type: 'string',
+                      const: 'character',
+                    },
+                    operationIndex: {
+                      type: 'integer',
+                      minimum: 0,
+                      maximum: 9007199254740991,
+                    },
+                  },
+                  required: ['kind', 'operationIndex'],
+                  additionalProperties: false,
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    kind: {
+                      type: 'string',
+                      const: 'turn',
+                    },
+                    current: {
+                      type: 'boolean',
+                      const: true,
+                    },
+                  },
+                  required: ['kind', 'current'],
+                  additionalProperties: false,
+                },
+              ],
+            },
+          },
+        },
+        required: ['kind', 'text', 'refs'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: [...responseSchemaExample.required, 'gmIndexHandoff'],
+} as const;

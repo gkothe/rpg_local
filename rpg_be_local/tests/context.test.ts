@@ -198,23 +198,44 @@ const turn = (id: string, narrative: string): Turn => ({
   completedAt: '',
 });
 
-test('gameplay history contains only delivered text and excludes failed and undone turns', () => {
+test('gameplay history includes delivered text and rolls without audit, failed or undone turns', () => {
   const c = newCampaign({ name: 'Dice context' });
-  const completed = turn('completed', 'Saved outcome');
+  const completed = { ...turn('completed', 'Saved outcome'), rawNarrative: 'RAW_CANARY' };
   completed.rolls = [
     {
       id: 'record',
       reason: 'Check',
       declaration: 'Target 4',
       groups: [{ label: 'Check', sides: 6, faces: [5] }],
+      sessionId: 'ROLL_AUDIT_CANARY',
+      campaignId: c.id,
+      createdAt: '',
+      slot: 0,
     },
-  ] as Turn['rolls'];
+  ];
+  completed.rollInterpretations = [
+    { rollId: 'record', explanation: 'Success: the door opens.', afterParagraph: 1 },
+  ];
   const failed = { ...turn('failed', 'FAILED_CANARY'), status: TurnStatus.Failed };
   const undone = { ...turn('undone', 'UNDONE_CANARY'), undone: true };
   const context = buildContext(c, [completed, failed, undone], 'Next', []);
   assert.match(context.prompt, /rollInterpretations/);
-  assert.deepEqual(JSON.parse(context.prompt).history, [{ player: 'look', gm: 'Saved outcome' }]);
-  assert.doesNotMatch(context.prompt, /FAILED_CANARY|UNDONE_CANARY/);
+  assert.deepEqual(JSON.parse(context.prompt).history, [
+    {
+      player: 'look',
+      gm: 'Saved outcome',
+      dice: [
+        {
+          id: 'record',
+          reason: 'Check',
+          declaration: 'Target 4',
+          groups: [{ label: 'Check', sides: 6, faces: [5] }],
+        },
+      ],
+      interpretations: completed.rollInterpretations,
+    },
+  ]);
+  assert.doesNotMatch(context.prompt, /FAILED_CANARY|UNDONE_CANARY|RAW_CANARY|ROLL_AUDIT_CANARY/);
   assert.deepEqual(context.historyIds, ['completed']);
   assert.doesNotMatch(compactionBatch(c, [completed], 16000).prompt, /roll_dice/);
 });
@@ -239,9 +260,11 @@ test('memory coverage and undone events are excluded and compaction stays bounde
     turn('4', 'recent'),
     turn('5', 'recent'),
     turn('6', 'recent'),
+    turn('7', 'recent'),
+    turn('8', 'recent'),
   ];
   const b = buildContext(c, h, 'go', []);
-  assert.deepEqual(b.historyIds, ['2', '4', '5', '6']);
+  assert.deepEqual(b.historyIds, ['2', '4', '5', '6', '7', '8']);
   assert.ok(!b.prompt.includes('secret old'));
   const batch = compactionBatch(c, h, 8000);
   assert.deepEqual(
@@ -249,14 +272,14 @@ test('memory coverage and undone events are excluded and compaction stays bounde
     ['2']
   );
   assert.ok(estimateTokens(batch.prompt) <= 8000);
-  const largeBatch = compactionBatch(c, [turn('3', 'x'.repeat(40000)), ...h.slice(-3)], 8000);
+  const largeBatch = compactionBatch(c, [turn('3', 'x'.repeat(40000)), ...h.slice(-5)], 8000);
   assert.deepEqual(
     largeBatch.turns.map((x) => x.id),
     ['3']
   );
   assert.ok(largeBatch.prompt.includes('x'.repeat(40000)));
   c.memory.valid = false;
-  assert.deepEqual(buildContext(c, h, 'go', []).historyIds, ['1', '2', '4', '5', '6']);
+  assert.deepEqual(buildContext(c, h, 'go', []).historyIds, ['1', '2', '4', '5', '6', '7', '8']);
 });
 
 test('retrieved relevant sections are included even when the old capacity estimate is tiny', () => {
@@ -272,7 +295,7 @@ test('retrieved relevant sections are included even when the old capacity estima
 test('default compaction packs a 32-KiB consecutive batch without splitting turns', () => {
   const c = newCampaign({ name: '32 KiB compaction' });
   assert.equal(c.budgets.compaction, 32768);
-  const history = Array.from({ length: 9 }, (_, i) => turn(String(i), 'x'.repeat(6000)));
+  const history = Array.from({ length: 11 }, (_, i) => turn(String(i), 'x'.repeat(6000)));
   const batch = compactionBatch(c, history);
   assert.equal(batch.turns.length, 5);
   assert.ok(Buffer.byteLength(batch.prompt, 'utf8') <= 32768);
@@ -282,7 +305,7 @@ test('default compaction packs a 32-KiB consecutive batch without splitting turn
   );
 });
 
-test('three recent pairs survive legacy memory coverage without adding technical audit', () => {
+test('five recent pairs survive legacy memory coverage without adding technical audit', () => {
   const c = newCampaign({ name: 'Recent pairs' });
   const history = Array.from({ length: 10 }, (_, i) => ({
     ...turn(String(i), `Delivered ${i}`),
@@ -300,9 +323,9 @@ test('three recent pairs survive legacy memory coverage without adding technical
   const payload = JSON.parse(manifest.prompt);
   assert.deepEqual(
     payload.history,
-    history.slice(-3).map((t) => ({ player: t.action, gm: t.narrative }))
+    history.slice(-5).map((t) => ({ player: t.action, gm: t.narrative }))
   );
-  assert.deepEqual(manifest.historyIds, ['7', '8', '9']);
+  assert.deepEqual(manifest.historyIds, ['5', '6', '7', '8', '9']);
   assert.equal(payload.memory, 'Legacy summary');
   assert.equal(payload.mandatory.action, 'Current action');
   assert.doesNotMatch(manifest.prompt, /RAW_CANARY/);
@@ -312,7 +335,7 @@ test('three recent pairs survive legacy memory coverage without adding technical
 
 test('selection preserves older uncovered backlog and deduplicates completed turn IDs', () => {
   const c = newCampaign({ name: 'Backlog' });
-  for (const count of [0, 1, 3, 4, 10]) {
+  for (const count of [0, 1, 5, 6, 10]) {
     const h = Array.from({ length: count }, (_, i) => turn(String(i), `Final ${i}`));
     const result = recentGameplayHistory(c, [...h, ...h]);
     assert.deepEqual(
@@ -321,18 +344,55 @@ test('selection preserves older uncovered backlog and deduplicates completed tur
     );
     assert.deepEqual(
       result.recent.map((t) => t.id),
-      h.slice(-3).map((t) => t.id)
+      h.slice(-5).map((t) => t.id)
     );
     assert.deepEqual(
       result.older.map((t) => t.id),
-      h.slice(0, Math.max(0, h.length - 3)).map((t) => t.id)
+      h.slice(0, Math.max(0, h.length - 5)).map((t) => t.id)
     );
   }
 });
 
+test('the fifth most recent completed turn still contributes NPC scene relevance', () => {
+  const c = newCampaign({ name: 'Scene window' });
+  const npcId = randomUUID();
+  c.characters.push({
+    id: npcId,
+    name: 'Marta',
+    type: CharacterType.Npc,
+    attributes: {},
+    inventory: {},
+    description: {},
+    notes: '',
+    revision: 0,
+  });
+  const history = Array.from({ length: 6 }, (_, i) =>
+    turn(String(i), i === 1 ? 'Marta promises to return.' : 'The room is quiet.')
+  );
+  c.memory = {
+    id: 'm',
+    text: 'Earlier events.',
+    valid: true,
+    coveredTurnIds: history.map((t) => t.id),
+    createdAt: '',
+  };
+  const payload = JSON.parse(buildContext(c, history, 'Wait here', []).prompt);
+  assert.deepEqual(
+    payload.mandatory.characters.map((character: { id: string }) => character.id),
+    [npcId]
+  );
+  assert.equal(payload.history.length, 5);
+});
+
 test('compaction excludes protected pairs even when they are huge; one older turn is eligible', () => {
   const c = newCampaign({ name: 'Protected' });
-  const recent = [turn('r1', 'x'.repeat(70000)), turn('r2', 'recent'), turn('r3', 'recent')];
+  const recent = [
+    turn('r1', 'x'.repeat(70000)),
+    turn('r2', 'recent'),
+    turn('r3', 'recent'),
+    turn('r4', 'recent'),
+    turn('r5', 'recent'),
+  ];
   assert.equal(olderHistoryBytes(c, recent), 0);
   assert.deepEqual(compactionBatch(c, recent).turns, []);
   const old = turn('old', 'Before the recent window');

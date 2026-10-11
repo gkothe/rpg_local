@@ -15,6 +15,8 @@ import {
   RULE_LIMITS,
   serializedBytes,
   ruleSlugSchema,
+  rulePathSchema,
+  ruleQuerySchema,
   type RuleSystem,
   type RuleNode,
   type RuleTool,
@@ -25,7 +27,7 @@ const token = z
   .min(1)
   .max(RULE_LIMITS.tokenChars)
   .regex(/^[A-Za-z0-9_-]+$/);
-const pathSchema = z.string().min(1).max(RULE_LIMITS.pathChars);
+const pathSchema = rulePathSchema;
 const filter = z
   .object({
     field: ruleSlugSchema,
@@ -39,12 +41,7 @@ export const ruleToolSchemas = {
     .strict(),
   rules_search: z
     .object({
-      query: z
-        .string()
-        .trim()
-        .min(1)
-        .max(RULE_LIMITS.queryChars)
-        .refine((query) => query.split(/\s+/).length <= RULE_LIMITS.queryTerms),
+      query: ruleQuerySchema,
       columns: z.array(z.enum(RULE_COLUMNS)).min(1).max(RULE_COLUMNS.length).optional(),
       source: ruleSlugSchema.optional(),
       cursor: token.optional(),

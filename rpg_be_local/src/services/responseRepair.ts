@@ -15,6 +15,7 @@ import { KNOWLEDGE_PROVENANCE_GUIDANCE } from '../domain/gameplayNarrator.js';
 import { participantReferenceSchema } from '../domain/combat.js';
 
 const editableFields = new Set([
+  'gmIndexHandoff',
   'operations',
   'knowledgeChanges',
   'continuityChanges',

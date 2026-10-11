@@ -176,6 +176,11 @@ export type KnowledgeValidation = {
   campaignId: string;
   turnId: string;
 };
+/** Server-owned identities/times for projecting and committing the same candidate twice. */
+export type KnowledgeApplicationReservations = {
+  createIds: ReadonlyMap<number, string>;
+  appliedAt: string;
+};
 const invalid = (detail: string): never => {
   throw new Problem(422, 'knowledge_invalid', detail);
 };
@@ -224,7 +229,8 @@ export function applyKnowledgeChanges(
   aliases: ReadonlyMap<number, string>,
   context: KnowledgeValidation,
   responsePath?: (index: number) => ResponsePath,
-  evidenceFor?: (index: number) => KnowledgeValidation | undefined
+  evidenceFor?: (index: number) => KnowledgeValidation | undefined,
+  reservations?: KnowledgeApplicationReservations
 ): {
   records: CampaignKnowledge[];
   before: CampaignKnowledge[];
@@ -251,10 +257,14 @@ export function applyKnowledgeChanges(
         op,
         evidenceFor?.(index) ?? context.preparedKnowledgeEvidence?.get(index) ?? context
       );
-      const reservedId = context.preparedKnowledgeIds?.get(index);
+      const preparedId = context.preparedKnowledgeIds?.get(index);
+      const applicationId = op.op === 'create' ? reservations?.createIds.get(index) : undefined;
+      if (preparedId && applicationId && preparedId !== applicationId)
+        invalid('Application identity differs from prepared knowledge identity');
+      const reservedId = preparedId ?? applicationId;
       if (reservedId && records.some((r) => r.id === reservedId))
         invalid('Prepared Place identity already exists');
-      const now = new Date().toISOString();
+      const now = reservations?.appliedAt ?? new Date().toISOString();
       const current = op.op === 'update' ? records.find((r) => r.id === op.id) : undefined;
       if (op.op === 'update' && !current) invalid('Knowledge record not found');
       const requestedVisibility =
@@ -308,7 +318,7 @@ export function applyKnowledgeChanges(
             attributions: [...current.attributions, attribution],
           }
         : {
-            id: context.preparedKnowledgeIds?.get(index) ?? randomUUID(),
+            id: reservedId ?? randomUUID(),
             visibility,
             introductionVisibility: visibility,
             kind: op.op === 'create' ? op.kind : KnowledgeKind.Other,

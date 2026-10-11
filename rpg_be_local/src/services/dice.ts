@@ -31,6 +31,7 @@ export class DiceService {
     characterIds: string[],
     metadata: {
       frozenContinuity?: import('../domain/continuity.js').FrozenContinuity;
+      frozenGmIndex?: import('../domain/gmIndex.js').FrozenGmIndex;
       frozenAtlas?: import('../domain/atlasRecall.js').FrozenAtlas;
       frozenSources?: FrozenCampaignSources;
       frozenHistory?: FrozenHistory;
@@ -45,7 +46,7 @@ export class DiceService {
       const id = randomUUID();
       try {
         await client.query(
-          'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history,frozen_continuity,frozen_atlas,npc_sheet_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)',
+          'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history,frozen_continuity,frozen_atlas,npc_sheet_version,frozen_gm_index,gm_index_contract_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)',
           [
             id,
             turn.campaignId,
@@ -62,6 +63,8 @@ export class DiceService {
             metadata.frozenContinuity ?? null,
             metadata.frozenAtlas ?? null,
             NPC_SHEET_VERSION,
+            metadata.frozenGmIndex ?? null,
+            metadata.frozenGmIndex?.contractVersion ?? null,
           ]
         );
       } catch (error) {

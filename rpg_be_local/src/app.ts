@@ -1,4 +1,9 @@
 import { AtlasImportService } from './services/atlasImport.js';
+import {
+  GmIndexStatusService,
+  GM_INDEX_OPTIONS,
+  gmIndexDisableSchema,
+} from './services/gmIndexStatus.js';
 import { atlasFeatureEnabled, requireAtlasFeature } from './domain/features.js';
 import { AtlasService } from './services/atlas.js';
 import { ATLAS_OPTIONS, atlasQuerySchema } from './domain/atlas.js';
@@ -157,6 +162,7 @@ export function createApp(options: AppOptions) {
   const sheetCompletions = store ? new NpcSheetCompletionService(store, providers) : null;
   const memoryRebuild = store ? new MemoryRebuildService(store, providers) : null;
   const historyRecall = store ? new HistoryRecallService(store) : null;
+  const gmIndexStatus = store ? new GmIndexStatusService(store) : null;
   const sources = store ? new SourceLibrary(store) : null;
   const rules = store ? new RuleStore(store) : null;
   const ruleLookup = new RuleLookup();
@@ -250,6 +256,7 @@ export function createApp(options: AppOptions) {
             limits: JOURNAL_LIMITS,
           },
           history: historyRecall?.options() ?? null,
+          gmIndex: GM_INDEX_OPTIONS,
           memoryRebuild: {
             statusOptions: MEMORY_REBUILD_STATUS_OPTIONS,
             actionOptions: MEMORY_REBUILD_ACTION_OPTIONS,
@@ -1118,7 +1125,10 @@ export function createApp(options: AppOptions) {
     })
   );
   app.post(
-    '/api/campaigns/:id/turns/:turnId/resume-editing',
+    [
+      '/api/campaigns/:id/turns/:turnId/resume-editing',
+      '/api/campaigns/:id/turns/:turnId/resume-finalization',
+    ],
     wrap(async (req, res) => {
       const input = z
         .object({ revision: z.number().int().nonnegative(), requestId: z.uuid() })
@@ -1198,13 +1208,27 @@ export function createApp(options: AppOptions) {
       res.json({ data: publicCampaign(await turns!.manualMemory(param(req, 'id'), input)) });
     })
   );
+  app.get(
+    '/api/campaigns/:id/gm-index',
+    wrap(async (req, res) => {
+      res.json({ data: await gmIndexStatus!.status(param(req, 'id')) });
+    })
+  );
+  app.post(
+    '/api/campaigns/:id/gm-index/disable',
+    wrap(async (req, res) => {
+      res.json({
+        data: await gmIndexStatus!.disable(param(req, 'id'), gmIndexDisableSchema.parse(req.body)),
+      });
+    })
+  );
   app.post(
     '/api/campaigns/:id/memory/rebuilds',
     wrap(async (req, res) => {
-      const { requestId, purpose } = memoryRebuildStartSchema.parse(req.body);
+      const { requestId, purpose, mode } = memoryRebuildStartSchema.parse(req.body);
       res
         .status(202)
-        .json({ data: await memoryRebuild!.start(param(req, 'id'), requestId, purpose) });
+        .json({ data: await memoryRebuild!.start(param(req, 'id'), requestId, purpose, mode) });
     })
   );
   app.get(

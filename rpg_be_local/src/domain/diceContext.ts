@@ -13,6 +13,7 @@ export function gameplayDigest(
 ): string {
   return diceDigest({
     knowledge: campaign.knowledge ?? [],
+    ...(campaign.gmIndex?.settings.enabled ? { gmIndex: campaign.gmIndex.document } : {}),
     ...(campaign.atlas ? { atlas: campaign.atlas } : {}),
     ...(campaign.continuity ? { continuity: campaign.continuity } : {}),
     ...(ruleContext

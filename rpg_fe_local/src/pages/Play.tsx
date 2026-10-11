@@ -407,15 +407,18 @@ export default function PlayPage() {
                     {t.editingPending && (
                       <div className="notice">
                         <p>
-                          The GM turn is saved. Finish narrative editing before continuing. Resuming
-                          does not repeat gameplay or dice.
+                          The GM turn is saved. Finish{' '}
+                          {t.finalization ? 'turn finalization' : 'narrative editing'} before
+                          continuing. Resuming does not repeat gameplay or dice.
                         </p>
                         {t.editingResume?.available ? (
                           <button
                             disabled={game.busy || game.uncertainEditingResume}
                             onClick={() => void game.resumeEditing(t)}
                           >
-                            Resume narrative editing
+                            {t.finalization
+                              ? 'Resume turn finalization'
+                              : 'Resume narrative editing'}
                           </button>
                         ) : (
                           <p className="muted">{t.editingResume?.reason}</p>
@@ -599,7 +602,7 @@ export default function PlayPage() {
                     {game.submitting
                       ? 'Submitting action…'
                       : game.turn?.editingPending
-                        ? 'Editing GM narrative…'
+                        ? `${settings.data?.gmIndex?.finalizationStages.find((stage) => stage.id === game.turn?.finalization?.stage)?.label ?? 'Editing GM narrative'}…`
                         : 'GM is preparing your turn…'}
                   </p>
                   {!game.submitting && (

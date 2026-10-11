@@ -13,6 +13,7 @@ export function useTurn(
   const [uncertainAction, setUncertainAction] = useState<string | null>(null);
   const [uncertainDiceRetry, setUncertainDiceRetry] = useState(false);
   const pendingEditingResume = useRef<{
+    endpoint: 'resume-finalization' | 'resume-editing';
     turnId: string;
     input: { revision: number; requestId: string };
   } | null>(null);
@@ -172,6 +173,7 @@ export function useTurn(
     if (!pendingEditingResume.current) {
       if (!attempt?.editingResume?.available) return false;
       pendingEditingResume.current = {
+        endpoint: attempt.finalization ? 'resume-finalization' : 'resume-editing',
         turnId: attempt.id,
         input: { revision: campaign.revision, requestId: crypto.randomUUID() },
       };
@@ -182,7 +184,7 @@ export function useTurn(
     setSubmitting(true);
     try {
       const result = await request<Turn>(
-        `/campaigns/${campaign.id}/turns/${pending.turnId}/resume-editing`,
+        `/campaigns/${campaign.id}/turns/${pending.turnId}/${pending.endpoint}`,
         json('POST', pending.input)
       );
       if (!alive.current || captured !== epoch.current) return false;

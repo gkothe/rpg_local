@@ -10,6 +10,19 @@ import { ruleCitationSchema } from './rules.js';
 import { knowledgeChangeSchema, knowledgeIntroductionSchema } from './knowledge.js';
 import { operationExplanationSchema } from './operationExplanations.js';
 import { combatEffectSchema, participantReferenceSchema } from './combat.js';
+import { GmIndexContractVersion, GmIndexEntryKind } from './gmIndex.js';
+import { gmIndexProseSchema } from './gmDirection.js';
+import { gmIndexWireRefSchema } from './gmIndexRefs.js';
+import { Problem } from '../errors.js';
+export const gmIndexHandoffSchema = z.array(
+  z
+    .object({
+      kind: z.enum([GmIndexEntryKind.GmPlan, GmIndexEntryKind.Task]),
+      text: gmIndexProseSchema,
+      refs: z.array(gmIndexWireRefSchema),
+    })
+    .strict()
+);
 // A prepared NPC is created under its reserved ID; ordinary creates stay server-identified.
 export const createOperationSchema = operationSchema.options[0]
   .extend({
@@ -21,6 +34,7 @@ export const createOperationSchema = operationSchema.options[0]
   .strict();
 export const gameplayResponseSchema = z
   .object({
+    gmIndexHandoff: gmIndexHandoffSchema.optional(),
     continuityChanges: z.array(continuityChangeSchema).optional(),
     atlasChanges: atlasMutationSchema.optional(),
     narrative: z.string().trim().min(1),
@@ -42,11 +56,25 @@ export const gameplayResponseSchema = z
 export const gameplayResponseJsonSchema = z.toJSONSchema(gameplayResponseSchema);
 // Archives retain the complete schema; disabled capabilities disappear only from live input/output.
 const liveResponseSchema = atlasFeatureEnabled()
-  ? gameplayResponseSchema
-  : gameplayResponseSchema.omit({ atlasChanges: true });
+  ? gameplayResponseSchema.omit({ gmIndexHandoff: true })
+  : gameplayResponseSchema.omit({ atlasChanges: true, gmIndexHandoff: true });
 // Citation offsets and page metadata are calculated by the application, not the GM.
 export const gameplayResponseInputSchema = z.preprocess(prepareCitationInput, liveResponseSchema);
 export const gameplayResponseWireJsonSchema = citationWireSchema(
   z.toJSONSchema(liveResponseSchema)
 );
 export type GameplayResponse = z.infer<typeof gameplayResponseSchema>;
+
+/** Choose from the saved execution contract, never the current campaign's activation setting. */
+export function gameplayResponseContract(version?: GmIndexContractVersion) {
+  if (version !== undefined && version !== GmIndexContractVersion.V1)
+    throw new Problem(422, 'gm_index_contract', 'Unsupported frozen GM index contract');
+  const schema =
+    version === GmIndexContractVersion.V1
+      ? liveResponseSchema.extend({ gmIndexHandoff: gmIndexHandoffSchema }).strict()
+      : liveResponseSchema;
+  return {
+    inputSchema: z.preprocess(prepareCitationInput, schema),
+    wireJsonSchema: citationWireSchema(z.toJSONSchema(schema)),
+  };
+}

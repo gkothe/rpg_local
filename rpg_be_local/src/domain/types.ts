@@ -70,6 +70,8 @@ export type Memory = {
   createdAt: string;
 };
 export type Campaign = {
+  /** Private derived working notes; public projections exclude this entire field. */
+  gmIndex?: import('./gmIndex.js').GmIndex;
   atlas?: import('./atlas.js').Atlas;
   continuity?: import('./continuity.js').Continuity;
   advancementPolicy?: { manual: true };
@@ -100,6 +102,7 @@ export type Campaign = {
   updatedAt: string;
 };
 export type Turn = {
+  finalization?: import('./turnFinalization.js').TurnFinalization;
   combatEffects?: CombatEffect[];
   participantReferences?: ParticipantReference[];
   sourceReads?: CampaignSourceRead[];
@@ -131,6 +134,7 @@ export type Turn = {
   completedAt: string | null;
 };
 export type ContextManifest = {
+  frozenGmIndex?: import('./gmIndex.js').FrozenGmIndex;
   frozenContinuity?: import('./continuity.js').FrozenContinuity;
   frozenAtlas?: import('./atlasRecall.js').FrozenAtlas;
   diceSessionId?: string;
@@ -169,6 +173,8 @@ export type Operation =
     }
   | { op: typeof OPERATION_KIND.State; expected: JsonObject; value: JsonObject };
 export type Snapshot = {
+  beforeGmIndexDocument?: import('./gmIndex.js').GmIndexDocument | null;
+  afterGmIndexDocument?: import('./gmIndex.js').GmIndexDocument | null;
   beforeAtlas?: import('./atlas.js').Atlas;
   afterAtlas?: import('./atlas.js').Atlas;
   beforeContinuity?: import('./continuity.js').NpcProfile[];

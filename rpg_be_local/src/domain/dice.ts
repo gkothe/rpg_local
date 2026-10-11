@@ -2,6 +2,7 @@ import { frozenAtlasSchema } from './atlasRecall.js';
 import { frozenCampaignSourcesSchema } from './campaignSourceRecall.js';
 import { frozenKnowledgeSchema } from './knowledgeRecall.js';
 import { frozenContinuitySchema } from './continuity.js';
+import { frozenGmIndexSchema, GmIndexContractVersion } from './gmIndex.js';
 import { frozenHistorySchema } from './historyRecall.js';
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
@@ -161,6 +162,8 @@ export const diceSessionSchema = z
     systemPrompt: z.string().optional(),
     frozenKnowledge: frozenKnowledgeSchema.optional(),
     frozenContinuity: frozenContinuitySchema.optional(),
+    frozenGmIndex: frozenGmIndexSchema.optional(),
+    gmIndexContractVersion: z.literal(GmIndexContractVersion.V1).optional(),
     frozenAtlas: frozenAtlasSchema.optional(),
     frozenSources: frozenCampaignSourcesSchema.optional(),
     frozenHistory: frozenHistorySchema.optional(),
@@ -182,7 +185,12 @@ export const diceSessionSchema = z
     imported: z.boolean(),
     npcSheetVersion: z.number().int().min(0).max(1).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (session) =>
+      (session.frozenGmIndex !== undefined) === (session.gmIndexContractVersion !== undefined),
+    'Frozen GM index and contract version must be captured together'
+  );
 export type DiceSession = z.infer<typeof diceSessionSchema>;
 
 // This internal seam permits deterministic boundary tests; no request selects the RNG.

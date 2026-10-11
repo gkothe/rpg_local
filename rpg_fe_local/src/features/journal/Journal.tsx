@@ -8,6 +8,7 @@ import JournalKnowledge from './JournalKnowledge';
 import MemoryRebuild from './MemoryRebuild';
 import { MemoryText } from './MemoryText';
 import HistoryMemory from './HistoryMemory';
+import GmIndex from './GmIndex';
 import Advancement from '../advancement/Advancement';
 import JournalHelp from './JournalHelp';
 import { JOURNAL_SECTIONS, type JournalSection } from './journalSections';
@@ -260,6 +261,12 @@ export default function Journal({
         tabIndex={0}
       >
         <HistoryMemory campaign={campaign} options={options} active={active} onChanged={onSaved} />
+        <GmIndex
+          campaign={campaign}
+          options={options}
+          active={active && tab === 'history'}
+          onChanged={onSaved}
+        />
       </div>
       {active && options?.advancement && (
         <div
