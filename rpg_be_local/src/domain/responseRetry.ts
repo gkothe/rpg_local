@@ -44,7 +44,7 @@ export async function withResponseRetries<T>(
       const reason = responseRetryFeedback(error);
       if (signal?.aborted || reason === null || attempt >= RESPONSE_RETRY_COUNT) throw error;
       await prepare();
-      feedback = `Your previous response was rejected: ${reason}. Correct it and return the complete required JSON. All saved dice are authoritative; replay their original requests without changing their specifications or faces. Cite only retrieved original text. For each citation, start and end must identify exactly the quoted substring (end = start + quote.length), not the whole retrieved section. Never invent receipt IDs or state.`;
+      feedback = `Your previous response was rejected: ${reason}. Correct it and return the complete required JSON. All saved dice are authoritative; replay their original requests without changing their specifications or faces. Cite only retrieved original text. For each citation, provide an exact unique quote and its source identity. Omit offsets and page metadata; the application computes them. Never invent receipt IDs or state.`;
     }
   }
 }

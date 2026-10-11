@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { tools } from './content';
 import { citation } from './examples';
+import { useResource } from '../../hooks/useResource';
+import type { Settings } from '../../services/types';
 const traceDetails = [
   'The model requests an allowed tool and supplies its arguments. The app will run the request; the model has not queried the database or generated trusted dice itself.',
   'The tool registry checks the arguments and confirms that the turn is still active. It rejects unknown tools and runs accepted calls one at a time.',
@@ -15,9 +17,13 @@ export default function ToolExplorer({
   selected: string;
   onSelect: (id: string) => void;
 }) {
+  const settings = useResource<Settings>('/settings');
+  const availableTools = tools.filter(
+    (candidate) => !candidate.id.startsWith('world_map_') || Boolean(settings.data?.atlas)
+  );
   const [book, setBook] = useState(() => tools.find((t) => t.id === selected)?.bookOnly ?? false);
   const [trace, setTrace] = useState(0);
-  const tool = tools.find((t) => t.id === selected) ?? tools[0];
+  const tool = availableTools.find((t) => t.id === selected) ?? availableTools[0];
   const bookEnabled = book || tool.bookOnly;
   const knowledge = tool.id.startsWith('campaign_knowledge');
   const npcs = tool.id.startsWith('campaign_npcs');
@@ -29,6 +35,12 @@ export default function ToolExplorer({
         the context and handles every service call, including database access. The model has no
         direct database connection or tool for running arbitrary SQL.
       </p>
+      {tool.id === 'npc_prepare' && (
+        <p>
+          The app reads applicable NPC sheet rules before assigning values. Every new registered NPC
+          gets a full sheet; existing NPCs can request completion and review additions before Apply.
+        </p>
+      )}
       <label>
         <input
           type="checkbox"
@@ -41,11 +53,12 @@ export default function ToolExplorer({
         Enable book tools
       </label>
       <p>
-        {tools.filter((candidate) => bookEnabled || !candidate.bookOnly).length} available tools.
+        {availableTools.filter((candidate) => bookEnabled || !candidate.bookOnly).length} available
+        tools.
         {!bookEnabled && ' Rulebook tools require book mode.'}
       </p>
       <div className="flow-tool-list">
-        {tools.map((t) => (
+        {availableTools.map((t) => (
           <button
             key={t.id}
             disabled={t.bookOnly && !bookEnabled}

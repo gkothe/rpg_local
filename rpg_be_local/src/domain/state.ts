@@ -1,4 +1,5 @@
 import { mutateAtlas, undoAtlas } from './atlasMutation.js';
+import { NPC_SHEET_VERSION } from './npcSheet.js';
 import { validateNpcPreparedCreates } from './npcPreparation.js';
 import type { NpcPreparationPayload } from './npcPreparation.js';
 import { applyContinuity, undoContinuity } from './continuity.js';
@@ -42,6 +43,7 @@ export function applyResponse(
   evidence?: KnowledgeValidation & {
     combat?: CombatValidation;
     npcPreparations?: NpcPreparationPayload[];
+    npcSheetVersion?: number;
   }
 ): { campaign: Campaign; snapshot: Snapshot; changes: string[] } {
   const response = gameplayResponseSchema.parse(raw);
@@ -64,6 +66,21 @@ export function applyResponse(
         );
       }
       if (op.op === OPERATION_KIND.Create) {
+        if (
+          evidence?.npcSheetVersion === NPC_SHEET_VERSION &&
+          op.character.type === CharacterType.Npc &&
+          !evidence.npcPreparations?.some(
+            (p) =>
+              p.receiptId === op.npcPreparationReceiptId &&
+              p.characterId === op.characterId &&
+              p.sheetMetadata
+          )
+        )
+          throw new Problem(
+            422,
+            'npc_sheet_receipt_required',
+            'New NPCs require a complete npc_prepare sheet receipt before creation'
+          );
         const npcPrepared = op.npcPreparationReceiptId
           ? evidence?.npcPreparations?.find(
               (p) => p.receiptId === op.npcPreparationReceiptId && p.characterId === op.characterId

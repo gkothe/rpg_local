@@ -12,6 +12,8 @@ test('malformed JSON and invalid response schema retry with feedback and prepare
       attempts.push(attempt);
       if (attempt === 0) return JSON.parse('malformed');
       assert.match(feedback, /previous response was rejected/);
+      assert.match(feedback, /Omit offsets and page metadata; the application computes them/);
+      assert.doesNotMatch(feedback, /start \+ quote\.length/);
       if (attempt === 1) z.object({ narrative: z.string() }).parse({ narrative: 42 });
       assert.match(feedback, /narrative/);
       return 'complete';

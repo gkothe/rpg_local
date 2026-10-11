@@ -6,6 +6,12 @@ import { MAX_LONG_TEXT_CHARS } from './limits.js';
 import { npcDraftSchema } from './combat.js';
 import { knowledgeIntroductionSchema } from './knowledge.js';
 import { profileCoreSchema, npcProfileSchema } from './continuity.js';
+import {
+  npcSheetMetadataSchema,
+  npcSheetResultSchema,
+  validateNpcSheet,
+  validateNpcSheetResult,
+} from './npcSheet.js';
 
 export const NPC_PREPARE_TOOL_NAME = 'npc_prepare';
 export const NPC_PREPARATION_LIMITS = {
@@ -52,6 +58,7 @@ export const npcCreatorOutputSchema = z
       .object({ role: text, impression: text.optional(), voice: text.optional() })
       .strict(),
     profile: profileCoreSchema,
+    sheet: npcSheetResultSchema.optional(),
   })
   .strict();
 export const npcPreparationPayloadSchema = z
@@ -61,9 +68,32 @@ export const npcPreparationPayloadSchema = z
     publicCharacter: npcDraftSchema,
     profile: npcProfileSchema,
     introduction: knowledgeIntroductionSchema,
+    sheetMetadata: npcSheetMetadataSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((payload, ctx) => {
+    if (!payload.sheetMetadata) return;
+    try {
+      const { requirements, result } = payload.sheetMetadata;
+      if (
+        result.conflicts.length ||
+        !isDeepStrictEqual(result.attributes, payload.publicCharacter.attributes) ||
+        !isDeepStrictEqual(result.inventory, payload.publicCharacter.inventory)
+      )
+        throw new Error('Sheet metadata differs from the public character');
+      validateNpcSheetResult(requirements, result);
+    } catch {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['sheetMetadata'],
+        message: 'Invalid complete NPC sheet metadata',
+      });
+    }
+  });
 export type NpcPreparationPayload = z.infer<typeof npcPreparationPayloadSchema>;
+export const npcFullCreatorOutputSchema = npcCreatorOutputSchema.extend({
+  sheet: npcSheetResultSchema,
+});
 export function preparationOperations(payload: NpcPreparationPayload): Record<string, unknown> {
   const { characterId, ...core } = payload.profile;
   return {
@@ -132,6 +162,25 @@ export function validateNpcPreparedCreates(
       !isDeepStrictEqual(op.introduction, payload.introduction)
     )
       throw new Problem(422, 'npc_receipt', 'Prepared NPC must use its exact creation receipt');
+    if (payload.sheetMetadata) {
+      validateNpcSheet(payload.sheetMetadata.requirements, payload.publicCharacter);
+      if (
+        !isDeepStrictEqual(
+          payload.sheetMetadata.result.attributes,
+          payload.publicCharacter.attributes
+        ) ||
+        !isDeepStrictEqual(
+          payload.sheetMetadata.result.inventory,
+          payload.publicCharacter.inventory
+        ) ||
+        payload.sheetMetadata.result.conflicts.length
+      )
+        throw new Problem(
+          422,
+          'npc_sheet_receipt',
+          'NPC sheet differs from its validated preparation'
+        );
+    }
     const expected = preparationOperations(payload).profileChange;
     if (!(response.continuityChanges ?? []).some((c) => isDeepStrictEqual(c, expected)))
       throw new Problem(

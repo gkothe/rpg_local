@@ -1,4 +1,5 @@
 import { atlasMutationSchema } from './atlas.js';
+import { atlasFeatureEnabled } from './features.js';
 import { z } from 'zod';
 import { continuityChangeSchema } from './continuity.js';
 import { prepareCitationInput, citationWireSchema } from './citationInput.js';
@@ -39,10 +40,13 @@ export const gameplayResponseSchema = z
   })
   .strict();
 export const gameplayResponseJsonSchema = z.toJSONSchema(gameplayResponseSchema);
+// Archives retain the complete schema; disabled capabilities disappear only from live input/output.
+const liveResponseSchema = atlasFeatureEnabled()
+  ? gameplayResponseSchema
+  : gameplayResponseSchema.omit({ atlasChanges: true });
 // Citation offsets and page metadata are calculated by the application, not the GM.
-export const gameplayResponseInputSchema = z.preprocess(
-  prepareCitationInput,
-  gameplayResponseSchema
+export const gameplayResponseInputSchema = z.preprocess(prepareCitationInput, liveResponseSchema);
+export const gameplayResponseWireJsonSchema = citationWireSchema(
+  z.toJSONSchema(liveResponseSchema)
 );
-export const gameplayResponseWireJsonSchema = citationWireSchema(gameplayResponseJsonSchema);
 export type GameplayResponse = z.infer<typeof gameplayResponseSchema>;

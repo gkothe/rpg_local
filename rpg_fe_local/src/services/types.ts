@@ -3,6 +3,18 @@ export interface ProviderSettings {
   model: string;
   effort: string | null;
 }
+export interface NpcSheetCompletionView {
+  id: string;
+  status: string;
+  active: boolean;
+  canStart: boolean;
+  actions: { id: string; label: string; decision: boolean }[];
+  error: string | null;
+  basis: string | null;
+  systemName: string | null;
+  conflicts: string[];
+  additions: { path: string[]; value: unknown }[];
+}
 export interface RuleContext {
   systemId: string;
   systemKey: string;
@@ -452,6 +464,10 @@ export interface HistoryDetail {
   correctionGuidance: { instruction: string; items: unknown[] };
 }
 export interface Settings {
+  npcSheetCompletionOptions?: {
+    statuses: { id: string; label: string }[];
+    actions: { id: string; label: string }[];
+  };
   atlas?: import('../features/atlas/types').AtlasOptions;
   history?: {
     kindOptions: { id: string; label: string }[];

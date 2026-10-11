@@ -1,8 +1,14 @@
 import { AtlasImportService } from './services/atlasImport.js';
+import { atlasFeatureEnabled, requireAtlasFeature } from './domain/features.js';
 import { AtlasService } from './services/atlas.js';
 import { ATLAS_OPTIONS, atlasQuerySchema } from './domain/atlas.js';
 import { NPC_CONTINUITY_LIMITS } from './domain/continuity.js';
 import { NPC_PREPARATION_LIMITS } from './domain/npcPreparation.js';
+import { NpcSheetCompletionService } from './services/npcSheetCompletion.js';
+import {
+  NPC_SHEET_COMPLETION_OPTIONS,
+  NpcSheetCompletionAction,
+} from './domain/npcSheetCompletion.js';
 import { publicCampaign, publicTurn } from './domain/playerProjection.js';
 import { operationalProblem } from './processingErrors.js';
 import {
@@ -148,6 +154,7 @@ export function createApp(options: AppOptions) {
   const atlasImports = store ? new AtlasImportService(store, providers) : null;
   const journal = store ? new JournalService(store, providers) : null;
   const advancement = store ? new AdvancementService(store, providers) : null;
+  const sheetCompletions = store ? new NpcSheetCompletionService(store, providers) : null;
   const memoryRebuild = store ? new MemoryRebuildService(store, providers) : null;
   const historyRecall = store ? new HistoryRecallService(store) : null;
   const sources = store ? new SourceLibrary(store) : null;
@@ -221,12 +228,13 @@ export function createApp(options: AppOptions) {
     wrap(async (_req, res) => {
       res.json({
         data: {
-          atlas: ATLAS_OPTIONS,
+          ...(atlasFeatureEnabled() ? { atlas: ATLAS_OPTIONS } : {}),
           turnStatuses: TURN_STATUS_OPTIONS.map((x) => x.id),
           sourceKinds: SOURCE_KIND_OPTIONS.map((x) => x.id),
           characterTypes: CHARACTER_TYPE_OPTIONS.map((x) => x.id),
           turnStatusOptions: TURN_STATUS_OPTIONS,
           characterTypeOptions: CHARACTER_TYPE_OPTIONS,
+          npcSheetCompletionOptions: NPC_SHEET_COMPLETION_OPTIONS,
           sourceKindOptions: SOURCE_KIND_OPTIONS,
           sourcePurposeOptions: SOURCE_PURPOSE_OPTIONS,
           knowledgeKindOptions: KNOWLEDGE_KIND_OPTIONS,
@@ -280,6 +288,14 @@ export function createApp(options: AppOptions) {
       });
     })
   );
+  app.use('/api/campaigns/:id/atlas', (_req, _res, next) => {
+    try {
+      requireAtlasFeature();
+      next();
+    } catch (error) {
+      next(error);
+    }
+  });
   app.post(
     '/api/campaigns/:id/atlas/imports',
     upload.single('file'),
@@ -874,6 +890,74 @@ export function createApp(options: AppOptions) {
       res.json({
         data: items.slice(0, limit),
         pagination: { nextCursor: items.length > limit ? String(offset + limit) : null },
+      });
+    })
+  );
+  const sheetBase = '/api/campaigns/:id/characters/:characterId/sheet-completions';
+  app.post(
+    sheetBase,
+    wrap(async (req, res) => {
+      res.status(202).json({
+        data: await sheetCompletions!.start(
+          param(req, 'id'),
+          idSchema.parse(param(req, 'characterId')),
+          req.body
+        ),
+      });
+    })
+  );
+  app.get(
+    sheetBase,
+    wrap(async (req, res) => {
+      res.json({
+        data: await sheetCompletions!.get(
+          param(req, 'id'),
+          idSchema.parse(param(req, 'characterId'))
+        ),
+      });
+    })
+  );
+  app.get(
+    `${sheetBase}/:jobId`,
+    wrap(async (req, res) => {
+      res.json({
+        data: await sheetCompletions!.get(
+          param(req, 'id'),
+          idSchema.parse(param(req, 'characterId')),
+          idSchema.parse(param(req, 'jobId'))
+        ),
+      });
+    })
+  );
+  app.post(
+    `${sheetBase}/:jobId/actions`,
+    wrap(async (req, res) => {
+      const input = z
+        .object({
+          action: z.enum([NpcSheetCompletionAction.Retry, NpcSheetCompletionAction.Cancel]),
+        })
+        .strict()
+        .parse(req.body);
+      res.json({
+        data: await sheetCompletions!.action(
+          param(req, 'id'),
+          idSchema.parse(param(req, 'characterId')),
+          idSchema.parse(param(req, 'jobId')),
+          input.action
+        ),
+      });
+    })
+  );
+  app.post(
+    `${sheetBase}/:jobId/decisions`,
+    wrap(async (req, res) => {
+      res.json({
+        data: await sheetCompletions!.decide(
+          param(req, 'id'),
+          idSchema.parse(param(req, 'characterId')),
+          idSchema.parse(param(req, 'jobId')),
+          req.body
+        ),
       });
     })
   );

@@ -16,6 +16,7 @@ import { Problem } from '../src/errors.js';
 import type { Generator } from '../src/providers/service.js';
 import type { GameplayToolDispatch } from '../src/providers/gameplayTools.js';
 import type { Campaign, Turn } from '../src/domain/types.js';
+import { completeNpcGenerate } from './completeNpcFixture.js';
 
 const enabled = process.env.NODE_ENV === 'test' && !!process.env.RPG_TEST_DATABASE_URL;
 const schema = `combat_fixture_${randomUUID().replaceAll('-', '')}`;
@@ -98,12 +99,31 @@ async function heroCampaign(): Promise<Campaign> {
 }
 /** Scripted GM: prepares two soldiers, rolls an attack and wounds only the first. */
 async function ambush(tools: GameplayToolDispatch, heroId: string, fail?: 'after_dice') {
+  const prepared = [];
+  for (const key of ['soldier-a', 'soldier-b']) {
+    const draft = soldier(key);
+    const receipt = (await tools(
+      'npc_prepare',
+      {
+        localKey: key,
+        intent: 'Prepare a city guard',
+        introduction,
+        establishedCharacter: draft.character,
+        distinctFromCharacterIds: prepared.map((p) => p.characterId),
+      },
+      `npc-${key}`
+    )) as { characterId: string; receiptId: string; profileChange: unknown };
+    prepared.push(receipt);
+  }
   const batch = {
     localKey: 'ambush',
     participants: [
       { characterId: heroId, label: 'Hero', trackedFields: damage },
-      soldier('soldier-a'),
-      soldier('soldier-b'),
+      ...prepared.map((p) => ({
+        npcPreparationReceiptId: p.receiptId,
+        label: 'Soldier',
+        trackedFields: damage,
+      })),
     ],
   };
   const payload = (await tools('combat_prepare', batch, 'prepare')) as unknown as Payload;
@@ -162,6 +182,7 @@ async function ambush(tools: GameplayToolDispatch, heroId: string, fail?: 'after
       rollInterpretations: [{ rollId: roll.rollId, explanation: 'Hit', afterParagraph: 2 }],
       ruleCitations: [],
       knowledgeChanges: [],
+      continuityChanges: prepared.map((p) => p.profileChange),
       operationExplanations: [explain(0), explain(1), explain(2, [roll.rollId]), explain(3)],
       combatEffects: [
         {
@@ -181,14 +202,14 @@ async function ambush(tools: GameplayToolDispatch, heroId: string, fail?: 'after
   };
 }
 function editor(counts: { editor: number }, failFirst = false): Generator['generate'] {
-  return async (_settings, prompt) => {
+  return completeNpcGenerate(async (_settings, prompt) => {
     counts.editor++;
     if (failFirst && counts.editor === 1)
       throw new Problem(429, 'provider_quota', 'Synthetic editor quota unavailable');
     assert.match(prompt, /character links/);
     // Return the supplied narrative unchanged; this fixture edits nothing.
     return JSON.parse(/^\{"narrative":.*\}$/m.exec(prompt)![0]);
-  };
+  });
 }
 
 test(
@@ -265,7 +286,7 @@ test(
     const campaigns = new CampaignService(store, generator as never);
     await assert.rejects(
       () => campaigns.deleteCharacter(campaign.id, a!.id, saved.revision),
-      /end the encounter first/
+      /Remove this NPC profile/
     );
     const second = await service.submit(campaign.id, {
       revision: saved.revision,
@@ -408,14 +429,35 @@ test(
           await assert.rejects(() => tools(name, input, randomUUID()), pattern);
           checks.push(label);
         };
+        const npc = (await tools(
+          'npc_prepare',
+          {
+            localKey: 'soldier-a',
+            intent: 'City guard',
+            introduction,
+            establishedCharacter: soldier('soldier-a').character,
+          },
+          'npc'
+        )) as { receiptId: string };
+        const participant = {
+          npcPreparationReceiptId: npc.receiptId,
+          label: 'Soldier',
+          trackedFields: damage,
+        };
+        await reject(
+          'combat_prepare',
+          { localKey: 'legacy', participants: [soldier('soldier-a')] },
+          /npc_prepare first/,
+          'fresh sheet'
+        );
         const payload = (await tools(
           'combat_prepare',
-          { localKey: 'a', participants: [soldier('soldier-a')] },
+          { localKey: 'a', participants: [participant] },
           'first'
         )) as unknown as Payload;
         await reject(
           'combat_prepare',
-          { localKey: 'a', participants: [soldier('soldier-b')] },
+          { localKey: 'a', participants: [{ ...participant, label: 'Changed' }] },
           /different arguments/,
           'key'
         );
@@ -423,14 +465,14 @@ test(
           'combat_prepare',
           {
             localKey: 'b',
-            participants: [{ ...soldier('soldier-a'), label: 'Renamed' }],
+            participants: [{ ...participant, label: 'Renamed' }],
           },
-          /different specification/,
+          /different label/,
           'localKey'
         );
         await reject(
           'combat_prepare',
-          { localKey: 'c', encounterId: randomUUID(), participants: [soldier('soldier-c')] },
+          { localKey: 'c', encounterId: randomUUID(), participants: [participant] },
           /encounterId/,
           'foreign encounter'
         );
@@ -504,6 +546,7 @@ test(
     });
     await terminal(campaign.id, submitted.id);
     assert.deepEqual(checks, [
+      'fresh sheet',
       'key',
       'localKey',
       'foreign encounter',

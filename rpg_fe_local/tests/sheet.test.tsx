@@ -98,12 +98,12 @@ describe('draft protection', () => {
     expect(screen.queryByDisplayValue('Arin')).not.toBeInTheDocument();
   });
   it('keeps local character edits and the original revision when fresh turn state arrives', async () => {
-    const fetcher = vi.fn(async (_url: string, init?: RequestInit) =>
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) =>
       init?.method === 'PATCH'
         ? new Response(JSON.stringify({ detail: 'Character save temporarily unavailable.' }), {
             status: 503,
           })
-        : new Response(JSON.stringify({ data: [] }))
+        : new Response(JSON.stringify({ data: url.endsWith('/sheet-completions') ? null : [] }))
     );
     vi.stubGlobal('fetch', fetcher);
     const campaign = fixtureCampaign();

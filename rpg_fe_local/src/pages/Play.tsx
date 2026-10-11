@@ -54,11 +54,13 @@ export default function PlayPage() {
     ruleSystem = useResource<RuleSystemMetadata>(`/campaigns/${id}/rule-system`),
     settings = useResource<Settings>('/settings');
   const location = useLocation();
+  const atlasAvailable = Boolean(settings.data?.atlas);
+  const campaignTabs = CAMPAIGN_TABS.filter((name) => name !== 'atlas' || atlasAvailable);
   const requestedTab = search.get('tab');
   const [tab, setTab] = useState(
       search.get('setup') === '1'
         ? 'sources'
-        : requestedTab && CAMPAIGN_TABS.includes(requestedTab)
+        : requestedTab && campaignTabs.includes(requestedTab)
           ? requestedTab
           : 'play'
     ),
@@ -73,8 +75,9 @@ export default function PlayPage() {
   const navigatedTab = search.get('tab');
   const setupMode = search.get('setup') === '1';
   useEffect(() => {
-    if (!setupMode && navigatedTab && CAMPAIGN_TABS.includes(navigatedTab)) setTab(navigatedTab);
-  }, [location.key, navigatedTab, setupMode]);
+    if (setupMode || !navigatedTab || !CAMPAIGN_TABS.includes(navigatedTab)) return;
+    setTab(navigatedTab === 'atlas' && !atlasAvailable ? 'play' : navigatedTab);
+  }, [location.key, navigatedTab, setupMode, atlasAvailable]);
   const game = useTurn(resource.data, resource.reload, settings.data),
     campaign = resource.data;
   const transcript = useRef<HTMLElement | null>(null);
@@ -157,7 +160,7 @@ export default function PlayPage() {
       <ErrorNotice message={error || resource.error || providers.error} />
       {feedback && <p role="status">{feedback}</p>}
       <nav className="tabs" aria-label="Campaign sections">
-        {CAMPAIGN_TABS.map((t) => (
+        {campaignTabs.map((t) => (
           <button
             aria-current={tab === t ? 'page' : undefined}
             className={tab === t ? 'selected' : ''}
@@ -660,7 +663,7 @@ export default function PlayPage() {
           layout={ruleSystem.data?.sheetLayout}
         />
       </div>
-      {tab === 'atlas' && (
+      {tab === 'atlas' && atlasAvailable && (
         <AtlasPanel
           campaignId={campaign.id}
           revision={campaign.revision}

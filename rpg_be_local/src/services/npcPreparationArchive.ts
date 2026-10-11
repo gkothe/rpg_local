@@ -16,6 +16,8 @@ import {
 } from '../domain/npcPreparation.js';
 import { npcArgumentDigest } from './npcPreparation.js';
 import { remapProfile } from './continuityArchive.js';
+import { npcSheetRequirementsSchema } from '../domain/npcSheet.js';
+import { npcSheetLookupSchema } from './npcSheetRules.js';
 
 export const npcIntroductionEvidenceSchema = z
   .object({
@@ -59,6 +61,17 @@ export const npcPreparationArchiveSchema = z
     result: npcPreparationPayloadSchema.nullable(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
+    sheetCheckpoint: z
+      .object({
+        history: z.array(
+          z
+            .object({ request: npcSheetLookupSchema, result: z.record(z.string(), z.unknown()) })
+            .strict()
+        ),
+        requirements: npcSheetRequirementsSchema.optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .refine(
@@ -82,12 +95,26 @@ export function preparationArchiveRow(row: Record<string, unknown>): NpcPreparat
     result: row.result,
     createdAt: new Date(row.created_at as string).toISOString(),
     updatedAt: new Date(row.updated_at as string).toISOString(),
+    ...(row.sheet_checkpoint ? { sheetCheckpoint: row.sheet_checkpoint } : {}),
   });
 }
 export function remapNpcPreparation(
   row: NpcPreparationArchive,
   mapped: (id: string) => string
 ): void {
+  for (const requirements of [
+    row.sheetCheckpoint?.requirements,
+    row.result?.sheetMetadata?.requirements,
+  ]) {
+    for (const citation of requirements?.citations ?? [])
+      citation.receiptId = mapped(citation.receiptId);
+  }
+  for (const item of row.sheetCheckpoint?.history ?? []) {
+    for (const key of ['receipt', 'receiptId'])
+      if (typeof item.result[key] === 'string')
+        item.result[key] = mapped(item.result[key] as string);
+    if (item.request.tool === 'rules_search') remapRuleSearchEvidence(item.result, mapped);
+  }
   // Remap only declared contract references; keys, fiction and mechanical values are opaque.
   const evidence = (items: unknown): void => {
     if (!Array.isArray(items)) return;

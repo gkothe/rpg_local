@@ -7,6 +7,8 @@ import { dbEnabled, openIsolatedStore } from './journalFixture.js';
 import { newCampaign } from '../src/domain/campaign.js';
 import { createApp } from '../src/app.js';
 import type { ProviderService } from '../src/providers/service.js';
+import { atlasFeatureEnabled } from '../src/domain/features.js';
+import { AtlasImportService } from '../src/services/atlasImport.js';
 
 let db: Awaited<ReturnType<typeof openIsolatedStore>>;
 before(async () => {
@@ -122,31 +124,40 @@ async function fixture() {
     },
   } as unknown as ProviderService;
   const app = createApp({ store: db.store, providers }).app;
-  const response = await http(app)
-    .post(`/api/campaigns/${c.id}/atlas/imports`)
-    .field('requestId', randomUUID())
-    .attach('file', png, { filename: 'warehouse.png', contentType: 'image/png' })
-    .expect(202);
+  // Seed retained map data through the domain service when live Atlas routes are disabled.
+  const imports = new AtlasImportService(db.store, providers);
+  const response = atlasFeatureEnabled()
+    ? await http(app)
+        .post(`/api/campaigns/${c.id}/atlas/imports`)
+        .field('requestId', randomUUID())
+        .attach('file', png, { filename: 'warehouse.png', contentType: 'image/png' })
+        .expect(202)
+    : { body: { data: await imports.start(c.id, { requestId: randomUUID(), legend: '' }, png) } };
   const jobId = response.body.data.id;
   for (let i = 0; i < 100; i++) {
-    const polled = await http(app).get(`/api/campaigns/${c.id}/atlas/imports/${jobId}`).expect(200);
+    const polled = atlasFeatureEnabled()
+      ? await http(app).get(`/api/campaigns/${c.id}/atlas/imports/${jobId}`).expect(200)
+      : { body: { data: await imports.get(c.id, jobId) } };
     if (polled.body.data.status !== 'running') {
       assert.equal(polled.body.data.status, 'ready');
       break;
     }
     await delay(10);
   }
-  await http(app)
-    .post(`/api/campaigns/${c.id}/atlas/imports/${jobId}/accept`)
-    .send({
-      requestId: randomUUID(),
-      selectedKeys: ['secret', 'site', 'office'],
-      selectedRoutes: [0, 1],
-      selectedFrames: [0],
-      matches: {},
-      playerSafe: false,
-    })
-    .expect(200);
+  const decision = {
+    requestId: randomUUID(),
+    selectedKeys: ['secret', 'site', 'office'],
+    selectedRoutes: [0, 1],
+    selectedFrames: [0],
+    matches: {},
+    playerSafe: false,
+  };
+  if (!atlasFeatureEnabled()) await imports.accept(c.id, jobId, decision);
+  else
+    await http(app)
+      .post(`/api/campaigns/${c.id}/atlas/imports/${jobId}/accept`)
+      .send(decision)
+      .expect(200);
   const canonical = await db.store.campaign(c.id);
   const site = canonical.knowledge!.find((p) => p.title === 'Warehouse')!;
   const secret = canonical.knowledge!.find((p) => p.title === 'SECRET_CELLAR_LABEL')!;
@@ -204,15 +215,17 @@ test(
     const atlas = await http(f.app)
       .get(`/api/campaigns/${f.c.id}/atlas`)
       .query({ scope: f.site.id })
-      .expect(200);
+      .expect(atlasFeatureEnabled() ? 200 : 409);
     assertPrivate(JSON.stringify(atlas.body), f);
-    assert.equal(atlas.body.data.routes.length, 1);
-    assert.equal(atlas.body.data.frames.length, 1);
-    assert.equal(atlas.body.data.breadcrumb.length, 1);
+    if (atlasFeatureEnabled()) {
+      assert.equal(atlas.body.data.routes.length, 1);
+      assert.equal(atlas.body.data.frames.length, 1);
+      assert.equal(atlas.body.data.breadcrumb.length, 1);
+    } else assert.equal(atlas.body.code, 'feature_disabled');
     await http(f.app)
       .get(`/api/campaigns/${f.c.id}/atlas`)
       .query({ scope: f.secret.id })
-      .expect(404);
+      .expect(atlasFeatureEnabled() ? 404 : 409);
     await http(f.app).get(`/api/campaigns/${f.c.id}/journal/entries/${f.secret.id}`).expect(404);
     assert.equal(f.calls(), 1);
   }
@@ -225,11 +238,13 @@ test(
     const f = await fixture();
     const denied = await http(f.app)
       .get(`/api/campaigns/${f.c.id}/atlas/images/${f.assetId}`)
-      .expect(404);
+      .expect(atlasFeatureEnabled() ? 404 : 409);
     assertPrivate(JSON.stringify(denied.body), f);
     const other = newCampaign({ name: 'Foreign campaign' });
     await db.store.insert(other);
-    await http(f.app).get(`/api/campaigns/${other.id}/atlas/images/${f.assetId}`).expect(404);
+    await http(f.app)
+      .get(`/api/campaigns/${other.id}/atlas/images/${f.assetId}`)
+      .expect(atlasFeatureEnabled() ? 404 : 409);
     const stored = await db.store.pool.query('SELECT bytes FROM atlas_assets WHERE id=$1', [
       f.assetId,
     ]);

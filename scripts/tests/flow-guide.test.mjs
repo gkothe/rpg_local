@@ -354,6 +354,11 @@ test('compact NPC creator teaching tool matches backend receipt contracts', asyn
   npcPrepareSchema.parse(tool.args);
   const { createOperation, profileChange, guidance, ...payload } = tool.result;
   const parsed = npcPreparationPayloadSchema.parse(payload);
+  assert.deepEqual(parsed.publicCharacter.attributes, {
+    hp: 8,
+    skills: { Athletics: 0, Boating: 2 },
+  });
+  assert.equal(parsed.sheetMetadata.requirements.fields.length, 3);
   assert.deepEqual(preparationOperations(parsed), tool.result);
   assert.ok(createOperation.npcPreparationReceiptId);
   assert.equal(profileChange.expected, null);

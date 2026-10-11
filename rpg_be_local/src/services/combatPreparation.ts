@@ -1,4 +1,5 @@
 import { NpcPreparationService } from './npcPreparation.js';
+import { NPC_SHEET_VERSION } from '../domain/npcSheet.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { PoolClient } from 'pg';
@@ -29,6 +30,7 @@ type Sheet = {
   description: JsonObject;
 };
 type SessionRow = {
+  npc_sheet_version: number;
   id: string;
   campaign_id: string;
   imported: boolean;
@@ -106,6 +108,15 @@ export class CombatPreparationService {
       await new DiceService(this.store).assertOwned(turn, client);
       const session = await this.session(turn, client);
       const input = combatPrepareSchema.parse(raw);
+      if (
+        session.npc_sheet_version === NPC_SHEET_VERSION &&
+        input.participants.some((p) => !('characterId' in p) && !('npcPreparationReceiptId' in p))
+      )
+        throw new Problem(
+          422,
+          'npc_sheet_receipt_required',
+          'Prepare new combat NPCs with npc_prepare first; combat_prepare accepts the resulting receipt'
+        );
       const argumentDigest = digest(input);
       const prior = await client.query(
         'SELECT argument_digest,payload FROM combat_preparations WHERE session_id=$1 AND preparation_key=$2',

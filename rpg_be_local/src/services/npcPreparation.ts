@@ -15,7 +15,18 @@ import type { Generator } from '../providers/service.js';
 import type { PromptTraceContext } from '../providers/promptLog.js';
 import { canonicalRuleJson } from '../domain/rules.js';
 import { KnowledgeVisibility, validateKnowledgeEvidence } from '../domain/knowledge.js';
-import { npcCreatorPrompt, npcCreatorJsonSchema } from '../domain/npcCreationGeneration.js';
+import {
+  npcCreatorPrompt,
+  npcCreatorJsonSchema,
+  npcFullCreatorJsonSchema,
+} from '../domain/npcCreationGeneration.js';
+import {
+  deriveNpcSheetRequirements,
+  executeNpcSheetLookup,
+  type NpcSheetCheckpoint,
+} from './npcSheetRules.js';
+import { RuleStore, ruleContext } from './ruleStore.js';
+import { validateSheetWithRepair } from './npcSheetGeneration.js';
 import {
   npcPrepareSchema,
   npcCreatorOutputSchema,
@@ -115,11 +126,15 @@ export class NpcPreparationService {
           throw new Problem(422, 'npc_reference', 'Knowledge is not in the frozen context');
       const mandatory = JSON.parse(session.frozen_prompt).mandatory;
       const roster = [...(mandatory.characters ?? []), ...characters];
+      const staged = await this.ready(session.id, client);
       for (const id of [
         ...(input.relevantCharacterIds ?? []),
         ...(input.distinctFromCharacterIds ?? []),
       ])
-        if (!roster.some((c: { id: string }) => c.id === id))
+        if (
+          !roster.some((c: { id: string }) => c.id === id) &&
+          !staged.some((p) => p.characterId === id)
+        )
           throw new Problem(422, 'npc_reference', 'Character is not in the frozen context');
       const sourceReads = await new CampaignSourceLookup(this.store).records(
         turn.campaignId,
@@ -215,29 +230,163 @@ export class NpcPreparationService {
           'UPDATE npc_preparations SET status=$2,owner_id=$3,owner_turn_id=$4,safe_error=NULL,updated_at=now() WHERE id=$1',
           [id, NpcPreparationStatus.Running, claim, turn.id]
         );
-      return { id, characterId, frozenInput, settings: old?.provider_settings ?? turn.settings };
+      return {
+        id,
+        characterId,
+        frozenInput,
+        settings: old?.provider_settings ?? turn.settings,
+        sheetVersion: session.npc_sheet_version,
+        checkpoint: old?.sheet_checkpoint as NpcSheetCheckpoint | undefined,
+      };
     });
     if ('replay' in reserved && reserved.replay) return preparationOperations(reserved.replay);
     if (!('id' in reserved))
       throw new Problem(409, 'npc_preparation_claim', 'Preparation could not be claimed');
     try {
       if (signal?.aborted) throw new Problem(409, 'cancelled', 'NPC creation cancelled');
+      const rules = new RuleStore(this.store);
+      const system = await rules.resolve(await this.store.campaign(turn.campaignId));
+      const scope = `npc-sheet:${reserved.id}:`;
+      let sheetCheckpoint = reserved.checkpoint;
+      const alive = async () => {
+        await this.store.transaction(async (client) => {
+          await new DiceService(this.store).assertOwned(turn, client);
+          if (turn.ruleContext) await rules.guard(turn.ruleContext, client);
+          const r = await client.query('SELECT owner_id,status FROM npc_preparations WHERE id=$1', [
+            reserved.id,
+          ]);
+          if (
+            signal?.aborted ||
+            r.rows[0]?.owner_id !== claim ||
+            r.rows[0]?.status !== NpcPreparationStatus.Running
+          )
+            throw new Problem(409, 'npc_preparation_claim', 'NPC preparation ownership was lost');
+        });
+      };
+      const requirements = reserved.sheetVersion
+        ? await deriveNpcSheetRequirements({
+            generator: this.generator,
+            settings: reserved.settings,
+            system,
+            context: {
+              ...reserved.frozenInput,
+              savedDice: await new DiceService(this.store).records(turn.diceSessionId!),
+            },
+            scope: { campaignId: turn.campaignId, ownerId: reserved.id, systemId: system.systemId },
+            checkpoint: reserved.checkpoint,
+            alive,
+            signal,
+            trace,
+            reads: async () => {
+              const r = await this.store.pool.query(
+                'SELECT * FROM turn_rule_reads WHERE campaign_id=$1 AND transport_request_id LIKE $2',
+                [turn.campaignId, `${scope}%`]
+              );
+              return r.rows.map((row) => ({
+                id: row.id,
+                campaignId: row.campaign_id,
+                ownerId: reserved.id,
+                context: row.captured_context,
+                tool: row.tool_name,
+                payload: row.payload,
+              }));
+            },
+            save: async (checkpoint) => {
+              await alive();
+              const r = await this.store.pool.query(
+                'UPDATE npc_preparations SET sheet_checkpoint=$2 WHERE id=$1 AND owner_id=$3 AND status=$4',
+                [reserved.id, checkpoint, claim, NpcPreparationStatus.Running]
+              );
+              if (!r.rowCount)
+                throw new Problem(
+                  409,
+                  'npc_preparation_claim',
+                  'NPC preparation ownership was lost'
+                );
+              sheetCheckpoint = checkpoint;
+            },
+            read: async (request, index) =>
+              this.store.transaction(async (client) => {
+                await new DiceService(this.store).assertOwned(turn, client);
+                const current = turn.ruleContext
+                  ? await rules.guard(turn.ruleContext, client)
+                  : await rules.resolve(await this.store.campaign(turn.campaignId, client), client);
+                const transportId = `${scope}${index}`,
+                  digest = npcArgumentDigest(request);
+                const old = await client.query(
+                  'SELECT * FROM turn_rule_reads WHERE campaign_id=$1 AND transport_request_id=$2',
+                  [turn.campaignId, transportId]
+                );
+                if (old.rows[0]) {
+                  if (old.rows[0].argument_digest !== digest)
+                    throw new Problem(409, 'npc_sheet_lookup', 'Sheet read identity changed');
+                  return old.rows[0].payload;
+                }
+                const id = randomUUID(),
+                  payload = executeNpcSheetLookup(current, request, id);
+                await client.query(
+                  'INSERT INTO turn_rule_reads(id,campaign_id,turn_id,system_id,captured_context,tool_name,transport_request_id,argument_digest,result_hash,payload,transcript_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+                  [
+                    id,
+                    turn.campaignId,
+                    turn.id,
+                    current.systemId,
+                    ruleContext(current),
+                    request.tool,
+                    transportId,
+                    digest,
+                    npcArgumentDigest(payload),
+                    payload,
+                    Buffer.byteLength(JSON.stringify(payload)),
+                  ]
+                );
+                return payload;
+              }),
+          })
+        : undefined;
       const output = npcCreatorOutputSchema.parse(
         await this.generator.generate(
           reserved.settings,
-          npcCreatorPrompt(reserved.frozenInput),
-          npcCreatorJsonSchema,
+          npcCreatorPrompt({
+            ...reserved.frozenInput,
+            ...(requirements
+              ? {
+                  sheetRequirements: requirements,
+                  ruleEvidence: sheetCheckpoint?.history,
+                  savedDice: await new DiceService(this.store).records(turn.diceSessionId!),
+                }
+              : {}),
+          }),
+          requirements ? npcFullCreatorJsonSchema : npcCreatorJsonSchema,
           signal,
           trace ? { ...trace, executionId: randomUUID(), purpose: 'npc_preparation' } : undefined
         )
       );
+      const sheet = requirements
+        ? await validateSheetWithRepair(
+            output.sheet,
+            requirements,
+            {
+              attributes: input.establishedCharacter?.attributes ?? {},
+              inventory: input.establishedCharacter?.inventory ?? {},
+            },
+            this.generator,
+            reserved.settings,
+            signal,
+            trace
+          )
+        : undefined;
       if (input.establishedCharacter && output.name !== input.establishedCharacter.name)
         throw new Problem(422, 'npc_established_name', 'Creator changed the supplied NPC name');
       if (
         output.profile.secret &&
-        JSON.stringify(output.description).includes(output.profile.secret)
+        JSON.stringify({
+          description: output.description,
+          attributes: sheet?.attributes,
+          inventory: sheet?.inventory,
+        }).includes(output.profile.secret)
       )
-        throw new Problem(422, 'npc_secret', 'Private secret was copied into public description');
+        throw new Problem(422, 'npc_secret', 'Private secret was copied into public sheet');
       for (const [key, value] of Object.entries(input.establishedCharacter?.description ?? {}))
         if (
           key in output.description &&
@@ -254,12 +403,13 @@ export class NpcPreparationService {
         publicCharacter: {
           name: output.name,
           type: 'npc',
-          attributes: input.establishedCharacter?.attributes ?? {},
-          inventory: input.establishedCharacter?.inventory ?? {},
+          attributes: sheet?.attributes ?? input.establishedCharacter?.attributes ?? {},
+          inventory: sheet?.inventory ?? input.establishedCharacter?.inventory ?? {},
           description: { ...input.establishedCharacter?.description, ...output.description },
         },
         profile: { ...output.profile, characterId: reserved.characterId },
         introduction: input.introduction,
+        ...(requirements && sheet ? { sheetMetadata: { requirements, result: sheet } } : {}),
       });
       await this.store.transaction(async (client) => {
         await new DiceService(this.store).assertOwned(turn, client);

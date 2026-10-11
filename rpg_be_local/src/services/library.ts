@@ -1618,6 +1618,7 @@ export class LibraryService {
           id: row.id,
           campaignId: row.campaign_id,
           rootTurnId: row.root_turn_id,
+          npcSheetVersion: row.npc_sheet_version,
           contextDigest: row.context_digest,
           frozenPrompt: row.frozen_prompt,
           frozenRevision: row.frozen_revision,
@@ -1761,8 +1762,8 @@ export class LibraryService {
       for (const session of archive.diceSessions)
         await client.query(
           session.systemPrompt !== undefined
-            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history,frozen_continuity,frozen_atlas) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13,$14,$15,$16)'
-            : 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9)',
+            ? 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history,frozen_continuity,frozen_atlas,npc_sheet_version) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)'
+            : 'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,imported,new_faces,created_at,npc_sheet_version) VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10)',
           [
             session.id,
             session.campaignId,
@@ -1784,6 +1785,7 @@ export class LibraryService {
                   session.frozenAtlas ?? null,
                 ]
               : []),
+            session.npcSheetVersion ?? 0,
           ]
         );
       for (const t of archive.turns)
@@ -1828,7 +1830,7 @@ export class LibraryService {
       }
       for (const prep of archive.npcPreparations ?? [])
         await client.query(
-          'INSERT INTO npc_preparations(id,campaign_id,session_id,turn_id,owner_turn_id,local_key,argument_digest,frozen_input,provider_settings,reserved_character_id,status,result,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',
+          'INSERT INTO npc_preparations(id,campaign_id,session_id,turn_id,owner_turn_id,local_key,argument_digest,frozen_input,provider_settings,reserved_character_id,status,result,created_at,updated_at,sheet_checkpoint) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)',
           [
             prep.id,
             prep.campaignId,
@@ -1844,6 +1846,7 @@ export class LibraryService {
             prep.result,
             prep.createdAt,
             prep.updatedAt,
+            prep.sheetCheckpoint ?? null,
           ]
         );
       for (const prep of archive.combatPreparations)

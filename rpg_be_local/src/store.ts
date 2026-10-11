@@ -269,7 +269,8 @@ export class Store {
     client: PoolClient,
     exemptJournalJobId?: string,
     exemptRebuildJobId?: string,
-    exemptAdvancementReviewId?: string
+    exemptAdvancementReviewId?: string,
+    exemptNpcSheetJobId?: string
   ): Promise<void> {
     const r = await client.query(
       "SELECT id FROM turns WHERE campaign_id=$1 AND (status IN ($2,$3) OR document->>'editingPending'='true')",
@@ -306,6 +307,12 @@ export class Store {
         'advancement_busy',
         'Wait for or cancel the advancement review first (Journal tab)'
       );
+    const sheet = await client.query(
+      "SELECT id FROM npc_sheet_completions WHERE campaign_id=$1 AND status='running' AND ($2::uuid IS NULL OR id<>$2::uuid)",
+      [id, exemptNpcSheetJobId ?? null]
+    );
+    if (sheet.rowCount)
+      throw new Problem(409, 'npc_sheet_busy', 'Wait for or cancel the NPC sheet completion first');
   }
   /** Stored before/after versions of one record from non-undone turns, oldest first. */
   async knowledgeSnapshots(
@@ -351,6 +358,9 @@ export class Store {
     c.memory = m;
   }
   async recover(): Promise<number> {
+    const sheet = await this.pool.query(
+      "UPDATE npc_sheet_completions SET status='interrupted',owner=NULL,lease_until=NULL,safe_error='Sheet completion was interrupted; retry it.',updated_at=now() WHERE status='running' AND lease_until<now()"
+    );
     await this.pool.query(
       "UPDATE atlas_imports SET status='interrupted',owner_id=NULL,error='Image extraction was interrupted; start a new import.',updated_at=now() WHERE status='running' AND (lease_until IS NULL OR lease_until < now())"
     );
@@ -384,7 +394,8 @@ export class Store {
       (r.rowCount ?? 0) +
       (journal.rowCount ?? 0) +
       (rebuild.rowCount ?? 0) +
-      (advancement.rowCount ?? 0)
+      (advancement.rowCount ?? 0) +
+      (sheet.rowCount ?? 0)
     );
   }
   async reindex(c: Campaign, client: PoolClient): Promise<void> {

@@ -98,6 +98,7 @@ test('player and NPC sections swap between reading and JSON editing and save ind
     let data: unknown = [];
     if (path === '/api/settings') data = options;
     else if (path === '/api/providers') data = providers;
+    else if (path.endsWith('/sheet-completions')) data = null;
     else if (path.includes('/characters/') && route.request().method() === 'PATCH') {
       const patch = route.request().postDataJSON();
       expect(Object.keys(patch).sort()).toEqual(['inventory', 'revision']);
@@ -392,7 +393,9 @@ test('journal layout has no horizontal overflow across standard widths', async (
                 ? []
                 : path === `/api/campaigns/${campaign.id}`
                   ? campaign
-                  : [campaign],
+                  : path.endsWith('/sheet-completions')
+                    ? null
+                    : [campaign],
       },
     });
   });

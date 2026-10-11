@@ -1,4 +1,6 @@
 import { atlasObservations } from '../domain/atlasRecall.js';
+import { assertAtlasSessionEnabled, requireAtlasFeature } from '../domain/features.js';
+import { NPC_SHEET_VERSION } from '../domain/npcSheet.js';
 import { assertAtlas } from '../domain/atlasCompatibility.js';
 import { AtlasPreparationService } from './atlasPreparation.js';
 import { compileAtlas } from '../domain/atlasCommit.js';
@@ -290,6 +292,7 @@ export class TurnService {
         );
       assertFrozenContext(saved.frozen_knowledge, campaign);
       assertContinuity(saved.frozen_continuity ?? undefined, campaign);
+      assertAtlasSessionEnabled(saved);
       assertAtlas(saved.frozen_atlas, campaign);
       const turn: Turn = {
         ...previous,
@@ -374,6 +377,7 @@ export class TurnService {
       if (!session?.system_prompt) throw conflict('Saved editing context is missing');
       assertFrozenContext(session.frozen_knowledge, campaign);
       assertContinuity(session.frozen_continuity ?? undefined, campaign);
+      assertAtlasSessionEnabled(session);
       assertAtlas(session.frozen_atlas, campaign);
       t.context = {
         ...t.context!,
@@ -570,12 +574,15 @@ export class TurnService {
           const npcPreparation = new NpcPreparationService(this.store, this.generator);
           const atlasPreparation = new AtlasPreparationService(this.store, this.generator);
           let frozenDefinitions: GameplayToolDefinition[] | undefined;
+          let npcSheetVersion = NPC_SHEET_VERSION;
           if (t.diceSessionId) {
             const saved = await this.store.pool.query(
               'SELECT * FROM dice_sessions WHERE id=$1 AND campaign_id=$2',
               [t.diceSessionId, t.campaignId]
             );
             const root = saved.rows[0];
+            if (root) assertAtlasSessionEnabled(root);
+            npcSheetVersion = root?.npc_sheet_version ?? 0;
             if (!root?.system_prompt)
               throw new Problem(409, 'dice_context', 'Frozen session metadata is missing');
             t.context!.systemPrompt = root.system_prompt;
@@ -597,6 +604,7 @@ export class TurnService {
           const lookup = new RuleLookup();
           const sourceLookup = new CampaignSourceLookup(this.store);
           const registry = new GameplayTools({
+            npcSheetVersion,
             book: t.ruleContext?.kind === RuleSystemKind.Library,
             knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c, true),
             ...(t.context!.frozenAtlas
@@ -933,6 +941,7 @@ export class TurnService {
     prepare = false,
     editedNarrative?: string
   ): Promise<void> {
+    if (wireResponse.atlasChanges) requireAtlasFeature();
     const dice = new DiceService(this.store);
     await this.store.transaction(async (client) => {
       const { campaign, turn } = await this.lockedOwned(t, client);
@@ -1012,6 +1021,12 @@ export class TurnService {
         );
       turn.sourceReads = sourceReads;
       const applied = applyResponse(campaign, response, t.id, {
+        npcSheetVersion: (
+          await client.query(
+            'SELECT npc_sheet_version FROM dice_sessions WHERE id=$1 AND campaign_id=$2',
+            [sessionId, campaign.id]
+          )
+        ).rows[0]?.npc_sheet_version,
         campaignId: campaign.id,
         turnId: t.id,
         sourceSpans,

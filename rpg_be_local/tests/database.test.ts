@@ -195,7 +195,9 @@ const immediate: Generator = {
   generateOwnedGameplay: async () => openDoor(),
 };
 async function wait(campaignId: string, id: string): Promise<Turn> {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  // Full-suite schema setup competes for PostgreSQL/CPU with this integration worker.
+  const fixtureCompletionDeadlineMs = Date.now() + 10_000;
+  while (Date.now() < fixtureCompletionDeadlineMs) {
     const t = await store.turn(campaignId, id);
     if (!['pending', 'running'].includes(t.status)) return t;
     await new Promise((resolve) => setTimeout(resolve, 10));

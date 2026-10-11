@@ -180,6 +180,7 @@ export const diceSessionSchema = z
     newFaces: z.number().int().min(0).max(DICE_LIMITS.facesPerSession),
     createdAt: z.iso.datetime(),
     imported: z.boolean(),
+    npcSheetVersion: z.number().int().min(0).max(1).optional(),
   })
   .strict();
 export type DiceSession = z.infer<typeof diceSessionSchema>;

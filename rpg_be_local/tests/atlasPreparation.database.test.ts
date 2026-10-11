@@ -9,12 +9,13 @@ import { LibraryService, remapArchive } from '../src/services/library.js';
 import { TurnStatus } from '../src/domain/options.js';
 import { gmResponse } from './ownedGameplayFixture.js';
 import { Problem } from '../src/errors.js';
+import { atlasFeatureEnabled } from '../src/domain/features.js';
 import type { Generator } from '../src/providers/service.js';
 import type { AtlasPrepared } from '../src/domain/atlasPreparation.js';
 
 let db: Awaited<ReturnType<typeof openIsolatedStore>>;
 before(async () => {
-  if (dbEnabled) db = await openIsolatedStore('atlas_preparation_qa');
+  if (dbEnabled && atlasFeatureEnabled()) db = await openIsolatedStore('atlas_preparation_qa');
 });
 after(async () => {
   if (dbEnabled && db) await db.close();
@@ -98,7 +99,7 @@ function generator(
 
 test(
   'owned preparation replays, rejects changed input, stays unpublished and commits stable IDs through archive/undo',
-  { skip: !dbEnabled },
+  { skip: !atlasFeatureEnabled() ? 'Atlas is disabled globally' : !dbEnabled },
   async () => {
     const c = await campaign();
     let receiptId!: string;
@@ -151,7 +152,7 @@ test(
 
 test(
   'failed editor resumes by recompiling original wire once with immutable preparation identities',
-  { skip: !dbEnabled },
+  { skip: !atlasFeatureEnabled() ? 'Atlas is disabled globally' : !dbEnabled },
   async () => {
     const c = await campaign();
     let allowEditor = false,
@@ -204,7 +205,7 @@ test(
 
 test(
   'explicit gameplay retry reuses a ready cartographer receipt without another child call',
-  { skip: !dbEnabled },
+  { skip: !atlasFeatureEnabled() ? 'Atlas is disabled globally' : !dbEnabled },
   async () => {
     const c = await campaign();
     let first = true;
@@ -233,7 +234,7 @@ test(
 
 test(
   'late cancelled cartographer completion cannot publish a ready receipt or campaign geography',
-  { skip: !dbEnabled },
+  { skip: !atlasFeatureEnabled() ? 'Atlas is disabled globally' : !dbEnabled },
   async () => {
     const c = await campaign();
     let finish!: (value: unknown) => void, entered!: () => void;

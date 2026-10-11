@@ -88,13 +88,78 @@ function generator(
     gameplayCapacity: async () => 16000,
     bookGameplayCapacity: async () => 16000,
     generate: async (settings, prompt, schema, signal, trace) => {
+      if (
+        JSON.parse(prompt.startsWith('{') ? prompt : '{}').task?.startsWith(
+          'Establish the COMPLETE'
+        )
+      ) {
+        const input = JSON.parse(prompt);
+        const history = input.history as { result: Record<string, unknown> }[];
+        if (input.selectedSystem.kind === 'library' && !history.length)
+          return {
+            action: 'read',
+            request: {
+              tool: 'rules_get',
+              arguments: { path: 'core_rules.example', view: 'text' },
+              page: 0,
+            },
+          };
+        const read = history[0]?.result;
+        return {
+          action: 'finish',
+          requirements: {
+            version: 1,
+            systemName: 'Synthetic health game',
+            edition: '1',
+            category: 'Mortal',
+            basis: read ? 'book' : 'model_knowledge',
+            fields: [
+              { path: ['attributes', 'hp'], type: 'number', min: 1, reason: 'Health stat block' },
+            ],
+            applicability: ['Compact health block; no separate skill catalog'],
+            citations: read
+              ? [
+                  {
+                    receiptId: read.receiptId,
+                    path: read.path,
+                    source: read.source,
+                    systemId: input.selectedSystem.systemId,
+                    revision: input.selectedSystem.revision,
+                    contentHash: input.selectedSystem.contentHash,
+                    quote: read.text,
+                  },
+                ]
+              : [],
+          },
+        };
+      }
       if (prompt.startsWith('{"task":')) {
         counter.creator++;
-        if (child) return child(settings, prompt, schema, signal, trace);
+        if (child) {
+          const output = (await child(settings, prompt, schema, signal, trace)) as Record<
+            string,
+            unknown
+          >;
+          return {
+            ...output,
+            sheet: {
+              attributes: { hp: 8 },
+              inventory: {},
+              rationales: [{ path: ['attributes', 'hp'], reason: 'Fixture vitality' }],
+              conflicts: [],
+            },
+          };
+        }
         return {
           name: 'Mara',
           description: { role: 'Innkeeper', voice: 'Practical dry humor' },
           profile: core,
+          sheet: {
+            attributes: { hp: 8 },
+            inventory: {},
+            rationales: [{ path: ['attributes', 'hp'], reason: 'Fixture vitality' }],
+            conflicts: [],
+          },
         };
       }
       assert.ok(!prompt.includes(core.secret), 'private core must not enter narrative-only editor');
@@ -155,6 +220,9 @@ test(
     const library = new LibraryService(store);
     const archive = await library.export(c.id);
     assert.equal(archive.npcPreparations!.length, 1);
+    assert.equal(archive.diceSessions![0]!.npcSheetVersion, 1);
+    assert.ok(archive.npcPreparations![0]!.sheetCheckpoint?.requirements);
+    assert.ok(archive.npcPreparations![0]!.result?.sheetMetadata);
     const remapped = remapArchive(archive);
     assert.notEqual(remapped.campaign.characters[0]!.id, saved.characters[0]!.id);
     assert.equal(
@@ -162,6 +230,18 @@ test(
       remapped.campaign.characters[0]!.id
     );
     const imported = await library.import(archive);
+    const importedArchive = await library.export(imported.id);
+    assert.equal(importedArchive.diceSessions![0]!.npcSheetVersion, 1);
+    const legacyArchive = structuredClone(archive);
+    delete legacyArchive.diceSessions![0]!.npcSheetVersion;
+    const legacyImported = await library.import(legacyArchive);
+    assert.equal((await library.export(legacyImported.id)).diceSessions![0]!.npcSheetVersion, 0);
+    await assert.rejects(
+      store.pool.query('UPDATE dice_sessions SET npc_sheet_version=0 WHERE id=$1', [
+        done.diceSessionId,
+      ]),
+      /immutable/
+    );
     assert.equal(imported.continuity!.npcProfiles[0]!.characterId, imported.characters[0]!.id);
     const template = await library.template('Inn setup', c.id, saved.revision);
     const instantiated = await library.instantiate(template.id);

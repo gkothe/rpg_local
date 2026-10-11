@@ -5,6 +5,7 @@ import { Field, ErrorNotice } from '../../components/Controls';
 import CharacterSection from './CharacterSection';
 import { CHARACTER_SECTIONS } from './sectionOptions';
 import AwardedTotal from '../advancement/AwardedTotal';
+import NpcSheetCompletion from './NpcSheetCompletion';
 function Editor({
   campaign,
   character,
@@ -12,6 +13,7 @@ function Editor({
   canDelete,
   layout,
   player,
+  active,
 }: {
   campaign: Campaign;
   character: Character;
@@ -19,6 +21,7 @@ function Editor({
   canDelete: boolean;
   layout?: SheetLayout;
   player?: boolean;
+  active: boolean;
 }) {
   const baseRevision = useRef(campaign.revision),
     savingGuard = useRef(false);
@@ -39,6 +42,14 @@ function Editor({
         </h3>
       </header>
       <ErrorNotice message={error} />
+      {canDelete && (
+        <NpcSheetCompletion
+          campaignId={campaign.id}
+          characterId={character.id}
+          enabled={active}
+          onSaved={onSaved}
+        />
+      )}
       <Field label="Name">
         <input value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
@@ -253,6 +264,7 @@ export default function CharacterSheet({
         return (
           <div key={c.id} hidden={!shown} className={player === false ? 'npc-entry' : undefined}>
             <Editor
+              active={!!shown}
               campaign={campaign}
               character={c}
               onSaved={onSaved}

@@ -7,6 +7,7 @@ import {
 } from '../domain/atlasRecall.js';
 import { ATLAS_PREPARE_TOOL, atlasPrepareSchema } from '../domain/atlasPreparation.js';
 import { ATLAS_LIMITS } from '../domain/atlas.js';
+import { atlasFeatureEnabled } from '../domain/features.js';
 import type { RuleDeliveredEvidence } from '../domain/ruleReadCoverage.js';
 import { z } from 'zod';
 import {
@@ -136,7 +137,7 @@ function ownedRegistrations(
   );
   const sourceRead = options.readCampaignSource;
   return [
-    ...(options.atlas
+    ...(atlasFeatureEnabled() && options.atlas
       ? [
           {
             name: 'world_map_search',
@@ -185,7 +186,9 @@ function ownedRegistrations(
           {
             name: NPC_PREPARE_TOOL_NAME,
             description:
-              'Prepare a meaningful new NPC with a compact public role/voice and private goal, motive, boundary and optional tension/secret. A creator call is made only for a new preparation; exact same-key requests replay. Returns unpublished receipt-bound create/profile operations. Search for duplicates first.',
+              options.npcSheetVersion === 0
+                ? 'Prepare a meaningful new NPC with a compact public role/voice and private goal, motive, boundary and optional tension/secret. A creator call is made only for a new preparation; exact same-key requests replay. Returns unpublished receipt-bound create/profile operations. Search for duplicates first.'
+                : 'Prepare any newly registered NPC with a COMPLETE playable sheet for the selected system/edition/type and a compact public role/voice and private goal, motive, boundary and optional tension/secret. A creator call is made only for a new preparation; exact same-key requests replay. Returns unpublished receipt-bound create/profile operations. Search for duplicates first.',
             schema: npcPrepareSchema,
             purpose: 'default' as const,
             capability: 'characters' as const,
@@ -346,6 +349,7 @@ export class GameplayTools {
       atlas?: FrozenAtlas;
       prepareAtlas?: (input: unknown) => Promise<Record<string, unknown>>;
       prepareNpc?: (input: unknown) => Promise<Record<string, unknown>>;
+      npcSheetVersion?: number;
       npcReader?: () => Promise<ReturnType<typeof createNpcRecall>>;
       prepareCombat: (input: unknown) => Promise<Record<string, unknown>>;
       history?: HistoryToolReader;
@@ -360,7 +364,12 @@ export class GameplayTools {
           throw new Problem(409, 'cancelled', 'Gameplay attempt cancelled');
         await options.assertActive();
       })
-    ).filter((tool) => options.book || tool.purpose === 'default');
+    ).filter(
+      (tool) =>
+        (options.book || tool.purpose === 'default') &&
+        (atlasFeatureEnabled() ||
+          (tool.capability !== 'atlas' && !tool.name.startsWith('world_map_')))
+    );
     if (new Set(this.registrations.map((tool) => tool.name)).size !== this.registrations.length)
       throw new Error('Duplicate gameplay tool registration');
     this.definitions = this.registrations.map(definition);

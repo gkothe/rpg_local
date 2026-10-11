@@ -27,6 +27,60 @@ import {
 } from '../src/providers/gameplayTools.js';
 import { createNpcRecall } from '../src/domain/npcRecall.js';
 import { npcProfileSchema } from '../src/domain/continuity.js';
+import { applyResponse } from '../src/domain/state.js';
+import { newCampaign } from '../src/domain/campaign.js';
+import { gmResponse } from './ownedGameplayFixture.js';
+import { npcFullCreatorOutputSchema } from '../src/domain/npcPreparation.js';
+
+test('fresh gameplay forbids bare NPC creates while player and legacy creates remain available', () => {
+  const c = newCampaign({ name: 'Gate fixture' }),
+    turnId = randomUUID();
+  const response = gmResponse('A traveler arrives.', [
+    {
+      op: 'create',
+      character: {
+        name: 'Traveler',
+        type: CharacterType.Npc,
+        attributes: {},
+        inventory: {},
+        description: {},
+      },
+      introduction: gmIntroduction,
+    },
+  ]);
+  assert.throws(
+    () => applyResponse(c, response, turnId, { campaignId: c.id, turnId, npcSheetVersion: 1 }),
+    /complete npc_prepare sheet receipt/
+  );
+  assert.equal(
+    applyResponse(c, response, turnId, { campaignId: c.id, turnId, npcSheetVersion: 0 }).campaign
+      .characters.length,
+    1
+  );
+  response.operations[0] = {
+    ...response.operations[0]!,
+    character: {
+      name: 'Traveler',
+      type: CharacterType.Player,
+      attributes: {},
+      inventory: {},
+      description: {},
+    },
+  } as (typeof response.operations)[number];
+  assert.equal(
+    applyResponse(c, response, turnId, { campaignId: c.id, turnId, npcSheetVersion: 1 }).campaign
+      .characters.length,
+    1
+  );
+  assert.equal(
+    npcFullCreatorOutputSchema.safeParse({
+      name: 'Traveler',
+      description: { role: 'Guard' },
+      profile: core,
+    }).success,
+    false
+  );
+});
 
 const payload = (): NpcPreparationPayload => {
   const characterId = randomUUID();
@@ -44,6 +98,21 @@ const payload = (): NpcPreparationPayload => {
     introduction: gmIntroduction,
   };
 };
+test('legacy sessions retain their exact NPC tool definition while fresh sessions advertise full sheets', () => {
+  const prepareNpc = async () => ({});
+  const fresh = ownedTools({ prepareNpc }).definitions.find(
+    (d) => d.name === NPC_PREPARE_TOOL_NAME
+  )!;
+  const legacy = ownedTools({ prepareNpc, npcSheetVersion: 0 }).definitions.find(
+    (d) => d.name === NPC_PREPARE_TOOL_NAME
+  )!;
+  assert.equal(
+    legacy.description,
+    'Prepare a meaningful new NPC with a compact public role/voice and private goal, motive, boundary and optional tension/secret. A creator call is made only for a new preparation; exact same-key requests replay. Returns unpublished receipt-bound create/profile operations. Search for duplicates first.'
+  );
+  assert.match(fresh.description, /COMPLETE playable sheet/);
+  assert.deepEqual(fresh.inputSchema, legacy.inputSchema);
+});
 test('creator asks for short deep fiction while mechanics/history stay separate', () => {
   const prompt = npcCreatorPrompt({
     campaign: 'Flooded crossroads',

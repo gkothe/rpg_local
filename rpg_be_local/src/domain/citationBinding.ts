@@ -9,7 +9,7 @@ import { citationPages } from './ruleCitationValidation.js';
 import type { KnowledgeValidation } from './knowledge.js';
 import type { GameplayResponse } from './gameplayResponse.js';
 
-function occurrences(text: string, quote: string, base: number): number[] {
+export function occurrences(text: string, quote: string, base: number): number[] {
   const result: number[] = [];
   if (!quote) return result;
   for (let index = text.indexOf(quote); index !== -1; index = text.indexOf(quote, index + 1))

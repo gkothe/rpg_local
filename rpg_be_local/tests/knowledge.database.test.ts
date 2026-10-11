@@ -21,6 +21,8 @@ import {
 import type { Generator } from '../src/providers/service.js';
 import type { Turn } from '../src/domain/types.js';
 import { emptyResponse, ownedTools, syntheticGenerate } from './ownedGameplayFixture.js';
+import { completeNpcGenerate } from './completeNpcFixture.js';
+import type { NpcPreparationPayload } from '../src/domain/npcPreparation.js';
 const enabled = process.env.NODE_ENV === 'test' && !!process.env.RPG_TEST_DATABASE_URL;
 let store: Store;
 const schema = `knowledge_fixture_${randomUUID().replaceAll('-', '')}`;
@@ -108,7 +110,8 @@ test(
   }
 );
 async function finish(campaignId: string, id: string): Promise<Turn> {
-  for (let n = 0; n < 300; n++) {
+  const fixtureCompletionDeadlineMs = Date.now() + 10_000;
+  while (Date.now() < fixtureCompletionDeadlineMs) {
     const t = await store.turn(campaignId, id);
     if (!['pending', 'running'].includes(t.status)) return t;
     await new Promise((r) => setTimeout(r, 10));
@@ -266,35 +269,43 @@ test(
   async () => {
     const c = newCampaign({ name: 'Historical DB' });
     await store.insert(c);
-    const generator = {
+    const generator: Generator = {
       ...base,
-      generateOwnedGameplay: async () => ({
-        ...answer,
-        knowledgeChanges: [],
-        operations: [
+      generate: completeNpcGenerate(base.generate),
+      generateOwnedGameplay: async (_settings, _prompt, _schema, _system, tools) => {
+        const prepared = (await tools(
+          'npc_prepare',
           {
-            op: 'create',
-            character: {
+            localKey: 'guide',
+            intent: 'Prepare a guide',
+            establishedCharacter: {
               name: 'Guide',
               type: 'npc',
-              attributes: {},
+              attributes: { health: { max: 6, damage: 0 } },
               inventory: {},
               description: {},
             },
             introduction: { origin: O.Gm, evidence: [], visibility: V.Player },
           },
-        ],
-        operationExplanations: [
-          {
-            operationIndex: 0,
-            reason: 'The guide arrives',
-            basis: 'provisional',
-            rollIds: [],
-            evidence: [],
-            visibility: V.Player,
-          },
-        ],
-      }),
+          'guide'
+        )) as NpcPreparationPayload & { createOperation: unknown; profileChange: unknown };
+        return {
+          ...answer,
+          knowledgeChanges: [],
+          operations: [prepared.createOperation],
+          continuityChanges: [prepared.profileChange],
+          operationExplanations: [
+            {
+              operationIndex: 0,
+              reason: 'The guide arrives',
+              basis: 'provisional',
+              rollIds: [],
+              evidence: [],
+              visibility: V.Player,
+            },
+          ],
+        };
+      },
     };
     const service = new TurnService(store, generator);
     const t = await service.submit(c.id, {
@@ -305,6 +316,11 @@ test(
     assert.equal((await finish(c.id, t.id)).status, 'completed');
     const current = await store.campaign(c.id);
     const id = current.characters[0]!.id;
+    await store.transaction(async (client) => {
+      const saved = await store.campaign(c.id, client, true);
+      saved.continuity!.npcProfiles = [];
+      await store.save(saved, client);
+    });
     await new CampaignService(store, generator).deleteCharacter(c.id, id, 1);
     const deleted = await store.campaign(c.id);
     assert.equal(deleted.knowledge![0]!.characterNames[id], 'Guide');
@@ -313,7 +329,7 @@ test(
     );
     assert.equal(imported.characters.length, 0);
     assert.equal(Object.values(imported.knowledge![0]!.characterNames)[0], 'Guide');
-    await assert.rejects(() => service.undo(c.id, 2), /manually changed/);
+    await assert.rejects(() => service.undo(c.id, 2), /NPC profile changed/);
   }
 );
 test(

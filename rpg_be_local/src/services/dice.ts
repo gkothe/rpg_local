@@ -1,4 +1,5 @@
 import type { FrozenCampaignSources } from '../domain/campaignSourceRecall.js';
+import { NPC_SHEET_VERSION } from '../domain/npcSheet.js';
 import { type FrozenKnowledge } from '../domain/knowledgeRecall.js';
 import type { GameplayToolDefinition } from '../providers/gameplayTools.js';
 import { randomUUID } from 'node:crypto';
@@ -44,7 +45,7 @@ export class DiceService {
       const id = randomUUID();
       try {
         await client.query(
-          'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history,frozen_continuity,frozen_atlas) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',
+          'INSERT INTO dice_sessions(id,campaign_id,root_turn_id,context_digest,frozen_prompt,frozen_revision,character_ids,system_prompt,frozen_knowledge,tool_definitions,frozen_sources,frozen_history,frozen_continuity,frozen_atlas,npc_sheet_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)',
           [
             id,
             turn.campaignId,
@@ -60,6 +61,7 @@ export class DiceService {
             metadata.frozenHistory ? JSON.stringify(metadata.frozenHistory) : null,
             metadata.frozenContinuity ?? null,
             metadata.frozenAtlas ?? null,
+            NPC_SHEET_VERSION,
           ]
         );
       } catch (error) {

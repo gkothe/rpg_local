@@ -193,7 +193,6 @@ export function examplePayload(pinned: boolean, mentioned: boolean, book: boolea
       campaignSourceSeeds: [],
       characters: mentioned ? [player, npc] : [player],
       state: { location: 'North bridge' },
-      atlas: atlasReadResult,
       schema: responseSchemaExample,
       action: mentioned ? 'I ask Ivo for help and cross the bridge.' : 'I cross the bridge.',
     },
@@ -403,11 +402,50 @@ export const npcPrepareResult = {
     type: 'npc',
     attributes: {
       hp: 8,
+      skills: { Athletics: 0, Boating: 2 },
     },
     inventory: {},
     description: {
       role: 'Ferryman',
       voice: 'Brief, practical answers',
+    },
+  },
+  sheetMetadata: {
+    requirements: {
+      version: 1,
+      systemName: 'Synthetic river game',
+      edition: '1',
+      category: 'Mortal',
+      basis: 'model_knowledge',
+      citations: [],
+      applicability: ['No powers for mortals'],
+      fields: [
+        { path: ['attributes', 'hp'], type: 'number', min: 1, reason: 'Vitality' },
+        {
+          path: ['attributes', 'skills', 'Athletics'],
+          type: 'number',
+          min: 0,
+          max: 5,
+          reason: 'Complete skill catalog',
+        },
+        {
+          path: ['attributes', 'skills', 'Boating'],
+          type: 'number',
+          min: 0,
+          max: 5,
+          reason: 'Complete skill catalog',
+        },
+      ],
+    },
+    result: {
+      attributes: { hp: 8, skills: { Athletics: 0, Boating: 2 } },
+      inventory: {},
+      conflicts: [],
+      rationales: [
+        { path: ['attributes', 'hp'], reason: 'Established vitality' },
+        { path: ['attributes', 'skills', 'Athletics'], reason: 'Untrained' },
+        { path: ['attributes', 'skills', 'Boating'], reason: 'Ferryman occupation' },
+      ],
     },
   },
   profile: {
@@ -433,6 +471,7 @@ export const npcPrepareResult = {
       type: 'npc',
       attributes: {
         hp: 8,
+        skills: { Athletics: 0, Boating: 2 },
       },
       inventory: {},
       description: {
