@@ -72,6 +72,24 @@ else if(args.includes('/hooks')) {
       const completion={step_type:'tool',step_index:slot*2+1,state:'DONE',tool_name:'call_mcp_tool'};
       if(mode==='matching-envelope'||mode==='changed-envelope') completion.tool_info={parameters:{ServerName:'local_rpg',ToolName:'roll_dice',Arguments:mode==='changed-envelope'?{...input,slot:99}:input}};
       console.log(JSON.stringify({event:'step_update',step_update:completion}));
+      if(slot===0 && mode.startsWith('task-')) {
+        if(!agent.includes('tools: [manage_task]')) throw new Error('Task tool not enabled');
+        if(!agent.includes('manage_task is permitted')) throw new Error('Missing task guidance');
+        const action=mode.slice(5);
+        const parameters={Action:['list','status','kill','send_input'].includes(action)?action:'status',TaskId:'fixture-task',Input:'PRIVATE_INPUT'};
+        if(mode==='task-invalid-action') parameters.Action='run_command';
+        if(mode==='task-extra') parameters.CommandLine='PRIVATE_COMMAND';
+        const index=mode==='task-reused-index'?1:10;
+        const task={step_type:'tool',step_index:index,state:mode==='task-orphan'?'DONE':'ACTIVE',tool_name:'manage_task',tool_info:{name:'manage_task',parameters}};
+        if(mode==='task-conflicting-name') task.tool_info.name='run_command';
+        console.log(JSON.stringify({event:'step_update',step_update:task}));
+        if(mode==='task-incomplete') return console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,response:JSON.stringify({narrative:'Incomplete',operations:[]})}}));
+        const done={step_type:'tool',step_index:index,state:mode==='task-error'?'ERROR':'DONE',tool_name:'manage_task'};
+        if(mode==='task-envelope') done.tool_info={name:'manage_task',parameters};
+        if(mode==='task-changed-envelope') done.tool_info={name:'manage_task',parameters:{...parameters,TaskId:'another-task'}};
+        console.log(JSON.stringify({event:'step_update',step_update:done}));
+        if(mode==='task-duplicate') console.log(JSON.stringify({event:'step_update',step_update:done}));
+      }
       if(slot===0 && mode.startsWith('discovery-')) {
         if(!agent.includes('with no resources or resource templates')) throw new Error('Missing resource guidance');
         for(const [offset,name,method,resultKey] of [[0,'list_resources','resources/list','resources'],[1,'list_resource_templates','resources/templates/list','resourceTemplates']]) {
@@ -339,6 +357,12 @@ for (const usageMode of [
   'invalid-usage',
   'discovery-success',
   'discovery-envelope',
+  'task-list',
+  'task-status',
+  'task-kill',
+  'task-send_input',
+  'task-envelope',
+  'task-error',
 ])
   test(`Antigravity accepts successful native MCP despite ${usageMode} telemetry`, async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-dice-test-'));
@@ -375,6 +399,67 @@ for (const usageMode of [
       await rm(root, { recursive: true, force: true });
     }
   });
+
+for (const mode of [
+  'task-orphan',
+  'task-reused-index',
+  'task-conflicting-name',
+  'task-invalid-action',
+  'task-extra',
+  'task-changed-envelope',
+  'task-duplicate',
+  'task-incomplete',
+]) {
+  test(`Antigravity rejects invalid native task lifecycle: ${mode}`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-task-invalid-'));
+    try {
+      const filename = path.join(root, 'cli.mjs');
+      const traceFile = path.join(root, 'trace.jsonl');
+      const executionId = randomUUID();
+      const trace = new PromptTrace(traceFile, { executionId });
+      await writeFile(filename, fixture);
+      let calls = 0;
+      await assert.rejects(
+        generateAntigravityDice(
+          { binary: process.execPath, prefix: [filename] },
+          settings,
+          'Synthetic',
+          root,
+          { ...process.env, RPG_TEST_AGY_MODE: mode },
+          adapter(async (name) => {
+            assert.equal(name, 'roll_dice');
+            calls++;
+            return {
+              rollId: randomUUID(),
+              slot: 0,
+              groups: [{ label: 'check', sides: 6, faces: [3] }],
+              reused: false,
+            };
+          }),
+          undefined,
+          { executionId, trace }
+        ),
+        (error: unknown) => (error as { code: string }).code === 'dice_isolation'
+      );
+      assert.equal(
+        calls,
+        1,
+        'Task metadata must never dispatch gameplay or continue after rejection'
+      );
+      const rows = (await readFile(traceFile, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      const taskEvents = rows.filter((row) => ['native_task', 'rejected_tool'].includes(row.kind));
+      assert.doesNotMatch(
+        JSON.stringify(taskEvents),
+        /PRIVATE_INPUT|PRIVATE_COMMAND|fixture-task|another-task/
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
 
 for (const mode of [
   'discovery-foreign',

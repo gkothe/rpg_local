@@ -2,7 +2,7 @@ import { NARRATIVE_READABILITY_GUIDANCE } from './narrativeWriting.js';
 
 // Adapted from humanizer for gameplay prose, not its editorial workflow.
 export const NPC_CREATION_GUIDANCE = `NPC continuity:
-- Keep each meaningful NPC's core roughly 80-150 words: concrete want, motive, boundary and optional tension/secret. Short phrases with depth, not biographies or generic adjectives. This is a writing target, never a token cutoff.
+- Keep each meaningful NPC's core roughly 200-400 words: concrete want, motive, boundary and optional tension/secret. Short phrases with depth, not biographies or generic adjectives. This is a writing target, never a token cutoff.
 - When npc_prepare is offered, search the roster first, then call it before narrating meaningful new NPCs. If absent, use ordinary creation; do not fabricate tool results. Use its exact createOperation and profileChange if the NPC is used. Ordinary incidental NPCs may use normal create operations.
 - Include continuityChanges for new actions (an empty array when no profile changes). Replace changed profile fields; never append a biography. Public description must not contain private motives/secrets.
 - Treat knowledge holder/witness evidence as awareness; characterIds only identify subjects, not who knows a fact. Missing awareness remains unknown. Accepted canonical knowledge overrides contradictory profile links.
@@ -10,7 +10,8 @@ export const NPC_CREATION_GUIDANCE = `NPC continuity:
 `;
 export const GAMEPLAY_WRITING_GUIDANCE = `Narrative writing guidance:
 ${NARRATIVE_READABILITY_GUIDANCE}
-- Usually stay under 300 words per turn; less when enough, longer only for necessary information or requested detail.
+- Usually stay under 1000 words per turn; longer for necessary information or requested detail.
+- Address all questions and topics that the player sent, dont ignore topics.
 - Apply only to new narration/dialogue. Concrete details, direct verbs, varied sentence lengths; distinct NPC voices fitting scene.
 - Observable situation first. One or two concrete sensory details per scene; no stacked metaphors. Each paragraph advances scene or informs decisions.
 - No chatbot greetings, reflexive praise/agreement, inflated significance, filler, repeated summaries, forced threes or formulaic contrasts.

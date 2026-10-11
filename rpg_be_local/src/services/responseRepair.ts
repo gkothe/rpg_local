@@ -100,6 +100,22 @@ export function applyResponseCorrections<T>(original: T, paths: ResponsePath[], 
     )
   )
     throw new Problem(502, 'response_repair_failed', 'Unsafe correction path');
+  // Some providers return the requested root fields directly. Accept only an exact
+  // field set; nested paths must use the explicit path/value envelope.
+  if (
+    paths.length > 0 &&
+    paths.every((path) => path.length === 1) &&
+    raw !== null &&
+    typeof raw === 'object' &&
+    !Array.isArray(raw) &&
+    Object.keys(raw).length === paths.length &&
+    paths.every((path) => Object.hasOwn(raw as object, path[0]!))
+  ) {
+    const fields = raw as Record<string, unknown>;
+    raw = {
+      corrections: paths.map((path) => ({ path, value: fields[String(path[0])] })),
+    };
+  }
   const corrections = z
     .object({
       corrections: z.array(
@@ -286,6 +302,9 @@ export async function validateWithFieldRepair<T>(
         task: 'Correct only the listed invalid fields of this saved GM response. Return corrections in exactly the allowed path order. Preserve the narrative, scenario, valid operations, facts and authoritative dice. No tools, new events, invented receipts or rerolls. Use exact quotes from the supplied evidence; the app calculates citation offsets and pages. Do not remove valid material to evade validation.',
         invalid: error instanceof Error ? error.message : 'Invalid response',
         allowedPaths: paths,
+        correctionFormat: {
+          corrections: paths.map((path) => ({ path, value: '<corrected field value>' })),
+        },
         ...(paths.some((path) => path[0] === 'participantReferences')
           ? {
               participantReferenceGuidance:

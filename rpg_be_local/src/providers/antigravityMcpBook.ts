@@ -7,7 +7,7 @@ import { canonicalRuleJson, serializedBytes } from '../domain/rules.js';
 import { nativeGameplaySchema } from './gameplayContract.js';
 import type { ProviderSettings } from '../domain/types.js';
 import type { Executable } from './discovery.js';
-import { generateAntigravity } from './antigravity.js';
+import { ANTIGRAVITY_GAMEPLAY_NATIVE_TOOLS, generateAntigravity } from './antigravity.js';
 import { antigravityDiceEnvironment } from './antigravityDice.js';
 import { startGameplayMcp } from './gameplayMcp.js';
 import { gameplayToolRequestBytes, type GameplayAdapter } from './gameplayTools.js';
@@ -18,6 +18,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 const MCP_SERVER = 'local_rpg';
 const MCP_GATEWAY = 'call_mcp_tool';
 const MCP_RESOURCE_DISCOVERY = ['list_resources', 'list_resource_templates'] as const;
+const TASK_ACTIONS = ['list', 'status', 'kill', 'send_input'] as const;
+const TASK_ARGUMENT_FIELDS = ['Action', 'TaskId', 'Input'] as const;
+const NATIVE_TASK_GUIDANCE =
+  'Native manage_task is permitted for background tasks in this isolated CLI session (list, status, kill, send_input). This is the only native session-utility exception to the gameplay tool contract; it is not an MCP gameplay tool and grants no shell, file, network, scheduling or subagent access. Task errors are tool results: continue gameplay using the supplied campaign tools and return the final response.';
 const MCP_INVOCATION_GUIDANCE = `Invoke every owned tool through ${MCP_GATEWAY} with ServerName="${MCP_SERVER}", ToolName set to its registered name, and Arguments set to its argument object. Never invoke a registered tool name directly as a native function. ${MCP_SERVER} exposes gameplay tools only, with no resources or resource templates. Do not discover or read resources; use the supplied tool registry.`;
 const PROFILE_PREFIX = 'rpg-agy-private-';
 const NATIVE_ACCESS_DENIED = [
@@ -82,6 +86,7 @@ export async function generateAntigravityMcpBook(
   const tools = definitions.map((definition) => definition.name);
   const pending: PendingCall[] = [];
   const discoverySteps = new Map<number, string>();
+  const nativeTasks = new Map<number, { key: string; completed: boolean }>();
   const waiters = new Set<() => void>();
   const notify = () => {
     for (const waiter of waiters) waiter();
@@ -162,7 +167,7 @@ export async function generateAntigravityMcpBook(
         trace,
         ownedProfile: profile,
         privateMcp: { name: MCP_SERVER, endpoint },
-        agentPrompt: `${book.systemPrompt}\nNative transport: use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests. ${MCP_INVOCATION_GUIDANCE}\nOwned MCP argument schemas:${JSON.stringify(definitions)}`,
+        agentPrompt: `${book.systemPrompt}\nNative transport: use the real private ${MCP_SERVER} MCP tools. Do not emit simulated JSON tool requests. ${MCP_INVOCATION_GUIDANCE}\n${NATIVE_TASK_GUIDANCE}\nOwned MCP argument schemas:${JSON.stringify(definitions)}`,
         timeoutMs: 0,
         deadlineMs: deadline,
         maxOutputBytes: Infinity,
@@ -201,7 +206,11 @@ export async function generateAntigravityMcpBook(
                 tool_name?: string;
                 tool_info?: {
                   name?: string;
-                  parameters?: { Arguments?: unknown; ServerName?: string; ToolName?: string };
+                  parameters?: Record<string, unknown> & {
+                    Arguments?: unknown;
+                    ServerName?: string;
+                    ToolName?: string;
+                  };
                 };
               };
               if (step.step_type === 'agent_response') {
@@ -235,6 +244,67 @@ export async function generateAntigravityMcpBook(
               } else if (step.step_type === 'tool') {
                 const parameters = step.tool_info?.parameters;
                 const gateway = step.tool_name ?? step.tool_info?.name;
+                if (ANTIGRAVITY_GAMEPLAY_NATIVE_TOOLS.some((name) => name === gateway)) {
+                  const index = step.step_index;
+                  const validIndex = Number.isInteger(index) && index! >= 0;
+                  const validEnvelope =
+                    parameters !== undefined &&
+                    parameters !== null &&
+                    !Array.isArray(parameters) &&
+                    TASK_ACTIONS.some((action) => action === parameters.Action) &&
+                    Object.keys(parameters).every((key) =>
+                      TASK_ARGUMENT_FIELDS.some((field) => field === key)
+                    );
+                  const started = nativeTasks.get(index!);
+                  const validName =
+                    step.tool_info?.name === undefined || step.tool_info.name === gateway;
+                  if (
+                    validIndex &&
+                    validName &&
+                    validEnvelope &&
+                    step.state === 'ACTIVE' &&
+                    started === undefined &&
+                    !discoverySteps.has(index!) &&
+                    !pending.some((entry) => entry.index === index)
+                  ) {
+                    nativeTasks.set(index!, {
+                      key: canonicalRuleJson(parameters),
+                      completed: false,
+                    });
+                    await traceEvent(trace, 'native_task', {
+                      stepIndex: index,
+                      state: step.state,
+                      action: parameters!.Action,
+                    });
+                    return;
+                  }
+                  if (
+                    validIndex &&
+                    validName &&
+                    started &&
+                    !started.completed &&
+                    (step.state === 'DONE' || step.state === 'ERROR') &&
+                    (parameters === undefined ||
+                      (validEnvelope && canonicalRuleJson(parameters) === started.key))
+                  ) {
+                    started.completed = true;
+                    await traceEvent(trace, 'native_task', { stepIndex: index, state: step.state });
+                    // The CLI owns execution/results; this never dispatches campaign mutations.
+                    return;
+                  }
+                  await traceEvent(trace, 'rejected_tool', {
+                    code: 'dice_isolation',
+                    ...rejectedStepMetadata(step),
+                    gateway,
+                    validEnvelope,
+                    validIndex,
+                  });
+                  throw new Problem(
+                    502,
+                    'dice_isolation',
+                    'Antigravity emitted an invalid native task lifecycle'
+                  );
+                }
                 if (MCP_RESOURCE_DISCOVERY.some((name) => name === gateway)) {
                   const validEnvelope =
                     parameters?.ServerName === MCP_SERVER &&
@@ -247,6 +317,7 @@ export async function generateAntigravityMcpBook(
                     step.state === 'ACTIVE' &&
                     validEnvelope &&
                     started === undefined &&
+                    !nativeTasks.has(step.step_index!) &&
                     !pending.some((entry) => entry.index === step.step_index)
                   ) {
                     discoverySteps.set(step.step_index!, gateway!);
@@ -357,6 +428,7 @@ export async function generateAntigravityMcpBook(
                     !Number.isInteger(step.step_index) ||
                     step.step_index! < 0 ||
                     discoverySteps.has(step.step_index!) ||
+                    nativeTasks.has(step.step_index!) ||
                     pending.some((entry) => entry.index === step.step_index)
                   )
                     throw new Problem(
@@ -411,6 +483,9 @@ export async function generateAntigravityMcpBook(
                 usage?: { input_tokens?: number };
               };
               const unclaimedCalls = pending.filter((entry) => !entry.claimed).length;
+              const incompleteNativeTasks = [...nativeTasks.values()].filter(
+                (task) => !task.completed
+              ).length;
               await traceEvent(trace, 'native_completion', {
                 initialized,
                 alreadyCompleted: completed,
@@ -420,6 +495,7 @@ export async function generateAntigravityMcpBook(
                 responseCharacters:
                   typeof result.response === 'string' ? result.response.length : null,
                 unclaimedCalls,
+                incompleteNativeTasks,
               });
               if (initialized && !completed && result.status !== 'SUCCESS')
                 throw cliFailure(typeof result.response === 'string' ? result.response : '');
@@ -429,7 +505,8 @@ export async function generateAntigravityMcpBook(
                 result.status !== 'SUCCESS' ||
                 result.num_turns !== 1 ||
                 typeof result.response !== 'string' ||
-                unclaimedCalls > 0
+                unclaimedCalls > 0 ||
+                incompleteNativeTasks > 0
               ) {
                 const reason = !initialized
                   ? 'its private agent was not initialized'
@@ -439,7 +516,9 @@ export async function generateAntigravityMcpBook(
                       ? `it reported ${Number.isInteger(result.num_turns) ? result.num_turns : 'no'} completed turns instead of one`
                       : typeof result.response !== 'string'
                         ? 'its final response was missing'
-                        : 'a tool request was not dispatched';
+                        : incompleteNativeTasks > 0
+                          ? 'a native task call did not complete'
+                          : 'a tool request was not dispatched';
                 throw new Problem(
                   502,
                   'dice_isolation',

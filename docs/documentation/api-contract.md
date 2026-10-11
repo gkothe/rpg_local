@@ -209,6 +209,8 @@ Invalid Antigravity `call_mcp_tool` gateway server/tool envelopes use recoverabl
 
 The private HTTP MCP server supports `resources/list` and `resources/templates/list` with empty lists; resource reads remain unsupported. Antigravity is instructed to use the supplied gameplay registry without resource discovery. Its stream accepts `list_resources` and `list_resource_templates` only with an exact `ServerName: local_rpg` envelope and a fresh nonnegative step index. DONE metadata must match that discovery step; it may omit the envelope. Discovery does not dispatch gameplay, consume dice identities or expose data. Foreign discovery, extra arguments, resource reads and reused gameplay identities retain isolation failures.
 
+Antigravity gameplay agents explicitly enable native `manage_task` for `list`, `status`, `kill` and `send_input` within the isolated CLI session. The CLI executes the utility and supplies its result; the app never dispatches it through the campaign registry. An ACTIVE step requires the documented Action/TaskId/Input envelope and a fresh nonnegative step index. DONE or ERROR must match that start, optionally omitting the repeated envelope. Task errors let the model continue; orphan, changed, duplicate or unfinished task calls remain isolation failures. Native-task diagnostics record only action, state and step index, excluding task IDs, input and output. Shell, file, network, scheduling and subagent capabilities remain prohibited.
+
 ### Campaign knowledge and instruction contract
 
 Book and no-library actions share one response shape (see "One gameplay contract" below);

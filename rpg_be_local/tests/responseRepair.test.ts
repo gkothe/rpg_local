@@ -556,6 +556,60 @@ test('repair rejects narrative edits, unsafe paths and malformed correction outp
   );
   assert.equal(calls, 1);
 });
+test('direct collection corrections preserve the saved response and still require full validation', async () => {
+  const complete = { ...response(sourceEvidence()), knowledgeChanges: [] };
+  const original: Partial<typeof complete> = structuredClone(complete);
+  delete original.combatEffects;
+  delete original.participantReferences;
+  let calls = 0;
+  const result = await validateWithFieldRepair(
+    original,
+    async (candidate) => {
+      gameplayResponseInputSchema.parse(candidate);
+    },
+    {
+      capacity: async () => 10000,
+      generate: async (_settings, prompt) => {
+        calls++;
+        assert.deepEqual(JSON.parse(prompt).allowedPaths, [
+          ['combatEffects'],
+          ['participantReferences'],
+        ]);
+        return { combatEffects: [], participantReferences: [] };
+      },
+    },
+    settings
+  );
+  assert.equal(calls, 1);
+  assert.deepEqual(result, complete);
+  assert.equal(Object.hasOwn(original, 'combatEffects'), false);
+  const invalid = applyResponseCorrections(complete, [['participantReferences']], {
+    participantReferences: [{ afterParagraph: 1, characterIds: ['not-a-uuid'] }],
+  });
+  assert.equal(gameplayResponseInputSchema.safeParse(invalid).success, false);
+});
+
+test('direct correction objects must contain exactly the authorized top-level fields', () => {
+  const original = response(sourceEvidence());
+  const paths = [['combatEffects'], ['participantReferences']];
+  for (const raw of [
+    { combatEffects: [] },
+    { combatEffects: [], participantReferences: [], narrative: 'Changed scene' },
+    { combatEffects: [], participantReferences: [], operations: [] },
+    { corrections: [], combatEffects: [], participantReferences: [] },
+    [],
+    null,
+  ])
+    assert.throws(() => applyResponseCorrections(original, paths, raw));
+  assert.throws(() =>
+    applyResponseCorrections(original, [['knowledgeChanges', 0, 'evidence']], {
+      knowledgeChanges: [],
+    })
+  );
+  assert.throws(() =>
+    applyResponseCorrections(original, [['operations', '__proto__']], { operations: [] })
+  );
+});
 test('batched citation repair retains the two-call limit when corrections remain invalid', async () => {
   const original = response({ ...sourceEvidence(), quote: 'Invalid quote' });
   original.knowledgeChanges.push(structuredClone(original.knowledgeChanges[0]!));

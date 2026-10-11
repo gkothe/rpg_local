@@ -201,14 +201,20 @@ export default function ToolExplorer({
           use the supplied tools; resource discovery on local_rpg returns empty lists and lets the
           turn continue. Resource reads and discovery on other servers remain blocked.
         </p>
+        <p>
+          Antigravity may also use its native manage_task utility to list, check, stop or send input
+          to background tasks in the isolated CLI session. Task results and errors let gameplay
+          continue without restarting the turn. These calls do not change campaign state or draw
+          dice. Shell, file, network, scheduling and subagent tools remain blocked.
+        </p>
       </details>
       <details>
         <summary>Tool access and request limits</summary>
         <p>
-          The session disables other native tools and exposes only the app's allowed tools to the
-          model. The provider's command-line process still uses authentication and inherits a
-          filtered set of environment values. Restricting model tools does not remove those
-          credentials from the process.
+          The session exposes the app's allowed gameplay tools and, for Antigravity, the native
+          manage_task utility. Other native tools stay disabled. The provider's command-line process
+          still uses authentication and inherits a filtered set of environment values. Restricting
+          model tools does not remove those credentials from the process.
         </p>
         <p>
           The app runs tool calls one at a time. Rule calls share a cumulative SQL budget of 12

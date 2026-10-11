@@ -16,6 +16,7 @@ const ANTIGRAVITY_PROCESS_TIMEOUT_MS = 0;
 /** How long a successful empty-hooks check is reused for the same launch environment. */
 export const ANTIGRAVITY_HOOKS_VERIFIED_TTL_MS = 10 * 60 * 1000;
 const OWNED_PROFILE_SENTINEL = '<owned-profile>';
+export const ANTIGRAVITY_GAMEPLAY_NATIVE_TOOLS = ['manage_task'] as const;
 /** Clock seam; tests override `now` to exercise expiry. */
 export const antigravityHooksClock = { now: () => Date.now() };
 // Keyed by a digest of the launch environment; raw env values are never retained.
@@ -238,7 +239,7 @@ export async function generateAntigravity(
         options.privateMcp
           ? definition.replace(
               'tools: []',
-              `tools: []\nmcpServers: ${JSON.stringify([{ name: options.privateMcp.name, serverUrl: options.privateMcp.endpoint.url, headers: options.privateMcp.endpoint.headers }])}`
+              `tools: [${ANTIGRAVITY_GAMEPLAY_NATIVE_TOOLS.join(', ')}]\nmcpServers: ${JSON.stringify([{ name: options.privateMcp.name, serverUrl: options.privateMcp.endpoint.url, headers: options.privateMcp.endpoint.headers }])}`
             )
           : definition,
         {
