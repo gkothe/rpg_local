@@ -394,7 +394,18 @@ export type JournalEvidenceDetail =
   | { kind: 'turn'; label: string; turnId: string; available: boolean }
   | { kind: 'campaign_source' | 'book'; label: string; quote: string; available: true };
 export interface MemoryRebuildJobView {
-  gmIndex?: { mode: string; preview: GmIndexPreview | null };
+  gmIndex?: {
+    mode: string;
+    preview: GmIndexPreview | null;
+    progress?: {
+      label: string;
+      completedSteps: number;
+      totalSteps: number;
+      retrievalCalls: number;
+      emptySearches: number;
+      lastActivityAt: string;
+    };
+  };
   id: string;
   campaignId: string;
   purpose?: string;

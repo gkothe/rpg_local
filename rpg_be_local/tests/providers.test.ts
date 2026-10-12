@@ -239,6 +239,41 @@ test('Codex/Antigravity machine outputs are parsed, malformed output rejected', 
   );
   assert.throws(() => parseProviderOutput('agy', 'not json'), /JSON/);
 });
+test('failed generated results stay provider failures without misclassifying story as account diagnostics', () => {
+  const generated = JSON.stringify({ text: 'login authorization quota PRIVATE_VALUE' });
+  assert.throws(
+    () => parseProviderOutput('claude', JSON.stringify({ is_error: true, result: generated })),
+    (error: unknown) => (error as { code: string }).code === 'provider_failure'
+  );
+  for (const [response, expected] of [
+    [generated, 'provider_failure'],
+    ['Please login with your account', 'provider_auth'],
+    ['resource exhausted', 'provider_quota'],
+  ]) {
+    const output = [
+      { event: 'init', init: { agent: 'local-rpg-fixture' } },
+      { event: 'result', result: { status: 'ERROR', num_turns: 1, response } },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join('\n');
+    assert.throws(
+      () => parseProviderOutput('agy', output),
+      (error: unknown) => {
+        assert.doesNotMatch(String(error), /PRIVATE_VALUE/);
+        return (error as { code: string }).code === expected;
+      }
+    );
+    assert.throws(
+      () => parseProviderOutput('agy', output.replace('local-rpg-fixture', 'foreign-agent')),
+      (error: unknown) => (error as { code: string }).code === 'provider_isolation'
+    );
+    assert.throws(
+      () => parseProviderOutput('agy', output.replace('"num_turns":1', '"num_turns":2')),
+      (error: unknown) => (error as { code: string }).code === 'provider_isolation'
+    );
+  }
+});
+
 test('runner streams prompt through stdin with bounded output, no shell interpolation and cancellation', async () => {
   const output = await runProcess(
     process.execPath,
@@ -298,7 +333,7 @@ test('Antigravity excludes ambient customizations and accepts one isolated resul
   }
   assert.throws(
     () => parseProviderOutput('agy', output({ ...result, status: 'ERROR' })),
-    /isolated/
+    (error: unknown) => (error as { code: string }).code === 'provider_failure'
   );
 });
 

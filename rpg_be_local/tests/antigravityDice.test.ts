@@ -54,6 +54,19 @@ else if(args.includes('/hooks')) {
     if(process.env.RPG_TEST_AGY_MODE==='private-tool') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:2,state:'ACTIVE',tool_name:'PRIVATE/path',tool_info:{name:'PRIVATE NAME',parameters:{ServerName:'PRIVATE SERVER',ToolName:'PRIVATE TOOL',Arguments:{command:'PRIVATE_COMMAND'}}},response:'PRIVATE_RESPONSE'}}));
     if(process.env.RPG_TEST_AGY_MODE==='missing-tool') console.log(JSON.stringify({event:'step_update',step_update:{step_type:'tool',step_index:2,state:'ACTIVE'}}));
     const mode=process.env.RPG_TEST_AGY_MODE;
+    if(mode.startsWith('error-marker-')) {
+      const marker={conversation_id:'fixture',step_type:'error_message',step_index:7,state:'DONE',duration_seconds:0.1};
+      if(mode==='error-marker-extra') marker.tool_info={parameters:{command:'PRIVATE_COMMAND'}};
+      if(mode==='error-marker-active') marker.state='ACTIVE';
+      if(mode==='error-marker-index') marker.step_index=-1;
+      console.log(JSON.stringify({event:'step_update',step_update:marker}));
+      if(['error-marker-failure','error-marker-quota','error-marker-auth','error-marker-story','error-marker-multi'].includes(mode)) {
+        const response=mode==='error-marker-story'?JSON.stringify({foundation:[],entries:[],text:'login authorization quota PRIVATE_VALUE'}):mode==='error-marker-quota'?'resource exhausted PRIVATE_VALUE':mode==='error-marker-auth'?'Please login PRIVATE_VALUE':'transport failed PRIVATE_VALUE';
+        console.log(JSON.stringify({event:'result',result:{status:'ERROR',num_turns:mode==='error-marker-multi'?2:1,response}}));
+        return;
+      }
+      if(mode!=='error-marker-recovery') return;
+    }
     if(['zero-turns','missing-turns'].includes(mode)) {
       console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:mode==='zero-turns'?0:undefined,response:'PRIVATE_RESPONSE'}}));
       return;
@@ -117,6 +130,53 @@ else if(args.includes('/hooks')) {
     console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',num_turns:1,usage:mode==='partial-usage'?undefined:mode==='invalid-usage'?{input_tokens:'unknown'}:{input_tokens:30000},response:JSON.stringify(response)}}));
   });
 }`;
+
+for (const [mode, code] of [
+  ['error-marker-recovery', null],
+  ['error-marker-failure', 'provider_failure'],
+  ['error-marker-quota', 'provider_quota'],
+  ['error-marker-auth', 'provider_auth'],
+  ['error-marker-story', 'provider_failure'],
+  ['error-marker-multi', 'dice_isolation'],
+  ['error-marker-extra', 'dice_isolation'],
+  ['error-marker-active', 'dice_isolation'],
+  ['error-marker-index', 'dice_isolation'],
+] as const) {
+  test(`native diagnostic marker: ${mode}`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-error-marker-'));
+    try {
+      const filename = path.join(root, 'cli.mjs');
+      await writeFile(filename, fixture);
+      let dispatches = 0;
+      const call = generateAntigravityMcpBook(
+        { binary: process.execPath, prefix: [filename] },
+        settings,
+        'Synthetic',
+        root,
+        { ...process.env, RPG_TEST_AGY_MODE: mode },
+        adapter(async () => {
+          dispatches++;
+          return {
+            rollId: randomUUID(),
+            groups: [{ label: 'check', sides: 6, faces: [3] }],
+          };
+        })
+      );
+      if (code) {
+        await assert.rejects(call, (error: unknown) => {
+          assert.doesNotMatch(String(error), /PRIVATE_VALUE|PRIVATE_COMMAND/);
+          return (error as { code: string }).code === code;
+        });
+        assert.equal(dispatches, 0);
+      } else {
+        await call;
+        assert.equal(dispatches, 2);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
 
 test('rejected unknown activity logs structural diagnostics without values or dispatch', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-agy-rejected-step-'));

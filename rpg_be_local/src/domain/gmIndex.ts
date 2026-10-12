@@ -79,10 +79,9 @@ const directional = (entry: {
     entry.refs.some((ref) => ref.kind !== GmIndexRefKind.RuleHint)
   );
 };
-export const gmIndexEntryValueSchema = valueObject.refine(
-  directional,
-  'Directions require proposal metadata and campaign directions require provenance'
-);
+export const GM_INDEX_DIRECTION_GUIDANCE =
+  'Only pressure and opportunity entries require a non-null direction. For focus, task, clue, question and gm_plan, direction must be null. Campaign-based directions require an original or canonical campaign reference.';
+export const gmIndexEntryValueSchema = valueObject.refine(directional, GM_INDEX_DIRECTION_GUIDANCE);
 export const gmIndexEntrySchema = valueObject
   .extend({ id: z.uuid() })
   .strict()

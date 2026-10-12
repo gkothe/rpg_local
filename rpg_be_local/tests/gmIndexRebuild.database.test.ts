@@ -14,6 +14,8 @@ import { GmIndexPreparationMode } from '../src/domain/gmIndexGeneration.js';
 import { MemoryRebuildPurpose, MemoryRebuildStatus } from '../src/domain/memoryRebuild.js';
 import { MemoryRebuildService } from '../src/services/memoryRebuild.js';
 import { GmIndexStatusService } from '../src/services/gmIndexStatus.js';
+import { CAMPAIGN_SOURCE_GET_TOOL_NAME } from '../src/domain/campaignSourceRecall.js';
+import { HISTORY_SEARCH_TOOL_NAME } from '../src/domain/historyRecall.js';
 import {
   dbEnabled,
   openIsolatedStore,
@@ -37,8 +39,20 @@ const OLD_PLAN = 'OLD_INDEX_PLAN_EXCLUSION_MARKER';
 function provider(fail = false) {
   const calls: Record<string, unknown>[] = [];
   const generator: Generator = {
-    capacity: async () => 16000,
-    gameplayCapacity: async () => 16000,
+    capacity: async (settings) => {
+      assert.ok(
+        settings && typeof settings.provider === 'string',
+        'Resume must provide the captured campaign provider settings'
+      );
+      return 16000;
+    },
+    gameplayCapacity: async (settings) => {
+      assert.ok(
+        settings && typeof settings.provider === 'string',
+        'Resume must preflight the owned tool transport with captured settings'
+      );
+      return 16000;
+    },
     generate: async () => {
       throw new Error('Short campaign preparation must not summarize history');
     },
@@ -241,6 +255,30 @@ test(
     assert.deepEqual(scanned, expected);
     assert.equal(ready.gmIndex?.preview?.coverage.sourceSections, expected.length);
     assert.doesNotMatch(JSON.stringify(ai.calls), /DRAFT_SOURCE_MARKER/);
+  }
+);
+
+test(
+  'a fresh rebuild without a previous index enables only after reviewed Apply',
+  { skip: !dbEnabled },
+  async () => {
+    const { campaign } = await seed(5);
+    const ai = provider();
+    const service = new MemoryRebuildService(isolated.store, ai.generator);
+    const started = await service.start(
+      campaign.id,
+      randomUUID(),
+      MemoryRebuildPurpose.GmIndex,
+      GmIndexPreparationMode.FreshRebuild
+    );
+    const ready = await settle(service, campaign.id, started.id);
+    assert.equal(ready.status, MemoryRebuildStatus.Ready);
+    assert.equal((await isolated.store.campaign(campaign.id)).gmIndex, undefined);
+    await service.apply(campaign.id, ready.id, randomUUID(), ready.candidate!.proposalDigest);
+    const live = await isolated.store.campaign(campaign.id);
+    assert.equal(live.gmIndex!.settings.enabled, true);
+    assert.equal(live.historyRecall!.enabled, true);
+    assert.equal(live.gmIndex!.settings.activationHistoryBaseline.enabled, false);
   }
 );
 
@@ -550,5 +588,91 @@ test(
     const result = await isolated.store.campaign(campaign.id);
     assert.equal(result.gmIndex!.document.entries[0]!.title, oldTask.title);
     assert.equal(result.gmIndex!.settings.enabled, false);
+  }
+);
+
+test(
+  'source scans seed supplied originals and persist safe preparation stage/read progress',
+  { skip: !dbEnabled },
+  async () => {
+    const { campaign } = await seed();
+    campaign.sources = [
+      {
+        id: randomUUID(),
+        name: 'Private campaign original',
+        kind: SourceKind.Text,
+        status: SourceStatus.Confirmed,
+        version: 1,
+        text: `PRIVATE_SOURCE_PROGRESS_MARKER ${'Harbor merchant '.repeat(600)}`,
+        pages: [],
+        warnings: [],
+      },
+    ];
+    await save(campaign);
+    const ai = provider();
+    let expectedReads = 0;
+    let sections = 0;
+    const service = new MemoryRebuildService(isolated.store, ai.generator);
+    ai.generator.generateOwnedGameplay = async (_settings, prompt, _schema, _system, tools) => {
+      const input = JSON.parse(prompt);
+      if (input.stage === 'scan') {
+        if (input.batch.kind === 'source_original') {
+          sections++;
+          assert.match(input.supplied, /complete batch original/);
+          const original = await tools(
+            CAMPAIGN_SOURCE_GET_TOOL_NAME,
+            {
+              sourceId: input.batch.sourceId,
+              version: input.batch.version,
+              sectionIndex: input.batch.sectionIndex,
+            },
+            `source-${sections}`
+          );
+          expectedReads++;
+          assert.ok('alreadySupplied' in original);
+          assert.equal(original.alreadySupplied, true);
+          const running = (await service.list(campaign.id, 1, 0)).current!;
+          assert.equal(running.gmIndex!.progress!.label, 'Reading campaign source sections');
+          assert.equal(running.gmIndex!.progress!.retrievalCalls, expectedReads);
+          assert.doesNotMatch(
+            JSON.stringify(running),
+            /PRIVATE_SOURCE_PROGRESS_MARKER|HIDDEN_KNOWLEDGE_MARKER/
+          );
+          const empty = await tools(
+            HISTORY_SEARCH_TOOL_NAME,
+            { query: 'an-exact-missing-passage' },
+            `empty-${sections}`
+          );
+          expectedReads++;
+          assert.equal('corpusFragments' in empty, false);
+        }
+        return { foundation: [], entries: [] };
+      }
+      return { foundation: [], entries: [] };
+    };
+    const started = await service.start(campaign.id, randomUUID(), MemoryRebuildPurpose.GmIndex);
+    const ready = await settle(service, campaign.id, started.id);
+    assert.equal(ready.status, MemoryRebuildStatus.Ready, ready.safeError ?? '');
+    assert.equal(sections, sourceSections(campaign.sources[0]!).length);
+    const progress = ready.gmIndex!.progress!;
+    assert.equal(progress.label, 'Ready for review');
+    assert.equal(progress.retrievalCalls, sections * 2);
+    assert.equal(progress.emptySearches, sections);
+    assert.equal(progress.completedSteps, progress.totalSteps);
+    assert.ok(Number.isFinite(Date.parse(progress.lastActivityAt)));
+    const reloaded = await new MemoryRebuildService(isolated.store, ai.generator).status(
+      campaign.id,
+      ready.id
+    );
+    assert.deepEqual(reloaded.gmIndex!.progress, progress);
+    assert.doesNotMatch(
+      JSON.stringify(reloaded),
+      /PRIVATE_SOURCE_PROGRESS_MARKER|HIDDEN_KNOWLEDGE_MARKER/
+    );
+    const saved = await isolated.store.pool.query(
+      'SELECT candidate FROM memory_rebuild_jobs WHERE id=$1',
+      [ready.id]
+    );
+    assert.match(JSON.stringify(saved.rows[0].candidate), /initialSourceSections/);
   }
 );

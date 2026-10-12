@@ -2,14 +2,14 @@ import { Problem } from './errors.js';
 
 /** Never include raw provider output, exception messages, paths or rejected values. */
 export function cliFailure(diagnostics: string): Problem {
-  if (/hit your limit|usage limit|rate limit|quota|resource.exhausted/i.test(diagnostics))
+  if (/\b(?:hit your limit|usage limit|rate limit|quota|resource.exhausted)\b/i.test(diagnostics))
     return new Problem(
       503,
       'provider_quota',
       'CLI account quota or rate limit reached; wait for the provider reset before retrying.'
     );
   if (
-    /log.?in|authentication|unauthenticated|authorization|not authenticated|sign.?in/i.test(
+    /\b(?:log.?in|authentication|unauthenticated|authorization|not authenticated|sign.?in)\b/i.test(
       diagnostics
     )
   )
@@ -23,6 +23,14 @@ export function cliFailure(diagnostics: string): Problem {
     'provider_failure',
     'Local process failed; inspect its own diagnostics and account/model availability.'
   );
+}
+
+/** Generated JSON in a failed completion is data, never account diagnostics. */
+export function cliResultFailure(response: string): Problem {
+  const trimmed = response.trimStart();
+  const structured =
+    trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('```');
+  return cliFailure(structured ? '' : response);
 }
 export function operationalProblem(error: unknown): Problem {
   if (error instanceof Problem) return error;

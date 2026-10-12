@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import type { Memory } from './types.js';
-import { GmIndexPreparationMode, type GmIndexPreview } from './gmIndexGeneration.js';
+import {
+  GmIndexPreparationMode,
+  type GmIndexPreview,
+  type GmIndexPreparationProgress,
+} from './gmIndexGeneration.js';
 
 export enum MemoryRebuildStatus {
   Pending = 'pending',
@@ -133,7 +137,11 @@ export type MemoryRebuildDecision = {
   memoryId: string | null;
 };
 export type MemoryRebuildJobView = {
-  gmIndex?: { mode: GmIndexPreparationMode; preview: GmIndexPreview | null };
+  gmIndex?: {
+    mode: GmIndexPreparationMode;
+    preview: GmIndexPreview | null;
+    progress?: GmIndexPreparationProgress;
+  };
   id: string;
   campaignId: string;
   purpose: MemoryRebuildPurpose;

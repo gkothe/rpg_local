@@ -1,8 +1,9 @@
-import { cliFailure } from '../processingErrors.js';
+import { cliFailure, cliResultFailure } from '../processingErrors.js';
 import { Problem } from '../errors.js';
 import { parseCodexPayload } from './codex.js';
 import type { ProviderSettings } from '../domain/types.js';
 import { PROVIDER_ID } from './options.js';
+import { parseAntigravityResponse } from './antigravityResponse.js';
 export function providerArgs(
   id: string,
   settings: ProviderSettings,
@@ -69,6 +70,12 @@ export function parseProviderOutput(id: string, output: string): unknown {
       const init = events.find((event) => event.event === 'init')?.init;
       const result = events.filter((event) => event.event === 'result').at(-1)?.result;
       if (
+        init?.agent?.startsWith('local-rpg-') &&
+        result?.status === 'ERROR' &&
+        [undefined, 0, 1].includes(result.num_turns)
+      )
+        throw cliResultFailure(typeof result.response === 'string' ? result.response : '');
+      if (
         !init?.agent?.startsWith('local-rpg-') ||
         result?.status !== 'SUCCESS' ||
         result.num_turns !== 1
@@ -79,8 +86,7 @@ export function parseProviderOutput(id: string, output: string): unknown {
           'Antigravity did not complete one isolated GM turn'
         );
       const response = result.response.trim();
-      const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(response);
-      return JSON.parse(fenced ? fenced[1]! : response);
+      return parseAntigravityResponse(response);
     }
     if (id === PROVIDER_ID.Codex) {
       const events = output
@@ -110,13 +116,9 @@ export function parseProviderOutput(id: string, output: string): unknown {
     }
     const envelope = JSON.parse(output);
     if (envelope.is_error || envelope.error)
-      throw cliFailure(
-        typeof envelope.result === 'string'
-          ? envelope.result
-          : typeof envelope.error === 'string'
-            ? envelope.error
-            : ''
-      );
+      throw typeof envelope.result === 'string'
+        ? cliResultFailure(envelope.result)
+        : cliFailure(typeof envelope.error === 'string' ? envelope.error : '');
     if (envelope.structured_output) return envelope.structured_output;
     if (typeof envelope.result === 'string') return JSON.parse(envelope.result);
     if (typeof envelope.response === 'string') return JSON.parse(envelope.response);

@@ -1,8 +1,48 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { withResponseRetries } from '../src/domain/responseRetry.js';
+import {
+  withResponseRetries,
+  structuredResponseRetryFeedback,
+} from '../src/domain/responseRetry.js';
 import { Problem } from '../src/errors.js';
+import { gmIndexEntryValueSchema } from '../src/domain/gmIndex.js';
+
+test('index correction explains directional refinements without forwarding arbitrary custom text', () => {
+  const result = gmIndexEntryValueSchema.safeParse({
+    kind: 'gm_plan',
+    status: 'active',
+    title: 'Synthetic',
+    text: 'Synthetic',
+    ownerCharacterId: null,
+    refs: [],
+    direction: {
+      basis: 'creative',
+      trigger: null,
+      development: 'Synthetic',
+      choices: [],
+      rationale: 'Synthetic',
+    },
+  });
+  assert.equal(result.success, false);
+  if (!result.success) {
+    const feedback = structuredResponseRetryFeedback(result.error)!;
+    assert.match(feedback, /gm_plan, direction must be null/);
+    assert.match(feedback, /pressure and opportunity/);
+  }
+  const privateError = z
+    .string()
+    .refine(() => false, 'PRIVATE_VALUE')
+    .safeParse('input');
+  if (!privateError.success)
+    assert.doesNotMatch(structuredResponseRetryFeedback(privateError.error)!, /PRIVATE_VALUE/);
+});
+
+test('generic provider failures can retry but quota, login and isolation cannot', () => {
+  assert.ok(structuredResponseRetryFeedback(new Problem(502, 'provider_failure', 'Synthetic')));
+  for (const code of ['provider_quota', 'provider_auth', 'dice_isolation', 'cancelled'])
+    assert.equal(structuredResponseRetryFeedback(new Problem(503, code, 'Synthetic')), null);
+});
 
 test('malformed JSON and invalid response schema retry with feedback and prepare replay', async () => {
   const attempts: number[] = [];

@@ -1,4 +1,4 @@
-import { cliFailure } from '../processingErrors.js';
+import { cliResultFailure } from '../processingErrors.js';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,6 +13,7 @@ import { startGameplayMcp } from './gameplayMcp.js';
 import { gameplayToolRequestBytes, type GameplayAdapter } from './gameplayTools.js';
 import { logPrompt, traceEvent, safeTraceFailure, type PromptTraceContext } from './promptLog.js';
 import { responseRetryFeedback } from '../domain/responseRetry.js';
+import { parseAntigravityResponse } from './antigravityResponse.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const MCP_SERVER = 'local_rpg';
@@ -444,10 +445,14 @@ export async function generateAntigravityMcpBook(
                   notify();
                 }
               } else if (
-                step.step_type === 'unknown' &&
+                (step.step_type === 'unknown' || step.step_type === 'error_message') &&
                 step.state === 'DONE' &&
-                Number.isInteger(step.step_index) &&
+                Number.isSafeInteger(step.step_index) &&
                 step.step_index! >= 0 &&
+                (step.step_type !== 'error_message' ||
+                  (!discoverySteps.has(step.step_index!) &&
+                    !nativeTasks.has(step.step_index!) &&
+                    !pending.some((entry) => entry.index === step.step_index))) &&
                 Object.keys(step).every((key) =>
                   [
                     'conversation_id',
@@ -458,8 +463,10 @@ export async function generateAntigravityMcpBook(
                   ].includes(key)
                 )
               ) {
-                // The CLI emits an empty completion marker after tool continuation.
-                // It grants no capability and carries no tool or response content.
+                // Empty CLI markers grant no capability. A diagnostic marker is not
+                // success: the terminal result still controls failure classification.
+                if (step.step_type === 'error_message')
+                  await traceEvent(trace, 'native_diagnostic_marker', rejectedStepMetadata(step));
               } else if (step.step_type !== 'user_input') {
                 await traceEvent(trace, 'rejected_step', {
                   code: 'dice_isolation',
@@ -497,8 +504,25 @@ export async function generateAntigravityMcpBook(
                 unclaimedCalls,
                 incompleteNativeTasks,
               });
-              if (initialized && !completed && result.status !== 'SUCCESS')
-                throw cliFailure(typeof result.response === 'string' ? result.response : '');
+              if (initialized && !completed && result.status !== 'SUCCESS') {
+                if (typeof result.num_turns === 'number' && result.num_turns > 1)
+                  throw new Problem(
+                    502,
+                    'dice_isolation',
+                    'Antigravity reported multiple turns in a failed completion'
+                  );
+                const diagnostics = typeof result.response === 'string' ? result.response : '';
+                // A failed turn can still return generated story/index JSON. Its
+                // prose is not account diagnostics (e.g. references to login/quota).
+                const failure = cliResultFailure(diagnostics);
+                // Like successful final responses, this stays in the private local trace.
+                // Public problems and server error logs retain only safe classification.
+                await traceEvent(trace, 'native_failure_response', {
+                  code: failure.code,
+                  response: diagnostics,
+                });
+                throw failure;
+              }
               if (
                 !initialized ||
                 completed ||
@@ -538,9 +562,8 @@ export async function generateAntigravityMcpBook(
                 );
               }
               await traceEvent(trace, 'final', { response: text });
-              const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(text);
               try {
-                final = responseSchema.parse(JSON.parse(fenced ? fenced[1]! : text));
+                final = responseSchema.parse(parseAntigravityResponse(text));
               } catch (error) {
                 throw new Problem(
                   502,

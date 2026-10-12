@@ -1,5 +1,6 @@
 import { ZodError } from 'zod';
 import { Problem } from '../errors.js';
+import { GM_INDEX_DIRECTION_GUIDANCE } from './gmIndex.js';
 
 export const RESPONSE_RETRY_COUNT = 2;
 const RETRYABLE_RESPONSE_CODES = new Set([
@@ -20,7 +21,12 @@ export function responseRetryFeedback(error: unknown): string | null {
   if (error instanceof ZodError) {
     return (
       'Invalid response fields: ' +
-      error.issues.map((issue) => `${issue.path.join('.')}: ${issue.code}`).join('; ')
+      error.issues
+        .map(
+          (issue) =>
+            `${issue.path.join('.')}: ${issue.code}${issue.code === 'custom' && issue.message === GM_INDEX_DIRECTION_GUIDANCE ? `; ${GM_INDEX_DIRECTION_GUIDANCE}` : ''}`
+        )
+        .join('; ')
     );
   }
   if (error instanceof SyntaxError)
@@ -47,4 +53,21 @@ export async function withResponseRetries<T>(
       feedback = `Your previous response was rejected: ${reason}. Correct it and return the complete required JSON. All saved dice are authoritative; replay their original requests without changing their specifications or faces. Cite only retrieved original text. For each citation, provide an exact unique quote and its source identity. Omit offsets and page metadata; the application computes them. Never invent receipt IDs or state.`;
     }
   }
+}
+
+/** Correctable contracts and generic CLI failures; quota/auth and isolation failures stop. */
+export function structuredResponseRetryFeedback(error: unknown): string | null {
+  if (error instanceof Problem && error.code === 'provider_failure')
+    return 'The CLI failed before completing this stage. Retry this same stage with the supplied inputs; do not repeat completed work.';
+  if (error instanceof ZodError || error instanceof SyntaxError)
+    return responseRetryFeedback(error);
+  if (
+    error instanceof Problem &&
+    (['provider_json', 'gameplay_tool_unavailable', 'gameplay_tool_arguments'].includes(
+      error.code
+    ) ||
+      (error.status === 422 && ['gm_index_reference', 'gm_index_provenance'].includes(error.code)))
+  )
+    return error.message;
+  return null;
 }

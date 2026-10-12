@@ -5,11 +5,15 @@ import type { Store } from '../store.js';
 import { ownerId } from '../store.js';
 import type { Generator } from '../providers/service.js';
 
-import type { PromptTraceContext } from '../providers/promptLog.js';
+import { traceEvent, type PromptTraceContext } from '../providers/promptLog.js';
 import { canonicalJson, sha256 } from '../domain/journalLedger.js';
 import { RESPONSE_RETRY_COUNT, responseRetryFeedback } from '../domain/responseRetry.js';
 import type { TurnVersion, FrozenHistory } from '../domain/historyRecall.js';
-import { createGmIndexReadTools, restoreGmIndexSourceReads } from './gmIndexReadTools.js';
+import {
+  createGmIndexReadTools,
+  restoreGmIndexSourceReads,
+  gmIndexReadSummary,
+} from './gmIndexReadTools.js';
 import {
   GM_INDEX_UPDATER_INSTRUCTIONS,
   GM_INDEX_UPDATE_PURPOSE,
@@ -117,11 +121,29 @@ export class GmIndexUpdater {
         checkpoint.history,
         assertActive,
         async (read) => {
+          await traceEvent(trace, 'gm_index_read_complete', {
+            ...gmIndexReadSummary(read),
+            readNumber: invocation.reads.length + 1,
+          });
           invocation.reads.push(read);
           await this.save(turnId, checkpoint);
         },
-        [checkpoint.currentOriginal]
+        [checkpoint.currentOriginal],
+        [],
+        {
+          onReadStarted: (name) =>
+            traceEvent(trace, 'gm_index_read_start', {
+              tool: name,
+              readNumber: invocation.reads.length + 1,
+            }),
+        }
       );
+      const stageStartedAt = Date.now();
+      await traceEvent(trace, 'gm_index_stage_start', {
+        purpose: GM_INDEX_UPDATE_PURPOSE,
+        attempt,
+        promptBytes: Buffer.byteLength(checkpoint.prompt, 'utf8'),
+      });
       try {
         const output = await this.generator.generateOwnedGameplay!(
           checkpoint.campaign.settings,
@@ -142,8 +164,20 @@ export class GmIndexUpdater {
         await assertActive();
         const update = gmIndexUpdateSchema.parse(output);
         if (validate) await validate(update);
+        await traceEvent(trace, 'gm_index_stage_complete', {
+          purpose: GM_INDEX_UPDATE_PURPOSE,
+          attempt,
+          elapsedMs: Date.now() - stageStartedAt,
+          retrievalCalls: invocation.reads.length,
+        });
         return update;
       } catch (error) {
+        await traceEvent(trace, 'gm_index_stage_failed', {
+          purpose: GM_INDEX_UPDATE_PURPOSE,
+          attempt,
+          elapsedMs: Date.now() - stageStartedAt,
+          code: error instanceof Problem ? error.code : 'invalid_response',
+        });
         const reason =
           responseRetryFeedback(error) ??
           (error instanceof Problem && error.code.startsWith('gm_index_') && error.status === 422

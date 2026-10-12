@@ -13,3 +13,5 @@ Read `../CLAUDE.md`, `../AGENTS.md` and `../docs/documentation/api-contract.md` 
 - Root workspaces own dependencies and the lockfile. `lint` runs ESLint, `typecheck` runs TypeScript; run format/check, behavior tests and build separately. No live provider calls in the default tests.
 
 Record verified tooling/runtime gotchas here; maintained technical details belong in `../docs/documentation/`; report verification and remaining checks in the task response.
+
+The backend test command caps concurrent test files at four. Unbounded file startup caused isolated PostgreSQL fixture connection timeouts on the local Windows host. This limits test-runner load; concurrency explicitly exercised inside a test remains unchanged.

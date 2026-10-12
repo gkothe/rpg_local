@@ -9,6 +9,7 @@ import {
   type PromptTraceContext,
 } from '../providers/promptLog.js';
 import type { Generator } from '../providers/service.js';
+import { RESPONSE_RETRY_COUNT, structuredResponseRetryFeedback } from '../domain/responseRetry.js';
 import { composeMemory } from '../domain/memory.js';
 import {
   MEMORY_REBUILD_HEARTBEAT_MS,
@@ -69,9 +70,12 @@ import {
   gmIndexGenerationTargetIdentity,
   gmIndexPreview,
   gmIndexScanBatches,
+  gmIndexScanPrompt,
   gmIndexScanSchema,
   gmIndexPreparationSchema,
   gmIndexPreparedDocument,
+  normalizeGmIndexPreparationOutput,
+  normalizeGmIndexGenerationRefs,
   gmIndexPreparationDigest,
   GM_INDEX_PREPARATION_INSTRUCTIONS,
   type GmIndexGenerationCapture,
@@ -80,6 +84,7 @@ import { requireGmIndexTransport } from './gmIndexUpdater.js';
 import {
   createGmIndexReadTools,
   restoreGmIndexSourceReads,
+  gmIndexReadSummary,
   type GmIndexReadReceipt,
 } from './gmIndexReadTools.js';
 import { HISTORY_DEFAULTS } from '../domain/historyRecall.js';
@@ -135,6 +140,7 @@ export class MemoryRebuildService {
             gmIndex: {
               mode: (job.frozenInput as unknown as GmIndexGenerationCapture).mode,
               preview: showCandidate ? (job.gmIndexProposal?.preview ?? null) : null,
+              progress: this.indexProgress(job),
             },
           }
         : {}),
@@ -176,6 +182,33 @@ export class MemoryRebuildService {
             memoryId: job.decisionMemoryId,
           }
         : null,
+    };
+  }
+
+  private indexProgress(job: MemoryRebuildJobRow) {
+    const batches = gmIndexScanBatches(job.frozenInput as unknown as GmIndexGenerationCapture);
+    const step = job.checkpoint.nextIndex;
+    const batch = batches[step] as { kind?: string } | undefined;
+    const label =
+      job.status === MemoryRebuildStatus.Ready || job.status === MemoryRebuildStatus.Applied
+        ? 'Ready for review'
+        : batch?.kind === 'canonical'
+          ? 'Reading current campaign facts'
+          : batch?.kind === 'source_original'
+            ? 'Reading campaign source sections'
+            : batch?.kind === 'original_turns'
+              ? 'Reading saved original turns'
+              : step === batches.length
+                ? 'Merging the working index'
+                : 'Preparing compact history';
+    const reads = (job.indexReadInvocations ?? []).flat();
+    return {
+      label,
+      completedSteps: step,
+      totalSteps: job.checkpoint.totalTurns,
+      retrievalCalls: reads.length,
+      emptySearches: reads.filter((read) => gmIndexReadSummary(read).empty).length,
+      lastActivityAt: job.updatedAt,
     };
   }
 
@@ -353,8 +386,14 @@ export class MemoryRebuildService {
     const identity = identityOf(MemoryRebuildAction.Resume);
     const saved = await this.jobs.receipt(jobId, MemoryRebuildAction.Resume, requestId);
     if (saved) return this.replayReceipt(campaignId, jobId, saved.identityDigest, identity);
-    const frozen = frozenSchema.parse((await this.jobs.get(campaignId, jobId)).frozenInput);
-    await this.requireProvider(frozen.settings);
+    const capturedJob = await this.jobs.get(campaignId, jobId);
+    const settings =
+      capturedJob.purpose === MemoryRebuildPurpose.GmIndex
+        ? (capturedJob.frozenInput as unknown as GmIndexGenerationCapture).campaign.settings
+        : frozenSchema.parse(capturedJob.frozenInput).settings;
+    await this.requireProvider(settings);
+    if (capturedJob.purpose === MemoryRebuildPurpose.GmIndex)
+      await requireGmIndexTransport(this.generator!, settings);
     let launch: { job: MemoryRebuildJobRow; owner: string } | null = null;
     await this.store.transaction(async (client) => {
       const c = await this.store.campaign(campaignId, client, true);
@@ -433,15 +472,39 @@ export class MemoryRebuildService {
     root: PromptTraceContext,
     schema: unknown = memoryJsonSchema
   ): Promise<unknown> {
-    const child: PromptTraceContext = { ...root, executionId: randomUUID() };
-    await traceEvent(child, 'request', { prompt, schema }, true);
-    try {
-      const result = await generator.generate(settings, prompt, schema, signal, child);
-      await traceEvent(child, 'result', { result });
-      return result;
-    } catch (error) {
-      await traceEvent(child, 'failure', safeTraceFailure(error));
-      throw error;
+    let feedback = '';
+    for (let attempt = 0; ; attempt++) {
+      if (signal.aborted) throw cancelled();
+      const child: PromptTraceContext = {
+        ...root,
+        executionId: randomUUID(),
+        correctionAttempt: attempt,
+      };
+      const requestPrompt = feedback
+        ? JSON.stringify({ ...JSON.parse(prompt), validationFeedback: feedback })
+        : prompt;
+      await traceEvent(child, 'request', { prompt: requestPrompt, schema }, true);
+      try {
+        const result = await generator.generate(settings, requestPrompt, schema, signal, child);
+        const validator =
+          schema === historySectionJsonSchema
+            ? historySectionSchema
+            : schema === historyOverviewJsonSchema
+              ? historyOverviewSchema
+              : memorySchema;
+        validator.parse(result);
+        await traceEvent(child, 'result', { result });
+        return result;
+      } catch (error) {
+        await traceEvent(child, 'failure', safeTraceFailure(error));
+        const reason = structuredResponseRetryFeedback(error);
+        if (signal.aborted || reason === null || attempt >= RESPONSE_RETRY_COUNT) throw error;
+        feedback = `Previous output failed validation: ${reason}. Return complete strict JSON matching the supplied schema, with no trailing commas or extra prose. Correct only this step; do not repeat prior completed work.`;
+        await traceEvent(child, 'response_validation_retry', {
+          nextAttempt: attempt + 1,
+          ...safeTraceFailure(error),
+        });
+      }
     }
   }
 
@@ -461,6 +524,7 @@ export class MemoryRebuildService {
           ctl.abort();
         });
     }, MEMORY_REBUILD_HEARTBEAT_MS);
+    let runTrace: PromptTraceContext | undefined;
     try {
       const gmCapture =
         job.purpose === MemoryRebuildPurpose.GmIndex
@@ -478,6 +542,12 @@ export class MemoryRebuildService {
         purpose: 'memory_rebuild',
       };
       root.trace = await createPromptTrace('memory_rebuild', root);
+      runTrace = root;
+      await traceEvent(root, 'rebuild_started', {
+        purpose: job.purpose,
+        completedSteps: job.checkpoint.nextIndex,
+        totalSteps: job.checkpoint.totalTurns,
+      });
       if (gmCapture) {
         await this.runGmIndex(job, owner, gmCapture, generator, ctl.signal, root);
         return;
@@ -534,6 +604,10 @@ export class MemoryRebuildService {
       await this.alive(job, owner, ctl.signal);
       await this.finish(job, owner, draft, covered);
     } catch (error) {
+      await traceEvent(runTrace, 'rebuild_stopped', {
+        cancelled: ctl.signal.aborted,
+        ...safeTraceFailure(error),
+      });
       if (ctl.signal.aborted || (error instanceof Problem && error.code === 'cancelled')) return;
       reportProcessingFailure('memory_rebuild', error);
       const problem =
@@ -638,6 +712,12 @@ export class MemoryRebuildService {
       await this.alive(job, owner, signal);
       const i = cp.nextIndex;
       const step = plan[i]!;
+      const historyStepStartedAt = Date.now();
+      await traceEvent(root, 'history_step_start', {
+        step: i,
+        kind: step.kind,
+        totalSteps: plan.length,
+      });
       let fragment: StagedFragment;
       if (step.kind === HistoryStepKind.Section) {
         const previous = [...staged].reverse().find((f) => f.kind === HistoryFragmentKind.Section);
@@ -748,6 +828,13 @@ export class MemoryRebuildService {
         ...(job.indexReadInvocations ? { indexReadInvocations: job.indexReadInvocations } : {}),
       });
       if (!saved) throw cancelled();
+      await traceEvent(root, 'history_step_checkpoint', {
+        step: i,
+        kind: step.kind,
+        elapsedMs: Date.now() - historyStepStartedAt,
+        completedSteps: next.nextIndex,
+        totalSteps: next.totalTurns,
+      });
       cp = indexed ? { ...next, nextIndex: next.nextIndex - indexed.offset } : next;
     }
     await this.alive(job, owner, signal);
@@ -793,59 +880,165 @@ export class MemoryRebuildService {
         omitted: { count: 0, reasonCounts: {} },
       },
     };
-    const invoke = async (prompt: string, schema: z.ZodType, purpose: string) => {
-      await alive();
-      const reads: GmIndexReadReceipt[] = [];
-      indexReadInvocations.push(reads);
-      const tools = createGmIndexReadTools(
-        this.store,
-        capture.campaign,
-        history,
-        alive,
-        async (read) => {
-          reads.push(read);
-          const current = await this.jobs.get(job.campaignId, job.id);
-          if (
-            !(await this.jobs.advance(
-              job.id,
-              owner,
-              current.checkpoint.nextIndex,
-              current.checkpoint,
-              {
-                text: current.candidateText ?? '',
-                coveredTurnIds: current.candidateCoveredTurnIds ?? [],
-                staged: current.staged ?? [],
-                foundationDrafts: drafts,
-                ...(current.gmIndexProposal ? { gmIndex: current.gmIndexProposal } : {}),
-                indexReadInvocations,
-              }
-            ))
-          )
-            throw cancelled();
+    const invoke = async (
+      prompt: string,
+      schema: z.ZodType,
+      purpose: string,
+      suppliedSourceSections: import('./gmIndexReadTools.js').GmIndexSourceSection[] = [],
+      validateOutput?: (output: unknown) => void
+    ) => {
+      let feedback = '';
+      for (let attempt = 0; ; attempt++) {
+        await alive();
+        const invocationStartedAt = Date.now();
+        const activeStep = (await this.jobs.get(job.campaignId, job.id)).checkpoint.nextIndex;
+        await traceEvent(root, 'gm_index_stage_start', {
+          purpose,
+          step: activeStep,
+          attempt,
+          promptBytes: Buffer.byteLength(prompt, 'utf8'),
+        });
+        const reads: GmIndexReadReceipt[] = [];
+        indexReadInvocations.push(reads);
+        const tools = createGmIndexReadTools(
+          this.store,
+          capture.campaign,
+          history,
+          alive,
+          async (read) => {
+            reads.push(read);
+            await traceEvent(root, 'gm_index_read_complete', {
+              purpose,
+              readNumber: reads.length,
+              ...gmIndexReadSummary(read),
+              elapsedMs: Date.now() - invocationStartedAt,
+            });
+            const current = await this.jobs.get(job.campaignId, job.id);
+            if (
+              !(await this.jobs.advance(
+                job.id,
+                owner,
+                current.checkpoint.nextIndex,
+                current.checkpoint,
+                {
+                  text: current.candidateText ?? '',
+                  coveredTurnIds: current.candidateCoveredTurnIds ?? [],
+                  staged: current.staged ?? [],
+                  ...(current.gmIndexMergeOutput !== undefined
+                    ? { gmIndexMergeOutput: current.gmIndexMergeOutput }
+                    : {}),
+                  foundationDrafts: drafts,
+                  ...(current.gmIndexProposal ? { gmIndex: current.gmIndexProposal } : {}),
+                  indexReadInvocations,
+                }
+              ))
+            )
+              throw cancelled();
+          },
+          [],
+          [],
+          {
+            originalsOnly: true,
+            suppliedSourceSections,
+            onReadStarted: (name) =>
+              traceEvent(root, 'gm_index_read_start', {
+                purpose,
+                tool: name,
+                readNumber: reads.length + 1,
+              }),
+          }
+        );
+        try {
+          const result = await generator.generateOwnedGameplay!(
+            capture.campaign.settings,
+            feedback
+              ? JSON.stringify({ ...JSON.parse(prompt), validationFeedback: feedback })
+              : prompt,
+            z.toJSONSchema(schema),
+            GM_INDEX_PREPARATION_INSTRUCTIONS,
+            tools,
+            signal,
+            { ...root, executionId: randomUUID(), purpose, correctionAttempt: attempt }
+          );
+          await alive();
+          if (purpose === 'gm_index_prepare') {
+            const current = await this.jobs.get(job.campaignId, job.id);
+            if (
+              !(await this.jobs.advance(
+                job.id,
+                owner,
+                current.checkpoint.nextIndex,
+                current.checkpoint,
+                {
+                  text: current.candidateText ?? '',
+                  coveredTurnIds: current.candidateCoveredTurnIds ?? [],
+                  staged: current.staged ?? [],
+                  foundationDrafts: drafts,
+                  indexReadInvocations,
+                  gmIndexMergeOutput: result,
+                }
+              ))
+            )
+              throw cancelled();
+            await traceEvent(root, 'gm_index_merge_output_saved', { step: activeStep, attempt });
+          }
+          const validated = schema.parse(
+            normalizeGmIndexGenerationRefs(
+              capture,
+              purpose === 'gm_index_prepare' ? normalizeGmIndexPreparationOutput(result) : result
+            )
+          );
+          validateOutput?.(validated);
+          await traceEvent(root, 'gm_index_stage_complete', {
+            purpose,
+            retrievalCalls: reads.length,
+            emptySearches: reads.filter((read) => gmIndexReadSummary(read).empty).length,
+            elapsedMs: Date.now() - invocationStartedAt,
+          });
+          return validated;
+        } catch (error) {
+          await traceEvent(root, 'gm_index_stage_failed', {
+            purpose,
+            step: activeStep,
+            elapsedMs: Date.now() - invocationStartedAt,
+            ...safeTraceFailure(error),
+          });
+          const reason = structuredResponseRetryFeedback(error);
+          if (signal.aborted || reason === null || attempt >= RESPONSE_RETRY_COUNT) throw error;
+          await alive();
+          feedback = `Previous output failed validation: ${reason}. Return complete strict JSON matching the supplied schema. No trailing commas, comments, markdown or extra prose. Correct only this same batch/stage; already completed work stays saved. Use owned references and the supplied originals.`;
+          await traceEvent(root, 'response_validation_retry', {
+            purpose,
+            step: activeStep,
+            nextAttempt: attempt + 1,
+            ...safeTraceFailure(error),
+          });
         }
-      );
-      const result = await generator.generateOwnedGameplay!(
-        capture.campaign.settings,
-        prompt,
-        z.toJSONSchema(schema),
-        GM_INDEX_PREPARATION_INSTRUCTIONS,
-        tools,
-        signal,
-        { ...root, executionId: randomUUID(), purpose }
-      );
-      await alive();
-      return schema.parse(result);
+      }
     };
     let nextIndex = job.checkpoint.nextIndex;
     for (let i = nextIndex; i < batches.length; i++) {
       const out = (await invoke(
-        JSON.stringify({
-          stage: 'scan',
-          batch: batches[i],
-          task: 'Read this complete captured batch. Extract concise source-grounded foundation/navigation AND working entries for unresolved commitments, clues, questions, player intentions and tentative directions. Preserve old pending tasks even when not in the latest turns. Actual history and canonical state outrank authored assumptions; do not call proposed events accomplished facts. Return foundation and entries.',
-        }),
+        gmIndexScanPrompt(capture, batches[i]),
         gmIndexScanSchema,
-        'gm_index_scan'
+        'gm_index_scan',
+        ((batch: unknown) => {
+          const section = batch as {
+            kind: string;
+            sourceId: string;
+            version: number;
+            sectionIndex: number;
+          };
+          return section.kind === 'source_original'
+            ? [
+                {
+                  sourceId: section.sourceId,
+                  version: section.version,
+                  sectionIndex: section.sectionIndex,
+                },
+              ]
+            : [];
+        })(batches[i])
       )) as z.infer<typeof gmIndexScanSchema>;
       drafts = [
         ...drafts,
@@ -853,6 +1046,11 @@ export class MemoryRebuildService {
         ...out.entries.map((workingEntry) => ({ workingEntry })),
       ];
       nextIndex = i + 1;
+      await traceEvent(root, 'gm_index_batch_checkpoint', {
+        completedSteps: nextIndex,
+        totalSteps: job.checkpoint.totalTurns,
+        draftItems: drafts.length,
+      });
       if (
         !(await this.jobs.advance(
           job.id,
@@ -865,30 +1063,45 @@ export class MemoryRebuildService {
         throw cancelled();
     }
     if (nextIndex === batches.length) {
-      const output = await invoke(
-        JSON.stringify({
-          stage: 'synthesize',
-          scannedFoundation: drafts.filter(
-            (draft) => !(draft && typeof draft === 'object' && 'workingEntry' in draft)
-          ),
-          scannedWorkingEntries: drafts.flatMap((draft) =>
-            draft && typeof draft === 'object' && 'workingEntry' in draft
-              ? [draft.workingEntry]
-              : []
-          ),
-          currentState: capture.campaign.state,
-          canonicalKnowledge: capture.campaign.knowledge ?? [],
-          characters: capture.campaign.characters.map(
-            ({ notes: _notes, revision: _revision, ...character }) => character
-          ),
-          npcCores: capture.campaign.continuity?.npcProfiles ?? [],
-          lastTurns: capture.turns.slice(-RECENT_GAMEPLAY_TURN_COUNT).map(turnVersionOf),
-          corrections: correctionGuidance(capture.campaign),
-          task: 'Consolidate a new compact foundation and working index, current pending tasks and clues, campaign-grounded directions and optional creative hooks. Plans are tentative. The entire captured campaign/history has been scanned; retrieve exact originals if needed.',
-        }),
-        gmIndexPreparationSchema,
-        'gm_index_prepare'
-      );
+      let output = job.gmIndexMergeOutput;
+      if (output !== undefined) {
+        try {
+          gmIndexPreparedDocument(capture, output);
+          await traceEvent(root, 'gm_index_saved_merge_reused', { step: nextIndex });
+        } catch (error) {
+          await traceEvent(root, 'gm_index_saved_merge_rejected', safeTraceFailure(error));
+          output = undefined;
+        }
+      }
+      if (output === undefined)
+        output = await invoke(
+          JSON.stringify({
+            stage: 'synthesize',
+            scannedFoundation: drafts.filter(
+              (draft) => !(draft && typeof draft === 'object' && 'workingEntry' in draft)
+            ),
+            scannedWorkingEntries: drafts.flatMap((draft) =>
+              draft && typeof draft === 'object' && 'workingEntry' in draft
+                ? [draft.workingEntry]
+                : []
+            ),
+            currentState: capture.campaign.state,
+            canonicalKnowledge: capture.campaign.knowledge ?? [],
+            characters: capture.campaign.characters.map(
+              ({ notes: _notes, revision: _revision, ...character }) => character
+            ),
+            npcCores: capture.campaign.continuity?.npcProfiles ?? [],
+            lastTurns: capture.turns.slice(-RECENT_GAMEPLAY_TURN_COUNT).map(turnVersionOf),
+            corrections: correctionGuidance(capture.campaign),
+            task: 'Consolidate a new compact foundation and working index, current pending tasks and clues, campaign-grounded directions and optional creative hooks. Plans are tentative. The entire captured campaign/history has been scanned; retrieve exact originals if needed.',
+          }),
+          gmIndexPreparationSchema,
+          'gm_index_prepare',
+          [],
+          (output) => {
+            gmIndexPreparedDocument(capture, output);
+          }
+        );
       const document = gmIndexPreparedDocument(capture, output);
       const gmIndex = {
         document,
@@ -928,6 +1141,10 @@ export class MemoryRebuildService {
       ready.staged ?? []
     );
     if (!(await this.jobs.ready(job.id, owner, digest))) throw cancelled();
+    await traceEvent(root, 'gm_index_ready', {
+      completedSteps: ready.checkpoint.nextIndex,
+      totalSteps: ready.checkpoint.totalTurns,
+    });
   }
 
   async apply(
@@ -993,23 +1210,21 @@ export class MemoryRebuildService {
             'The campaign or index changed after preparation; rebuild and review again.'
           );
         const baseline = { enabled: historySettingsOf(c).enabled, modeDecisionId: requestId };
-        if (capture.mode === GmIndexPreparationMode.Prepare) {
+        const retainedRebuildSettings =
+          capture.mode === GmIndexPreparationMode.FreshRebuild
+            ? capture.retainedSettings
+            : undefined;
+        if (!retainedRebuildSettings) {
           if (job.staged?.length) await this.activateHistory(c, job, client, false);
           else c.historyRecall = { ...historySettingsOf(c), enabled: true, activeOverviewId: null };
         }
         c.gmIndex = {
-          settings:
-            capture.mode === GmIndexPreparationMode.FreshRebuild
-              ? (capture.retainedSettings ?? {
-                  enabled: false,
-                  activationHistoryBaseline: baseline,
-                })
-              : {
-                  enabled: true,
-                  activationHistoryBaseline: capture.retainedSettings?.enabled
-                    ? capture.retainedSettings.activationHistoryBaseline
-                    : baseline,
-                },
+          settings: retainedRebuildSettings ?? {
+            enabled: true,
+            activationHistoryBaseline: capture.retainedSettings?.enabled
+              ? capture.retainedSettings.activationHistoryBaseline
+              : baseline,
+          },
           document: proposal.document,
         };
         c.revision++;

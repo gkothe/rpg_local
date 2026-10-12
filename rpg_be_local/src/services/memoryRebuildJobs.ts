@@ -15,6 +15,7 @@ import type { Store } from '../store.js';
 import type { GmIndexProposal } from '../domain/gmIndexGeneration.js';
 
 export type MemoryRebuildJobRow = {
+  gmIndexMergeOutput?: unknown;
   indexReadInvocations?: import('./gmIndexReadTools.js').GmIndexReadReceipt[][];
   foundationDrafts?: unknown[];
   gmIndexProposal?: GmIndexProposal;
@@ -60,13 +61,21 @@ const mapRow = (r: Raw): MemoryRebuildJobRow => {
     (r.candidate as
       | (Omit<MemoryRebuildCandidate, 'proposalDigest'> & {
           staged?: unknown[];
+          gmIndexMergeOutput?: unknown;
           gmIndex?: GmIndexProposal;
+          indexReadInvocations?: import('./gmIndexReadTools.js').GmIndexReadReceipt[][];
           foundationDrafts?: unknown[];
         })
       | null) ?? null;
   return {
     id: r.id as string,
+    ...(candidate && Object.hasOwn(candidate, 'gmIndexMergeOutput')
+      ? { gmIndexMergeOutput: candidate.gmIndexMergeOutput }
+      : {}),
     ...(candidate?.gmIndex ? { gmIndexProposal: candidate.gmIndex } : {}),
+    ...(candidate?.indexReadInvocations
+      ? { indexReadInvocations: candidate.indexReadInvocations }
+      : {}),
     ...(candidate?.foundationDrafts ? { foundationDrafts: candidate.foundationDrafts } : {}),
     campaignId: r.campaign_id as string,
     requestId: r.request_id as string,
@@ -244,6 +253,7 @@ export class MemoryRebuildJobStore {
     expectedNextIndex: number,
     checkpoint: RebuildCheckpoint,
     candidate: {
+      gmIndexMergeOutput?: unknown;
       text: string;
       coveredTurnIds: string[];
       staged?: unknown[];

@@ -255,3 +255,36 @@ it('restores its older reviewable GM job from purpose attention despite a newer 
   expect(screen.queryByText(/Another preparation is running/)).not.toBeInTheDocument();
   expect(rebuild()).toBeDisabled();
 });
+
+it('shows server-owned preparation stage and retrieval activity without displaying private drafts', async () => {
+  const running = job({
+    status: 'running',
+    statusLabel: 'Rebuilding',
+    active: true,
+    candidate: null,
+    allowedActions: ['cancel'],
+    gmIndex: {
+      mode: 'prepare',
+      preview: null,
+      progress: {
+        label: 'Reading campaign source sections',
+        completedSteps: 2,
+        totalSteps: 33,
+        retrievalCalls: 4,
+        emptySearches: 1,
+        lastActivityAt: '2026-10-12T14:00:00Z',
+      },
+    },
+  });
+  stub((path) =>
+    path.endsWith('/gm-index')
+      ? reply(status())
+      : reply(path.includes('/memory/rebuilds?') ? page(running) : running)
+  );
+  mount();
+  expect(await screen.findByText(/Reading campaign source sections/)).toHaveTextContent(
+    '2 of 33 steps completed; 4 retrieval calls (1 empty searches)'
+  );
+  expect(screen.getByText(/Last server activity/)).toBeVisible();
+  expect(screen.queryByText('PRIVATE_RAW_CANDIDATE_MARKER')).not.toBeInTheDocument();
+});

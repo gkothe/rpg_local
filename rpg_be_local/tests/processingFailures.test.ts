@@ -183,6 +183,7 @@ for (const mode of ['incomplete', 'quota', 'auth'] as const) {
 test('authoritative-output failures are not mistaken for account authentication failures', async () => {
   const { cliFailure } = await import('../src/processingErrors.js');
   assert.equal(cliFailure('Invalid authoritative response').code, 'provider_failure');
+  assert.equal(cliFailure('Cataloging the catalogue failed').code, 'provider_failure');
 });
 
 test('storage, permission and missing-schema errors have actionable diagnostics without internal details', async () => {

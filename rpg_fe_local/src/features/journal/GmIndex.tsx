@@ -135,7 +135,19 @@ export default function GmIndex({
       )}
       {job && (
         <p role="status">
-          {job.statusLabel}: {job.processedTurns} of {job.totalTurns} captured batches checked.
+          {job.gmIndex?.progress ? (
+            <>
+              {job.statusLabel}: {job.gmIndex.progress.label}. {job.gmIndex.progress.completedSteps}{' '}
+              of {job.gmIndex.progress.totalSteps} steps completed;{' '}
+              {job.gmIndex.progress.retrievalCalls} retrieval calls (
+              {job.gmIndex.progress.emptySearches} empty searches). Last server activity:{' '}
+              {new Date(job.gmIndex.progress.lastActivityAt).toLocaleTimeString()}.
+            </>
+          ) : (
+            <>
+              {job.statusLabel}: {job.processedTurns} of {job.totalTurns} captured batches checked.
+            </>
+          )}
         </p>
       )}
       <ErrorNotice message={error || rebuild.error || job?.safeError || ''} />
@@ -167,8 +179,8 @@ export default function GmIndex({
             ))}
           </details>
           <p>
-            Applying uses this reviewed preparation. A rebuild replaces the notes after review and
-            keeps the current activation setting.
+            Applying uses this reviewed preparation. The first application enables notes for this
+            campaign. Rebuilding an existing index keeps its activation setting.
           </p>
         </div>
       )}
