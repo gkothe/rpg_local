@@ -24,7 +24,7 @@ export function responseRetryFeedback(error: unknown): string | null {
       error.issues
         .map(
           (issue) =>
-            `${issue.path.join('.')}: ${issue.code}${issue.code === 'custom' && issue.message === GM_INDEX_DIRECTION_GUIDANCE ? `; ${GM_INDEX_DIRECTION_GUIDANCE}` : ''}`
+            `${issue.path.join('.')}: ${issue.code}${issue.code === 'invalid_format' && issue.format === 'uuid' ? '; Copy the exact UUID from the supplied data or owned tool result. Do not invent, shorten, append to or combine IDs. UUID groups must have lengths 8-4-4-4-12.' : ''}${issue.code === 'custom' && issue.message === GM_INDEX_DIRECTION_GUIDANCE ? `; ${GM_INDEX_DIRECTION_GUIDANCE}` : ''}`
         )
         .join('; ')
     );

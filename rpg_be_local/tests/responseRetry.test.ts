@@ -8,6 +8,19 @@ import {
 import { Problem } from '../src/errors.js';
 import { gmIndexEntryValueSchema } from '../src/domain/gmIndex.js';
 
+test('invalid UUID feedback explains exact copying without exposing rejected values', () => {
+  const result = z.object({ id: z.uuid() }).safeParse({
+    id: '12345678-1234-4234-8234-123456789012PRIVATE',
+  });
+  assert.equal(result.success, false);
+  if (!result.success) {
+    const feedback = structuredResponseRetryFeedback(result.error)!;
+    assert.match(feedback, /Copy the exact UUID/);
+    assert.match(feedback, /8-4-4-4-12/);
+    assert.doesNotMatch(feedback, /PRIVATE|12345678/);
+  }
+});
+
 test('index correction explains directional refinements without forwarding arbitrary custom text', () => {
   const result = gmIndexEntryValueSchema.safeParse({
     kind: 'gm_plan',
