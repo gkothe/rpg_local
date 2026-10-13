@@ -77,6 +77,7 @@ export function createGmIndexReadTools(
   priorReads: readonly GmIndexReadReceipt[] = [],
   options: {
     originalsOnly?: boolean;
+    omitKnowledgeSearch?: boolean;
     suppliedSourceSections?: readonly GmIndexSourceSection[];
     onReadStarted?: (name: string) => Promise<void>;
   } = {}
@@ -110,6 +111,9 @@ export function createGmIndexReadTools(
     ],
     [HISTORY_GET_TOOL_NAME, originalHistoryGetSchema, (args: unknown) => history.get(args)],
   ] as const;
+  const availableSpecs = options.omitKnowledgeSearch
+    ? specs.filter(([name]) => name !== KNOWLEDGE_SEARCH_TOOL_NAME)
+    : specs;
   const replay = new Map<
     string,
     { name: string; arguments: string; result: Record<string, unknown> }
@@ -123,12 +127,12 @@ export function createGmIndexReadTools(
   return Object.assign(
     async (name: string, raw: unknown, requestId: string | number) => {
       await assertActive();
-      const spec = specs.find((spec) => spec[0] === name);
+      const spec = availableSpecs.find((spec) => spec[0] === name);
       if (!spec)
         throw new Problem(
           422,
           'gm_index_tool',
-          'Only the six read-only index tools are available.'
+          `Use only the available read-only index tools: ${availableSpecs.map(([name]) => name).join(', ')}.`
         );
       const key = String(requestId),
         args = canonicalJson(raw),
@@ -159,7 +163,7 @@ export function createGmIndexReadTools(
     },
     {
       assertActive,
-      definitions: specs.map(([name, schema]) => ({
+      definitions: availableSpecs.map(([name, schema]) => ({
         name,
         description:
           name === HISTORY_SEARCH_TOOL_NAME && options.originalsOnly

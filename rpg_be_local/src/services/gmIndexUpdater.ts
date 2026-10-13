@@ -20,7 +20,10 @@ import {
   gmIndexUpdateJsonSchema,
   gmIndexUpdateSchema,
   type GmIndexUpdate,
+  type GmIndexDeliveredOriginals,
+  validateGmIndexDelivery,
 } from '../domain/gmIndexUpdate.js';
+import { GmIndexProvenanceError } from '../domain/gmIndexProvenance.js';
 import { gmIndexDocumentSchema, type GmIndexDocument } from '../domain/gmIndex.js';
 import type { Campaign } from '../domain/types.js';
 
@@ -40,6 +43,7 @@ export type GmIndexCheckpoint = {
   history: FrozenHistory;
   currentOriginal: TurnVersion;
   prompt: string;
+  deliveredOriginals?: GmIndexDeliveredOriginals;
   invocations: {
     id: string;
     reads: {
@@ -95,6 +99,13 @@ export class GmIndexUpdater {
     validate?: (update: GmIndexUpdate) => Promise<void>
   ): Promise<GmIndexUpdate> {
     await requireGmIndexTransport(this.generator, checkpoint.campaign.settings);
+    const delivered = checkpoint.deliveredOriginals
+      ? validateGmIndexDelivery(
+          checkpoint.prompt,
+          checkpoint.deliveredOriginals,
+          checkpoint.campaign
+        )
+      : undefined;
     for (const invocation of checkpoint.invocations)
       restoreGmIndexSourceReads(checkpoint.campaign, invocation.reads);
     let feedback = '';
@@ -131,6 +142,12 @@ export class GmIndexUpdater {
         [checkpoint.currentOriginal],
         [],
         {
+          omitKnowledgeSearch: true,
+          suppliedSourceSections: delivered?.sources.map(({ sourceId, version, sectionIndex }) => ({
+            sourceId,
+            version,
+            sectionIndex,
+          })),
           onReadStarted: (name) =>
             traceEvent(trace, 'gm_index_read_start', {
               tool: name,
@@ -143,6 +160,16 @@ export class GmIndexUpdater {
         purpose: GM_INDEX_UPDATE_PURPOSE,
         attempt,
         promptBytes: Buffer.byteLength(checkpoint.prompt, 'utf8'),
+        suppliedKnowledgeCount: delivered?.knowledge.length ?? 0,
+        suppliedSourceCount: delivered?.sources.length ?? 0,
+        sectionBytes: delivered
+          ? Object.fromEntries(
+              Object.entries(JSON.parse(checkpoint.prompt)).map(([key, value]) => [
+                key,
+                Buffer.byteLength(JSON.stringify(value), 'utf8'),
+              ])
+            )
+          : undefined,
       });
       try {
         const output = await this.generator.generateOwnedGameplay!(
@@ -169,6 +196,8 @@ export class GmIndexUpdater {
           attempt,
           elapsedMs: Date.now() - stageStartedAt,
           retrievalCalls: invocation.reads.length,
+          entryOperations: update.gmIndexChanges.length,
+          foundationOperations: update.gmFoundationChanges.length,
         });
         return update;
       } catch (error) {
@@ -177,9 +206,13 @@ export class GmIndexUpdater {
           attempt,
           elapsedMs: Date.now() - stageStartedAt,
           code: error instanceof Problem ? error.code : 'invalid_response',
+          missingOriginalCount:
+            error instanceof GmIndexProvenanceError ? error.missingRefs.length : undefined,
         });
         const reason =
-          responseRetryFeedback(error) ??
+          (error instanceof GmIndexProvenanceError
+            ? error.retryFeedback()
+            : responseRetryFeedback(error)) ??
           (error instanceof Problem && error.code.startsWith('gm_index_') && error.status === 422
             ? error.message
             : null);
@@ -198,6 +231,9 @@ export const gmIndexCheckpointDigest = (checkpoint: GmIndexCheckpoint) =>
       index: checkpoint.indexIdentity,
       reservations: checkpoint.reservations,
       prompt: checkpoint.prompt,
+      ...(checkpoint.deliveredOriginals
+        ? { deliveredOriginals: checkpoint.deliveredOriginals }
+        : {}),
     })
   );
 export function validatedCheckpointResult(

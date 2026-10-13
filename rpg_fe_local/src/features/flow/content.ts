@@ -304,7 +304,7 @@ export const steps: FlowStep[] = [
     id: 'commit',
     label: '9. Commit and refresh',
     node: 'commit',
-    data: 'The app checks once more that the turn can finish and the campaign version still matches. For an enabled GM index, a separate read-only index updater first checks notes, foundation and possible developments using selected final prose and frozen facts. Failure can resume this stage without repeating gameplay or rolls. The app saves state, index, snapshot and story together, then releases the answer and refreshes the journal.',
+    data: 'The app checks once more that the turn can finish and the campaign version still matches. For an enabled GM index, a separate read-only updater reviews all notes, foundation and possible developments every turn. It receives the index once, freshness metadata, selected final prose and relevant complete frozen facts, then returns only necessary patches. Supplied originals need no duplicate lookups; missing evidence receives precise retry instructions. Failure can resume the frozen stage without repeating gameplay or rolls. The app saves state, index, snapshot and story together, then releases the answer and refreshes the journal.',
   },
 ];
 export const tools: FlowTool[] = [

@@ -1632,6 +1632,12 @@ p.dice-interpretation {
 }
 
 /* Character page: one parchment sheet; fields lay out as ruled rows in columns. */
+.character-page .npc-sheet-completion {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.3);
+  border-color: var(--parchment-edge);
+  box-shadow: none;
+}
 .character-page {
   padding: 2.5rem 2.75rem;
   color: var(--ink);

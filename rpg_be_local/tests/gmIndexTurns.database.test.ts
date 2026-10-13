@@ -10,7 +10,13 @@ import { DEFAULT_HISTORY_SETTINGS } from '../src/domain/historyRecall.js';
 import { gmIndexCanonicalIdentity } from '../src/domain/gmIndexCompatibility.js';
 import { publicCampaign, publicTurn } from '../src/domain/playerProjection.js';
 import { TurnService } from '../src/services/turns.js';
-import { dbEnabled, openIsolatedStore, seedCampaign, sleep } from './journalFixture.js';
+import {
+  dbEnabled,
+  openIsolatedStore,
+  seedCampaign,
+  sleep,
+  knowledgeRecord,
+} from './journalFixture.js';
 import { gmResponse, syntheticGenerate } from './ownedGameplayFixture.js';
 
 const NARRATIVE = 'You return to the harbor shelter.';
@@ -60,7 +66,8 @@ async function terminal(
 function syntheticIndexedGenerator(
   campaign: Campaign,
   onUpdate: () => Promise<void>,
-  failFirstUpdate = false
+  failFirstUpdate = false,
+  suppliedKnowledgeId?: string
 ) {
   const stages: string[] = [];
   let gameplayCalls = 0;
@@ -83,8 +90,16 @@ function syntheticIndexedGenerator(
         stages.push('updater');
         updaterCalls++;
         assert.equal(trace?.purpose, 'gm_index_update');
-        assert.equal(tools.definitions?.length, 6);
+        assert.equal(tools.definitions?.length, 5);
+        assert.ok(!tools.definitions?.some((tool) => tool.name === 'campaign_knowledge_search'));
         assert.ok(!tools.definitions?.some((tool) => tool.name === 'roll_dice'));
+        if (suppliedKnowledgeId) {
+          assert.ok(
+            JSON.parse(_prompt).suppliedKnowledge.some(
+              (record: { id: string }) => record.id === suppliedKnowledgeId
+            )
+          );
+        }
         await onUpdate();
         if (failFirstUpdate && updaterCalls === 1)
           throw new Problem(429, 'provider_quota', 'Synthetic updater quota failure');
@@ -99,7 +114,10 @@ function syntheticIndexedGenerator(
                 title: 'Follow up at the shelter',
                 text: PRIVATE_NOTE,
                 ownerCharacterId: null,
-                refs: [{ kind: 'turn', current: true }],
+                refs: [
+                  { kind: 'turn', current: true },
+                  ...(suppliedKnowledgeId ? [{ kind: 'knowledge', id: suppliedKnowledgeId }] : []),
+                ],
                 direction: null,
               },
             },
@@ -150,24 +168,36 @@ test(
       const { store } = isolated;
       const campaign = await indexedCampaign(store);
       const beforeIndex = structuredClone(campaign.gmIndex!.document);
-      const ai = syntheticIndexedGenerator(campaign, async () => {
-        const live = await store.campaign(campaign.id);
-        assert.deepEqual(live.state, campaign.state);
-        assert.deepEqual(live.gmIndex!.document, beforeIndex);
-        const [pending] = await store.recentTurns(campaign.id);
-        assert.ok(pending);
-        assert.equal(pending.finalization?.stage, 'index_updating');
-        assert.equal(pending.editingPending, true);
-        const safe = publicTurn(pending);
-        assert.equal(safe.narrative, null);
-        assert.deepEqual(safe.changes, []);
-        assert.equal(safe.rollInterpretations, undefined);
-        assert.equal(safe.operationExplanations, undefined);
-        const snapshots = await store.pool.query('SELECT turn_id FROM snapshots WHERE turn_id=$1', [
-          pending.id,
-        ]);
-        assert.equal(snapshots.rowCount, 0);
-      });
+      const olderFact = knowledgeRecord(
+        'Shelter commitment',
+        'The shelter keeper promised a room.'
+      );
+      campaign.knowledge = [olderFact];
+      await store.transaction(async (client) => store.save(campaign, client));
+      const ai = syntheticIndexedGenerator(
+        campaign,
+        async () => {
+          const live = await store.campaign(campaign.id);
+          assert.deepEqual(live.state, campaign.state);
+          assert.deepEqual(live.gmIndex!.document, beforeIndex);
+          const [pending] = await store.recentTurns(campaign.id);
+          assert.ok(pending);
+          assert.equal(pending.finalization?.stage, 'index_updating');
+          assert.equal(pending.editingPending, true);
+          const safe = publicTurn(pending);
+          assert.equal(safe.narrative, null);
+          assert.deepEqual(safe.changes, []);
+          assert.equal(safe.rollInterpretations, undefined);
+          assert.equal(safe.operationExplanations, undefined);
+          const snapshots = await store.pool.query(
+            'SELECT turn_id FROM snapshots WHERE turn_id=$1',
+            [pending.id]
+          );
+          assert.equal(snapshots.rowCount, 0);
+        },
+        false,
+        olderFact.id
+      );
       const service = new TurnService(store, ai.generator);
       const submitted = await service.submit(campaign.id, {
         revision: campaign.revision,
@@ -239,6 +269,13 @@ test(
       );
       assert.equal(candidate.rows[0].edited_narrative, NARRATIVE);
       assert.ok(candidate.rows[0].gm_index_checkpoint);
+      const legacy = candidate.rows[0].gm_index_checkpoint;
+      const savedPrompt = legacy.prompt;
+      delete legacy.deliveredOriginals;
+      await store.pool.query(
+        'UPDATE narrative_edit_candidates SET gm_index_checkpoint=$2 WHERE turn_id=$1',
+        [failed.id, JSON.stringify(legacy)]
+      );
       await assert.rejects(
         service.submit(campaign.id, {
           revision: unchanged.revision,
@@ -252,6 +289,12 @@ test(
       });
       const completed = await terminal(store, campaign.id, failed.id);
       assert.equal(completed.status, TurnStatus.Completed, completed.error ?? 'Resume failed');
+      const resumed = await store.pool.query(
+        'SELECT gm_index_checkpoint FROM narrative_edit_candidates WHERE turn_id=$1',
+        [failed.id]
+      );
+      assert.equal(resumed.rows[0].gm_index_checkpoint.prompt, savedPrompt);
+      assert.equal(resumed.rows[0].gm_index_checkpoint.deliveredOriginals, undefined);
       assert.deepEqual(ai.counts(), {
         gameplayCalls: 1,
         rollCalls: 1,

@@ -140,6 +140,8 @@ test('failed receipt persistence never marks source text supplied or caches a su
     }
   );
   const args = { sourceId: f.campaign.sources[0]!.id, version: 1, sectionIndex: 0 };
+  assert.equal(tools.definitions?.length, 6);
+  assert.ok(tools.definitions?.some((tool) => tool.name === 'campaign_knowledge_search'));
   await assert.rejects(
     tools(CAMPAIGN_SOURCE_GET_TOOL_NAME, args, 'read-1'),
     /receipt write failed/

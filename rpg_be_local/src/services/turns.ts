@@ -47,7 +47,7 @@ import {
   gmIndexSourceCoverage,
   refreshGmIndexDependencies,
 } from '../domain/gmIndexCompatibility.js';
-import { gmIndexUpdatePrompt } from '../domain/gmIndexUpdate.js';
+import { buildGmIndexUpdateContext } from '../domain/gmIndexUpdate.js';
 import { canonicalJson, sha256 } from '../domain/journalLedger.js';
 import { turnVersionOf } from '../domain/historyRecall.js';
 import { TurnFinalizationStage } from '../domain/turnFinalization.js';
@@ -1180,6 +1180,19 @@ export class TurnService {
             rollInterpretations: response.rollInterpretations,
           });
           const after = { ...applied.campaign, settings: t.settings };
+          const indexContext = checkpoint
+            ? undefined
+            : buildGmIndexUpdateContext(
+                after,
+                campaign.gmIndex.document,
+                {
+                  ...turn,
+                  narrative: editedNarrative ?? response.narrative,
+                  rolls: records,
+                  rollInterpretations: response.rollInterpretations,
+                },
+                response.gmIndexHandoff
+              );
           pendingIndex = checkpoint ?? {
             contractVersion: 1,
             candidateDigest: narrativeCandidate.candidateDigest,
@@ -1196,12 +1209,8 @@ export class TurnService {
               ],
             },
             currentOriginal,
-            prompt: gmIndexUpdatePrompt(
-              after,
-              campaign.gmIndex.document,
-              { ...turn, narrative: editedNarrative ?? response.narrative },
-              response.gmIndexHandoff
-            ),
+            prompt: indexContext!.prompt,
+            deliveredOriginals: indexContext!.deliveredOriginals,
             invocations: [],
           };
           await client.query(
@@ -1276,7 +1285,8 @@ export class TurnService {
           checkpoint.campaign.gmIndex!.document,
           checkpoint.campaign,
           checkpoint.invocations.at(-1)?.reads ?? [],
-          t.id
+          t.id,
+          checkpoint.deliveredOriginals
         );
         document.dependencyState.sourceCoverage = gmIndexSourceCoverage(checkpoint.campaign);
         document.dependencyState.turnCoverage = checkpoint.history.turnVersions;

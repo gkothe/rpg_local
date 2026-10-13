@@ -100,7 +100,7 @@ export default function NpcSheetCompletion({
     }
   }
   return (
-    <section className="panel stack" aria-label="Complete NPC sheet">
+    <section className="panel stack npc-sheet-completion" aria-label="Complete NPC sheet">
       <p>
         Complete missing skills and stats for this campaign’s game system. Review additions before
         saving. Established values stay unchanged.
