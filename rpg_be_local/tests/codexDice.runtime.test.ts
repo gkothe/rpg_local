@@ -12,6 +12,8 @@ import {
   parseCodexCatalog,
 } from '../src/providers/codex.js';
 import { ownedTools } from './ownedGameplayFixture.js';
+import { GameplaySessionBridge } from '../src/providers/gameplaySession.js';
+import type { GameplayToolDispatch } from '../src/providers/gameplayTools.js';
 
 const SYSTEM_PROMPT = 'Synthetic system prompt';
 const definitions = ownedTools().definitions;
@@ -189,6 +191,224 @@ test(
         ).length,
         2
       );
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'native Codex multi-phase continuation keeps same thread and cleans up ephemeral resources',
+  { skip: !process.env.RPG_TEST_CODEX_BIN || !process.env.RPG_TEST_CODEX_MODELS },
+  async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'rpg-codex-dice-native-session-'));
+    const requests: Record<string, unknown>[] = [];
+    const marker1 = randomUUID();
+    const marker2 = randomUUID();
+    const server = createServer(async (req, res) => {
+      assert.equal(req.url, '/responses');
+      assert.equal(req.headers.authorization, undefined);
+      const chunks: Buffer[] = [];
+      for await (const part of req) chunks.push(part);
+      const body = JSON.parse(Buffer.concat(chunks).toString());
+      requests.push(body);
+      const index = requests.length - 1;
+      let item: Record<string, unknown>;
+      if (index === 0) {
+        item = {
+          id: 'p1_msg',
+          type: 'message',
+          status: 'completed',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              text: JSON.stringify({
+                payload_json: JSON.stringify({
+                  narrative: `Phase 1 narrative with marker ${marker1}`,
+                  operations: [],
+                  rollInterpretations: [],
+                }),
+              }),
+              annotations: [],
+            },
+          ],
+        };
+      } else if (index === 1) {
+        item = {
+          id: 'p2_tc',
+          type: 'function_call',
+          call_id: 'call_p2',
+          name: 'campaign_history_search',
+          arguments: JSON.stringify({ query: 'canary' }),
+          status: 'completed',
+        };
+      } else {
+        item = {
+          id: 'p2_final',
+          type: 'message',
+          status: 'completed',
+          role: 'assistant',
+          content: [
+            {
+              type: 'output_text',
+              text: JSON.stringify({
+                payload_json: JSON.stringify({
+                  checked: { notes: true },
+                  marker: marker2,
+                  gmIndexChanges: [],
+                  gmFoundationChanges: [],
+                }),
+              }),
+              annotations: [],
+            },
+          ],
+        };
+      }
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      for (const event of [
+        {
+          type: 'response.created',
+          response: {
+            id: `response${index}`,
+            object: 'response',
+            status: 'in_progress',
+            output: [],
+          },
+        },
+        { type: 'response.output_item.added', output_index: 0, item },
+        { type: 'response.output_item.done', output_index: 0, item },
+        {
+          type: 'response.completed',
+          response: {
+            id: `response${index}`,
+            object: 'response',
+            status: 'completed',
+            output: [item],
+            usage: { input_tokens: 500, output_tokens: 20, total_tokens: 520 },
+          },
+        },
+      ]) {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
+      res.end();
+    });
+    try {
+      const home = path.join(root, 'home');
+      await mkdir(home);
+      const parsed = parseCodexCatalog(
+        JSON.parse(await readFile(process.env.RPG_TEST_CODEX_MODELS!, 'utf8'))
+      );
+      const catalogPath = path.join(root, 'models.json');
+      const instructionsPath = path.join(root, 'instructions.txt');
+      await writeFile(
+        catalogPath,
+        JSON.stringify({
+          models: (parsed.metadata as { models: Record<string, unknown>[] }).models.map(
+            (model) => ({
+              ...model,
+              base_instructions: SYSTEM_PROMPT,
+              supports_parallel_tool_calls: false,
+            })
+          ),
+        })
+      );
+      await writeFile(instructionsPath, SYSTEM_PROMPT);
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      assert.ok(address && typeof address !== 'string');
+      const config = {
+        ...isolatedCodexConfig(catalogPath, instructionsPath),
+        model_provider: 'fixture',
+        'model_providers.fixture.name': 'Anonymous dice fixture',
+        'model_providers.fixture.base_url': `http://127.0.0.1:${address.port}`,
+        'model_providers.fixture.wire_api': 'responses',
+        'model_providers.fixture.requires_openai_auth': false,
+        'model_providers.fixture.supports_websockets': false,
+        'features.enable_request_compression': false,
+      };
+
+      const bridge = new GameplaySessionBridge();
+      let toolSearchCalled = 0;
+      const initialTools: GameplayToolDispatch = Object.assign(
+        async (name: string) => {
+          if (name === 'campaign_history_search') toolSearchCalled++;
+          return { items: [] };
+        },
+        {
+          definitions: [
+            {
+              name: 'roll_dice',
+              description: 'Roll dice',
+              inputSchema: { type: 'object' as const, properties: { slot: { type: 'number' } } },
+            },
+            {
+              name: 'campaign_history_search',
+              description: 'Search history',
+              inputSchema: { type: 'object' as const, properties: { query: { type: 'string' } } },
+            },
+          ],
+        }
+      );
+      const indexTools: GameplayToolDispatch = Object.assign(
+        async (name: string) => {
+          assert.equal(name, 'campaign_history_search');
+          toolSearchCalled++;
+          return { items: [] };
+        },
+        {
+          definitions: [
+            {
+              name: 'campaign_history_search',
+              description: 'Search history',
+              inputSchema: { type: 'object' as const, properties: { query: { type: 'string' } } },
+            },
+          ],
+        }
+      );
+
+      const driverPromise = runCodexDicePhases(
+        { binary: process.env.RPG_TEST_CODEX_BIN!, prefix: [] },
+        { provider: 'codex', model: parsed.models[0]!.id, effort: 'low' },
+        `Phase 1 prompt with marker ${marker1}`,
+        root,
+        { ...codexEnvironment(process.env), CODEX_HOME: home },
+        config,
+        {
+          definitions: initialTools.definitions!,
+          schema: { type: 'object' },
+          systemPrompt: SYSTEM_PROMPT,
+          dispatch: initialTools,
+        },
+        undefined,
+        undefined,
+        bridge
+      );
+
+      const r1 = (await bridge.runPhase({
+        prompt: `Phase 1 prompt with marker ${marker1}`,
+        schema: { type: 'object' },
+        systemPrompt: SYSTEM_PROMPT,
+        tools: initialTools,
+      })) as { narrative: string };
+      assert.match(r1.narrative, new RegExp(marker1));
+
+      const r2 = (await bridge.runPhase({
+        prompt: `Phase 2 prompt with marker ${marker2}`,
+        schema: { type: 'object' },
+        systemPrompt: SYSTEM_PROMPT,
+        tools: indexTools,
+      })) as { checked: { notes: boolean }; marker: string };
+      assert.equal(r2.checked?.notes, true);
+      assert.equal(r2.marker, marker2);
+      assert.equal(toolSearchCalled, 1);
+
+      await bridge.close();
+      await driverPromise;
+
+      assert.equal(requests.length, 3);
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -30,9 +30,7 @@ it('explains both updater modes after editing and explicit separate-agent recove
     </MemoryRouter>
   );
   expect(screen.getByRole('heading', { name: '9. Commit and refresh' })).toBeVisible();
-  expect(
-    screen.getByText(/same Antigravity GM conversation continuing after narrative editing/)
-  ).toBeVisible();
+  expect(screen.getByText(/same GM conversation continuing after narrative editing/)).toBeVisible();
   expect(
     screen.getByText(/explicit separate-agent recovery without repeating gameplay/)
   ).toBeVisible();

@@ -12,18 +12,19 @@ import { freezeKnowledge } from '../src/domain/knowledgeRecall.js';
 import { ownedTools } from './ownedGameplayFixture.js';
 const claude = `
 const args=process.argv.slice(2);
+const sessionId=args[args.indexOf('--session-id')+1];
 if(args.includes('--version'))console.log('9.9.9 (Claude Code)');
 else { process.stdin.resume();process.stdin.on('end',async()=>{
 const tools=args[args.indexOf('--allowedTools')+1].split(',');
 if(!args[args.indexOf('--system-prompt')+1].includes('ENVELOPE_NATIVE'))throw Error('Missing envelope');
-console.log(JSON.stringify({type:'system',subtype:'init',tools,mcp_servers:[{name:'dice',status:'connected'}]}));
+console.log(JSON.stringify({type:'system',subtype:'init',session_id:sessionId,tools,mcp_servers:[{name:'dice',status:'connected'}]}));
 if(process.env.RPG_ADAPTER_FIND==='1') {
 const server=JSON.parse(args[args.indexOf('--mcp-config')+1]).mcpServers.dice;
 if(!tools.some(t=>t.endsWith('rules_find')))throw Error('Missing find');
 const response=await fetch(server.url,{method:'POST',headers:{...server.headers,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:10,method:'tools/call',params:{name:'rules_find',arguments:{query:'movement'}}})});
 const payload=await response.json();if(payload.result.isError||JSON.parse(payload.result.content[0].text).reads[0].text!=='Original movement')throw Error('Original not received');
 }
-console.log(JSON.stringify({type:'result',subtype:'success',is_error:false,num_turns:1,result:JSON.stringify({narrative:'Original synthetic response',operations:[],rollInterpretations:[],ruleCitations:[],knowledgeChanges:JSON.parse(process.env.RPG_ADAPTER_KNOWLEDGE||'[]'),operationExplanations:[],combatEffects:[],participantReferences:[]}),modelUsage:{fixture:{contextWindow:128000,outputTokens:100}}}));
+console.log(JSON.stringify({type:'result',subtype:'success',session_id:sessionId,uuid:'res-1',is_error:false,num_turns:1,result:JSON.stringify({narrative:'Original synthetic response',operations:[],rollInterpretations:[],ruleCitations:[],knowledgeChanges:JSON.parse(process.env.RPG_ADAPTER_KNOWLEDGE||'[]'),operationExplanations:[],combatEffects:[],participantReferences:[]}),modelUsage:{fixture:{contextWindow:128000,outputTokens:100}}}));
 });}`;
 const codex = `
 import readline from 'node:readline';

@@ -8,6 +8,11 @@ import { Problem } from '../errors.js';
 import { nativeGameplaySchema } from './gameplayContract.js';
 import { type GameplayAdapter, type GameplayToolResult } from './gameplayTools.js';
 import {
+  type GameplaySessionBridge,
+  assertPhaseToolsCompatible,
+  assertPhaseToolAuthority,
+} from './gameplaySession.js';
+import {
   CODEX_TRANSPORT_SCHEMA,
   codexEnvironment,
   codexHome,
@@ -66,7 +71,8 @@ export async function generateCodexDice(
   env: NodeJS.ProcessEnv,
   adapter: GameplayAdapter,
   signal?: AbortSignal,
-  trace?: PromptTraceContext
+  trace?: PromptTraceContext,
+  session?: GameplaySessionBridge
 ): Promise<unknown> {
   const inspected = await inspectCodex(executable, env);
   const metadata = inspected.metadata as { models: { slug: string; context_window?: number }[] };
@@ -114,10 +120,12 @@ export async function generateCodexDice(
       config,
       adapter,
       signal,
-      trace
+      trace,
+      session
     );
   } catch (error) {
     await traceEvent(trace, 'failure', safeTraceFailure(error));
+    session?.fail(error);
     failed = true;
     throw error;
   } finally {
@@ -142,27 +150,32 @@ export async function runCodexDicePhases(
   config: Record<string, unknown>,
   adapter: GameplayAdapter,
   signal?: AbortSignal,
-  trace?: PromptTraceContext
+  trace?: PromptTraceContext,
+  session?: GameplaySessionBridge
 ): Promise<unknown> {
   const args = [...executable.prefix, 'app-server', '--stdio'];
   for (const [key, value] of Object.entries(config))
     args.push('-c', `${key}=${JSON.stringify(value)}`);
   const definitions = adapter.definitions;
-  {
-    let phase = 0;
-    let threadId = '';
-    let turnId = '';
-    let completed = false;
-    const calls = new Map<string, string>();
-    let final: unknown;
-    await logPrompt(
-      'generateCodexGameplay',
-      settings,
-      prompt,
-      `${adapter.systemPrompt} Return a transport object with payload_json encoding the application JSON.`,
-      undefined,
-      trace
-    );
+  let active = adapter;
+  let phaseNumber = 1;
+  let currentTurnRequestId: number = session ? 100 * phaseNumber : CODEX_DICE_REQUEST_ID.Turn;
+  let phase = 0;
+  let threadId = '';
+  let turnId = '';
+  let completed = false;
+  const calls = new Map<string, string>();
+  const consumedTurnIds = new Set<string>();
+  let final: unknown;
+  await logPrompt(
+    'generateCodexGameplay',
+    settings,
+    prompt,
+    `${adapter.systemPrompt} Return a transport object with payload_json encoding the application JSON.`,
+    undefined,
+    trace
+  );
+  try {
     await runProcess(executable.binary, args, '', {
       cwd,
       env,
@@ -170,7 +183,48 @@ export async function runCodexDicePhases(
       timeoutMs: 0,
       maxOutputBytes: Infinity,
       protocol: {
-        start(send) {
+        start(send, end) {
+          if (session) {
+            session.attach(
+              (next) => {
+                if (!completed)
+                  throw new Problem(409, 'gameplay_phase', 'Previous GM phase is incomplete');
+                assertPhaseToolsCompatible(definitions, next.tools.definitions);
+                active = {
+                  dispatch: next.tools,
+                  definitions: next.tools.definitions ?? [],
+                  schema: next.schema,
+                  systemPrompt: next.systemPrompt,
+                };
+                trace = next.trace;
+                completed = false;
+                phaseNumber++;
+                calls.clear();
+                turnId = '';
+                currentTurnRequestId = 100 * phaseNumber;
+                const serializedSchema = JSON.stringify(next.schema);
+                const schemaInstruction = next.prompt.includes(serializedSchema)
+                  ? ''
+                  : `\nApplication schema for payload_json: ${serializedSchema}`;
+                send({
+                  id: currentTurnRequestId,
+                  method: CODEX_DICE_RPC.TurnStart,
+                  params: {
+                    threadId,
+                    input: [
+                      {
+                        type: 'text',
+                        text: `${next.systemPrompt}\n${next.prompt}${schemaInstruction}\nReturn a transport object with payload_json encoding the application JSON.`,
+                      },
+                    ],
+                    outputSchema: CODEX_TRANSPORT_SCHEMA,
+                    ...(settings.effort ? { effort: settings.effort } : {}),
+                  },
+                });
+              },
+              () => end()
+            );
+          }
           send({
             id: CODEX_DICE_REQUEST_ID.Initialize,
             method: CODEX_DICE_RPC.Initialize,
@@ -203,8 +257,9 @@ export async function runCodexDicePhases(
           } else if (message.id === CODEX_DICE_REQUEST_ID.Thread && message.result) {
             threadId = z.object({ thread: z.object({ id: z.string() }) }).parse(message.result)
               .thread.id;
+            currentTurnRequestId = session ? 100 * phaseNumber : CODEX_DICE_REQUEST_ID.Turn;
             send({
-              id: CODEX_DICE_REQUEST_ID.Turn,
+              id: currentTurnRequestId,
               method: CODEX_DICE_RPC.TurnStart,
               params: {
                 threadId,
@@ -213,15 +268,23 @@ export async function runCodexDicePhases(
                 ...(settings.effort ? { effort: settings.effort } : {}),
               },
             });
-          } else if (message.id === CODEX_DICE_REQUEST_ID.Turn && message.result) {
-            turnId = z.object({ turn: z.object({ id: z.string() }) }).parse(message.result).turn.id;
+          } else if (message.id === currentTurnRequestId && message.result) {
+            const acknowledgedId = z
+              .object({ turn: z.object({ id: z.string() }) })
+              .parse(message.result).turn.id;
+            if (consumedTurnIds.has(acknowledgedId))
+              throw new Problem(502, 'codex_protocol', 'Codex reused a consumed turn identity');
+            turnId = acknowledgedId;
           } else if (message.method === CODEX_DICE_RPC.ToolCall) {
             const call = toolCallSchema.parse(message.params);
+            assertPhaseToolAuthority(call.tool, active.definitions, completed);
             if (
               !threadId ||
               call.namespace ||
               call.threadId !== threadId ||
-              (turnId && call.turnId !== turnId) ||
+              !turnId ||
+              consumedTurnIds.has(call.turnId) ||
+              call.turnId !== turnId ||
               message.id === undefined ||
               !definitions.some((definition) => definition.name === call.tool)
             )
@@ -236,7 +299,11 @@ export async function runCodexDicePhases(
             calls.set(call.callId, identity);
             let result: GameplayToolResult;
             try {
-              result = await adapter.dispatch(call.tool, call.arguments, call.callId);
+              result = await active.dispatch(
+                call.tool,
+                call.arguments,
+                session ? `codex:phase:${phaseNumber}:call:${call.callId}` : call.callId
+              );
             } catch (error) {
               if (
                 !(error instanceof Problem) ||
@@ -304,7 +371,7 @@ export async function runCodexDicePhases(
               cacheReadTokens: usage.data.tokenUsage.last.cachedInputTokens,
               phase,
             });
-            adapter.observe?.({
+            active.observe?.({
               provider: 'codex',
               phase,
               inputTokens: usage.data.tokenUsage.last.inputTokens,
@@ -326,7 +393,9 @@ export async function runCodexDicePhases(
             if (
               completed ||
               result.threadId !== threadId ||
-              (turnId && result.turn.id !== turnId) ||
+              !turnId ||
+              consumedTurnIds.has(result.turn.id) ||
+              result.turn.id !== turnId ||
               result.turn.status !== CODEX_DICE_STATUS.Completed
             )
               throw new Problem(502, 'codex_protocol', 'Codex returned an unexpected dice phase');
@@ -355,11 +424,24 @@ export async function runCodexDicePhases(
               final = parseCodexPayload(messages[0].text);
             }
             completed = true;
-            end();
+            if (turnId) consumedTurnIds.add(turnId);
+            const validated = nativeGameplaySchema().parse(final);
+            await traceEvent(trace, 'final', { response: validated });
+            if (session) {
+              session.complete(validated);
+            } else {
+              end();
+            }
           } else if (
             message.method === CODEX_DICE_RPC.ItemStarted ||
             message.method === CODEX_DICE_RPC.ItemCompleted
           ) {
+            if (completed)
+              throw new Problem(
+                502,
+                'dice_isolation',
+                'Codex emitted activity outside the owned turn'
+              );
             const item = message.params?.item as { type?: string } | undefined;
             if (item?.type && !(CODEX_DICE_ITEM_TYPES as readonly string[]).includes(item.type))
               throw new Problem(
@@ -373,8 +455,12 @@ export async function runCodexDicePhases(
     });
     if (!completed)
       throw new Problem(502, 'provider_protocol', 'Codex closed before completing its dice phase');
+    session?.fail(new Problem(409, 'gm_session_lost', 'Codex conversation ended'));
     const validated = nativeGameplaySchema().parse(final);
     await traceEvent(trace, 'final', { response: validated });
     return validated;
+  } catch (error) {
+    session?.fail(error);
+    throw error;
   }
 }

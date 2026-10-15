@@ -11,7 +11,8 @@ import {
   type ApiToolCall,
   type ApiUsage,
 } from './apiConversation.js';
-import type { GameplayAdapter } from './gameplayTools.js';
+import type { GameplayAdapter, GameplayToolDispatch } from './gameplayTools.js';
+import type { GameplayPhase, GameplaySession } from './gameplaySession.js';
 import { traceEvent, logPrompt, type PromptTraceContext } from './promptLog.js';
 
 export const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -24,6 +25,7 @@ const partSchema = z
     thought: z.boolean().optional(),
     functionCall: z
       .object({ id: z.string().optional(), name: z.string().min(1), args: z.unknown().optional() })
+      .passthrough()
       .optional(),
   })
   .passthrough();
@@ -56,29 +58,54 @@ const responseSchema = z
 
 export type GeminiContext = { key: string; fetchImpl?: ApiFetch };
 
-/** Ordinary (adapter undefined) or owned-tool generation against Gemini generateContent. */
-export async function generateGemini(
+async function runGeminiPhase(
   context: GeminiContext,
   settings: ProviderSettings,
-  prompt: string,
-  schema: unknown,
-  systemPrompt: string,
-  adapter: GameplayAdapter | undefined,
-  signal?: AbortSignal,
-  trace?: PromptTraceContext
+  contents: unknown[],
+  phase: {
+    prompt: string;
+    schema: unknown;
+    systemPrompt: string;
+    tools?: GameplayToolDispatch;
+    trace?: PromptTraceContext;
+    adapterObserve?: GameplayAdapter['observe'];
+  },
+  options: {
+    totalUsage: ApiUsage;
+    phaseNumber: number;
+    logGameplayPrompt?: boolean;
+    signal?: AbortSignal;
+  }
 ): Promise<unknown> {
-  const conversation = adapter && new ApiConversation(adapter, signal);
-  const instructions = instructionsWithSchema(systemPrompt, schema);
-  if (adapter)
-    await logPrompt('generateGeminiApiGameplay', settings, prompt, instructions, undefined, trace);
-  // Candidate content is replayed verbatim so thought signatures and call ids survive.
-  const contents: unknown[] = [{ role: 'user', parts: [{ text: prompt }] }];
-  const total: ApiUsage = {};
+  const instructions = instructionsWithSchema(phase.systemPrompt, phase.schema);
+  const phaseTrace = phase.trace;
+  if (options.logGameplayPrompt)
+    await logPrompt(
+      'generateGeminiApiGameplay',
+      settings,
+      phase.prompt,
+      instructions,
+      undefined,
+      phaseTrace
+    );
+  contents.push({ role: 'user', parts: [{ text: phase.prompt }] });
+  const phaseAdapter: GameplayAdapter | undefined = phase.tools
+    ? {
+        dispatch: phase.tools,
+        definitions: phase.tools.definitions ?? [],
+        schema: phase.schema,
+        systemPrompt: phase.systemPrompt,
+        observe: phase.adapterObserve,
+      }
+    : undefined;
+  const conversation = phaseAdapter && new ApiConversation(phaseAdapter, options.signal);
   let usageSeen = true;
   let modelTurns = 0;
+  const phaseUsage: ApiUsage = {};
+  const phaseStartedAt = Date.now();
   for (;;) {
     if (conversation) await conversation.beforeRequest();
-    else if (signal?.aborted) throw new Problem(409, 'cancelled', 'Request cancelled');
+    else if (options.signal?.aborted) throw new Problem(409, 'cancelled', 'Request cancelled');
     const data = responseSchema.safeParse(
       await postJson({
         provider: 'Gemini API',
@@ -87,7 +114,7 @@ export async function generateGemini(
         body: {
           systemInstruction: { parts: [{ text: instructions }] },
           contents,
-          ...(conversation
+          ...(conversation && conversation.definitions.length
             ? {
                 tools: [
                   {
@@ -101,7 +128,7 @@ export async function generateGemini(
               }
             : { generationConfig: { responseMimeType: 'application/json' } }),
         },
-        signal,
+        signal: options.signal,
         fetchImpl: context.fetchImpl,
       })
     );
@@ -126,14 +153,16 @@ export async function generateGemini(
     const usage = data.data.usageMetadata;
     if (usage?.promptTokenCount === undefined && usage?.candidatesTokenCount === undefined)
       usageSeen = false;
-    addUsage(total, {
+    const currentUsage = {
       inputTokens: usage?.promptTokenCount,
       outputTokens:
         usage?.candidatesTokenCount === undefined
           ? undefined
           : usage.candidatesTokenCount + (usage.thoughtsTokenCount ?? 0),
       cacheReadTokens: usage?.cachedContentTokenCount,
-    });
+    };
+    addUsage(options.totalUsage, currentUsage);
+    addUsage(phaseUsage, currentUsage);
     const nativeCalls = candidate.content.parts.flatMap((part) =>
       part.functionCall ? [part.functionCall] : []
     );
@@ -145,7 +174,7 @@ export async function generateGemini(
           'The model requested a tool during a no-tools generation'
         );
       const calls: ApiToolCall[] = nativeCalls.map((call, index) => ({
-        id: call.id ?? `call-${modelTurns}-${index}`,
+        id: call.id ?? `call-${options.phaseNumber}-${modelTurns}-${index}`,
         name: call.name,
         arguments: call.args ?? {},
       }));
@@ -163,16 +192,113 @@ export async function generateGemini(
       });
       continue;
     }
+    contents.push(candidate.content);
     const text = candidate.content.parts
       .filter((part) => !part.thought)
       .map((part) => part.text ?? '')
       .join('');
-    const final = parseFinalJson(text, !!adapter);
+    const final = parseFinalJson(text, !!phase.tools);
     if (usageSeen) {
-      await traceEvent(trace, 'usage', { ...total, modelTurns });
-      adapter?.observe?.({ provider: 'gemini-api', ...total, modelTurns });
-    } else await traceEvent(trace, 'usage_unavailable', { provider: 'gemini-api' });
-    if (adapter) await traceEvent(trace, 'final', { response: final });
+      await traceEvent(phaseTrace, 'usage', { ...phaseUsage, modelTurns });
+      phaseAdapter?.observe?.({ provider: 'gemini-api', ...phaseUsage, modelTurns });
+    } else await traceEvent(phaseTrace, 'usage_unavailable', { provider: 'gemini-api' });
+    if (phase.tools) await traceEvent(phaseTrace, 'final', { response: final });
+    if (options.phaseNumber > 0)
+      await traceEvent(phaseTrace, 'session_phase_complete', {
+        phase: options.phaseNumber,
+        durationMs: Date.now() - phaseStartedAt,
+      });
     return final;
   }
+}
+
+/** Ordinary (adapter undefined) or owned-tool generation against Gemini generateContent. */
+export async function generateGemini(
+  context: GeminiContext,
+  settings: ProviderSettings,
+  prompt: string,
+  schema: unknown,
+  systemPrompt: string,
+  adapter: GameplayAdapter | undefined,
+  signal?: AbortSignal,
+  trace?: PromptTraceContext
+): Promise<unknown> {
+  const contents: unknown[] = [];
+  const totalUsage: ApiUsage = {};
+  return runGeminiPhase(
+    context,
+    settings,
+    contents,
+    {
+      prompt,
+      schema,
+      systemPrompt,
+      tools: adapter?.dispatch,
+      trace,
+      adapterObserve: adapter?.observe,
+    },
+    {
+      totalUsage,
+      phaseNumber: 0,
+      logGameplayPrompt: !!adapter,
+      signal,
+    }
+  );
+}
+
+export function createGeminiSession(
+  context: GeminiContext,
+  settings: ProviderSettings,
+  signal?: AbortSignal,
+  trace?: PromptTraceContext
+): GameplaySession & { close: () => void } {
+  const contents: unknown[] = [];
+  const totalUsage: ApiUsage = {};
+  let phaseNumber = 0;
+  let running = false;
+  let closed = false;
+  let failure: unknown;
+  return {
+    async runPhase(phase: GameplayPhase): Promise<unknown> {
+      if (failure) throw failure;
+      if (closed) throw new Problem(409, 'gm_session_lost', 'GM conversation is closed');
+      if (running) throw new Problem(409, 'gameplay_phase', 'A GM phase is already running');
+      running = true;
+      phaseNumber++;
+      try {
+        const result = await runGeminiPhase(
+          context,
+          settings,
+          contents,
+          {
+            prompt: phase.prompt,
+            schema: phase.schema,
+            systemPrompt: phase.systemPrompt,
+            tools: phase.tools,
+            trace: phase.trace ?? trace,
+          },
+          {
+            totalUsage,
+            phaseNumber,
+            logGameplayPrompt: phaseNumber === 1,
+            signal,
+          }
+        );
+        return result;
+      } catch (error) {
+        if (!(
+          error instanceof Problem && ['provider_json', 'invalid_response'].includes(error.code)
+        )) {
+          failure = error;
+          closed = true;
+        }
+        throw error;
+      } finally {
+        running = false;
+      }
+    },
+    close() {
+      closed = true;
+    },
+  };
 }

@@ -526,9 +526,13 @@ independent of provider/model settings and inert while the GM index is disabled.
 Changing it is rejected while a campaign has an active or unfinished turn.
 GET `/settings` advertises `gmIndex.updateModes` (id, label, default,
 requiresConversation when applicable). GET `/providers` advertises optional
-`gmConversation:{supported,reason}`. Initially Antigravity supports continuing an
-owned stream conversation; other transports keep separate-agent support. An indexed
-turn selecting an unsupported continuation provider fails before generation.
+`gmConversation:{supported,reason}`. All five integrated providers (Antigravity CLI,
+OpenAI Codex CLI, Claude Code CLI, Gemini API, and OpenRouter) support continuing an
+owned GM session when ready: native CLIs preserve an owned duplex process/thread,
+while API providers retain complete conversation history in memory across turn phases.
+Transports report `supported: false` with a diagnostic reason when required CLIs are
+not discovered or API credentials are not configured. An indexed turn selecting an
+unsupported or unready continuation provider fails validation before generation.
 
 The chosen mode is frozen for each indexed turn. Both execute GM gameplay,
 narrative editor, index maintenance, then atomic turn/index commit. Continuation

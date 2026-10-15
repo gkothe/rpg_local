@@ -1,4 +1,5 @@
 import { Problem } from '../errors.js';
+import { canonicalRuleJson } from '../domain/rules.js';
 import type { GameplayToolDispatch } from './gameplayTools.js';
 import type { PromptTraceContext } from './promptLog.js';
 
@@ -10,6 +11,34 @@ export type GameplayPhase = {
   trace?: PromptTraceContext;
 };
 export type GameplaySession = { runPhase: (phase: GameplayPhase) => Promise<unknown> };
+
+export function assertPhaseToolsCompatible(
+  registered: readonly { name: string; inputSchema: unknown }[],
+  requested: readonly { name: string; inputSchema: unknown }[] | undefined
+): void {
+  for (const definition of requested ?? []) {
+    const existing = registered.find((item) => item.name === definition.name);
+    if (
+      !existing ||
+      canonicalRuleJson(existing.inputSchema) !== canonicalRuleJson(definition.inputSchema)
+    )
+      throw new Problem(
+        503,
+        'gm_session_tools',
+        'Continuation tool schema is incompatible with the owned GM registry'
+      );
+  }
+}
+
+export function assertPhaseToolAuthority(
+  toolName: string,
+  activeDefinitions: readonly { name: string }[],
+  idle = false
+): void {
+  if (idle) throw new Problem(409, 'gameplay_phase', 'Gameplay tools are closed between phases');
+  if (!activeDefinitions.some((definition) => definition.name === toolName))
+    throw new Problem(422, 'gm_index_tool', 'This tool is unavailable in the index phase');
+}
 
 /** A phase result releases the caller, never waits for orchestration in a protocol handler. */
 export class GameplaySessionBridge implements GameplaySession {

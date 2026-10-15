@@ -5,6 +5,7 @@ import { runProcess } from '../src/providers/processRunner.js';
 import { agentDefinition, parseModelCatalog, modelSlug } from '../src/providers/antigravity.js';
 import { gameplayResponseJsonSchema as responseJsonSchema } from '../src/domain/gameplayResponse.js';
 import { ProviderService, type Provider } from '../src/providers/service.js';
+import type { ApiFetch } from '../src/providers/apiHttp.js';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -382,4 +383,215 @@ test('rules capability accepts model-supported efforts and Default while preserv
   for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', null])
     assert.equal(await service.bookGameplayCapacity({ ...settings, effort }), 16000);
   assert.equal(await service.capacity(settings), 16000);
+});
+
+test('all five providers advertise gmConversation capability consistent with readiness', async () => {
+  const env: NodeJS.ProcessEnv = {
+    GEMINI_API_KEY: 'test-gemini-key',
+    GEMINI_MODELS: 'gemini-2.5-flash',
+    OPENROUTER_API_KEY: 'test-openrouter-key',
+    OPENROUTER_MODELS: 'anthropic/claude-3.5-sonnet',
+  };
+  const service = new ProviderService({ env });
+  const providers = await service.list();
+  const ids = ['agy', 'codex', 'claude', 'gemini-api', 'openrouter'] as const;
+  for (const id of ids) {
+    const p = providers.find((row) => row.id === id);
+    assert.ok(p, `Provider row ${id} must exist in list`);
+    assert.ok(p.gmConversation, `gmConversation capability must be defined for ${id}`);
+    assert.equal(typeof p.gmConversation.supported, 'boolean');
+    if (p.gmConversation.supported) {
+      assert.equal(p.gmConversation.reason, null);
+    } else {
+      assert.ok(typeof p.gmConversation.reason === 'string');
+    }
+  }
+
+  // When API key is missing, gmConversation reflects the unconfigured state
+  const unconfiguredService = new ProviderService({ env: {} });
+  const unconfiguredProviders = await unconfiguredService.list();
+  const geminiUnconfigured = unconfiguredProviders.find((p) => p.id === 'gemini-api')!;
+  assert.equal(geminiUnconfigured.gmConversation?.supported, false);
+  assert.match(geminiUnconfigured.gmConversation?.reason ?? '', /GEMINI_API_KEY/);
+  await assert.rejects(
+    unconfiguredService.gmConversationCapacity({
+      provider: 'gemini-api',
+      model: 'gemini-2.5-flash',
+      effort: null,
+    }),
+    /GEMINI_API_KEY/
+  );
+});
+
+test('cold cache API isolation: Gemini and OpenRouter resolve validation and session without discovering CLIs', async () => {
+  class ThrowingCliService extends ProviderService {
+    override async discoverCli(): Promise<Provider[]> {
+      throw new Error('CLI discovery must not be invoked for API operations');
+    }
+  }
+  const env: NodeJS.ProcessEnv = {
+    GEMINI_API_KEY: 'test-gemini-key',
+    GEMINI_MODELS: 'gemini-2.5-flash',
+    OPENROUTER_API_KEY: 'test-openrouter-key',
+    OPENROUTER_MODELS: 'anthropic/claude-3.5-sonnet',
+  };
+  const service = new ThrowingCliService({ env });
+
+  // Capacity, gameplay capacity, narrativeEditorSettings, and gmConversationCapacity must all work on cold cache
+  const geminiSettings = { provider: 'gemini-api', model: 'gemini-2.5-flash', effort: null };
+  assert.equal(await service.capacity(geminiSettings), 16000);
+  assert.equal(await service.gameplayCapacity(geminiSettings), 16000);
+  assert.deepEqual(await service.narrativeEditorSettings(geminiSettings), {
+    ...geminiSettings,
+    effort: null,
+  });
+  await service.gmConversationCapacity(geminiSettings);
+
+  const openrouterSettings = {
+    provider: 'openrouter',
+    model: 'anthropic/claude-3.5-sonnet',
+    effort: null,
+  };
+  assert.equal(await service.capacity(openrouterSettings), 16000);
+  assert.equal(await service.gameplayCapacity(openrouterSettings), 16000);
+  assert.deepEqual(await service.narrativeEditorSettings(openrouterSettings), {
+    ...openrouterSettings,
+    effort: null,
+  });
+  await service.gmConversationCapacity(openrouterSettings);
+
+  // withOwnedGameplaySession creates session without discovering CLIs
+  let geminiSessionRan = false;
+  await service.withOwnedGameplaySession(geminiSettings, async (session) => {
+    assert.ok(session);
+    assert.equal(typeof session.runPhase, 'function');
+    geminiSessionRan = true;
+  });
+  assert.equal(geminiSessionRan, true);
+
+  let openrouterSessionRan = false;
+  await service.withOwnedGameplaySession(openrouterSettings, async (session) => {
+    assert.ok(session);
+    assert.equal(typeof session.runPhase, 'function');
+    openrouterSessionRan = true;
+  });
+  assert.equal(openrouterSessionRan, true);
+});
+
+test('withOwnedGameplaySession callback failure before the first request cleans up and propagates error across providers', async () => {
+  const env: NodeJS.ProcessEnv = {
+    GEMINI_API_KEY: 'test-gemini-key',
+    GEMINI_MODELS: 'gemini-2.5-flash',
+    OPENROUTER_API_KEY: 'test-openrouter-key',
+    OPENROUTER_MODELS: 'anthropic/claude-3.5-sonnet',
+  };
+  const service = new ProviderService({ env });
+
+  // API callback failure before first request propagates
+  await assert.rejects(
+    service.withOwnedGameplaySession(
+      { provider: 'gemini-api', model: 'gemini-2.5-flash', effort: null },
+      async () => {
+        throw new Error('gemini early callback error');
+      }
+    ),
+    /gemini early callback error/
+  );
+
+  await assert.rejects(
+    service.withOwnedGameplaySession(
+      { provider: 'openrouter', model: 'anthropic/claude-3.5-sonnet', effort: null },
+      async () => {
+        throw new Error('openrouter early callback error');
+      }
+    ),
+    /openrouter early callback error/
+  );
+
+  // CLI callback failure before first request fails the bridge and does not hang
+  class MockCliService extends ProviderService {
+    constructor() {
+      super();
+      this.locations.set('codex', { binary: 'dummy-codex', prefix: [] });
+    }
+    override async list(): Promise<Provider[]> {
+      return [
+        {
+          id: 'codex',
+          transport: 'cli',
+          name: 'Codex',
+          available: true,
+          supported: true,
+          reason: null,
+          version: '0.159.2',
+          catalogProvenance: 'test',
+          gmConversation: { supported: true, reason: null },
+          dice: { supported: true, reason: null },
+          rules: { supported: true, reason: null },
+          models: [
+            {
+              id: 'gpt-5.6-sol',
+              label: 'GPT',
+              efforts: [],
+              inputTokens: 8000,
+              dice: { supported: true, reason: null },
+              rules: { supported: true, reason: null },
+            },
+          ],
+        },
+      ];
+    }
+  }
+  const cliService = new MockCliService();
+  await assert.rejects(
+    cliService.withOwnedGameplaySession(
+      { provider: 'codex', model: 'gpt-5.6-sol', effort: null },
+      async () => {
+        throw new Error('cli early callback error');
+      }
+    ),
+    /cli early callback error/
+  );
+});
+
+test('withOwnedGameplaySession routes API providers to their respective engines and executes phases', async () => {
+  const geminiBody = {
+    candidates: [
+      {
+        content: {
+          parts: [{ text: '{"text":"gemini phase response"}' }],
+          role: 'model',
+        },
+        finishReason: 'STOP',
+      },
+    ],
+  };
+  const mockFetch: ApiFetch = async (_url, init) => {
+    const reqBody = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
+    assert.ok(reqBody.contents || reqBody.messages);
+    return new Response(JSON.stringify(geminiBody), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  const service = new ProviderService({
+    env: { GEMINI_API_KEY: 'test-key', GEMINI_MODELS: 'gemini-2.5-flash' },
+    fetch: mockFetch,
+  });
+  const dispatch = Object.assign(async () => ({}), {
+    definitions: [],
+    assertActive: async () => {},
+  });
+  const result = await service.withOwnedGameplaySession(
+    { provider: 'gemini-api', model: 'gemini-2.5-flash', effort: null },
+    async (session) => {
+      return await session.runPhase({
+        prompt: 'test prompt',
+        schema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+        systemPrompt: 'test system prompt',
+        tools: dispatch,
+      });
+    }
+  );
+  assert.deepEqual(result, { text: 'gemini phase response' });
 });

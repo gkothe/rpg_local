@@ -7,6 +7,10 @@ import path from 'node:path';
 import { ProviderService, type Provider } from '../src/providers/service.js';
 import { createPromptTrace, type PromptTraceContext } from '../src/providers/promptLog.js';
 import { API_PROVIDER_ID } from '../src/providers/options.js';
+import { createGeminiSession } from '../src/providers/geminiApi.js';
+import { createOpenRouterSession } from '../src/providers/openrouterApi.js';
+import { Problem } from '../src/errors.js';
+import type { GameplayToolDispatch } from '../src/providers/gameplayTools.js';
 import { ownedTools } from './ownedGameplayFixture.js';
 
 /** Wire payloads are inspected structurally; JSON.parse already yields an untyped value. */
@@ -524,4 +528,237 @@ test('a fallback model mid-conversation continues the tool history without the p
   const history = http.calls[2]!.body.messages;
   assert.equal(history[2].reasoning_details, undefined);
   assert.equal(history[3].role, 'tool');
+});
+
+test('Gemini session retains transcript, thought signature, terminal output, and sends current phase tools', async () => {
+  const t = await traced();
+  try {
+    const modelParts1 = [
+      { text: 'thinking phase 1', thought: true, thoughtSignature: 'sig-turn1' },
+      {
+        functionCall: { id: 'g1', name: 'campaign_knowledge_search', args: { query: 'castle' } },
+        thoughtSignature: 'sig-call1',
+      },
+    ];
+    const terminalParts1 = [
+      { text: 'thinking finish 1', thought: true, thoughtSignature: 'sig-term1' },
+      { text: JSON.stringify({ narrative: 'First narrative' }) },
+    ];
+    const terminalParts2 = [
+      { text: 'thinking phase 2', thought: true, thoughtSignature: 'sig-term2' },
+      { text: JSON.stringify({ indexResult: 'Second index' }) },
+    ];
+    const correctionParts = [{ text: JSON.stringify({ indexResult: 'Corrected index' }) }];
+
+    const http = scripted([
+      geminiReply(modelParts1),
+      geminiReply(terminalParts1),
+      geminiReply(terminalParts2),
+      geminiReply(correctionParts),
+    ]);
+
+    const session = createGeminiSession(
+      { key: KEY, fetchImpl: http.fetchImpl },
+      OWNED_SETTINGS.gemini,
+      undefined,
+      t.context
+    );
+
+    const tools = ownedTools();
+    const indexTools: GameplayToolDispatch = Object.assign(async () => ({ ok: true }), {
+      definitions: [
+        { name: 'rules_search', description: 'search', inputSchema: { type: 'object' as const } },
+      ],
+      assertActive: tools.call.assertActive,
+    });
+
+    // Phase 1
+    const p1 = await session.runPhase({
+      prompt: 'Phase 1 action',
+      schema: { type: 'object' },
+      systemPrompt: 'Phase 1 system',
+      tools: tools.call,
+      trace: t.context,
+    });
+    assert.deepEqual(p1, { narrative: 'First narrative' });
+
+    // Verify Call 1 (tools present) and Call 2 (terminal reply)
+    assert.equal(http.calls.length, 2);
+    assert.equal(
+      http.calls[0]!.body.tools[0].functionDeclarations.length,
+      tools.definitions.length
+    );
+    assert.match(http.calls[0]!.body.systemInstruction.parts[0].text, /Phase 1 system/);
+
+    // Phase 2
+    const p2 = await session.runPhase({
+      prompt: 'Phase 2 edited packet',
+      schema: { type: 'object' },
+      systemPrompt: 'Phase 2 index system',
+      tools: indexTools,
+      trace: t.context,
+    });
+    assert.deepEqual(p2, { indexResult: 'Second index' });
+
+    // Verify Call 3 (Phase 2):
+    // 1. Tools only contain indexTools (length 1)
+    assert.equal(http.calls[2]!.body.tools[0].functionDeclarations.length, 1);
+    assert.equal(http.calls[2]!.body.tools[0].functionDeclarations[0].name, 'rules_search');
+    // 2. SystemInstruction updated
+    assert.match(http.calls[2]!.body.systemInstruction.parts[0].text, /Phase 2 index system/);
+    // 3. Contents contains:
+    // [0] user: Phase 1 action
+    // [1] model: modelParts1 (with thought signatures)
+    // [2] user: tool response
+    // [3] model: terminalParts1 (retained terminal assistant response with sig-term1!)
+    // [4] user: Phase 2 edited packet
+    const c3 = http.calls[2]!.body.contents;
+    assert.equal(c3.length, 5);
+    assert.equal(c3[0].parts[0].text, 'Phase 1 action');
+    assert.deepEqual(c3[1], { role: 'model', parts: modelParts1 });
+    assert.equal(c3[2].role, 'user');
+    assert.deepEqual(c3[3], { role: 'model', parts: terminalParts1 });
+    assert.equal(c3[4].parts[0].text, 'Phase 2 edited packet');
+
+    // Correction phase
+    const pCorr = await session.runPhase({
+      prompt: 'Correction feedback',
+      schema: { type: 'object' },
+      systemPrompt: 'Phase 2 index system',
+      tools: indexTools,
+      trace: t.context,
+    });
+    assert.deepEqual(pCorr, { indexResult: 'Corrected index' });
+    const c4 = http.calls[3]!.body.contents;
+    assert.equal(c4.length, 7);
+    assert.deepEqual(c4[5], { role: 'model', parts: terminalParts2 });
+    assert.equal(c4[6].parts[0].text, 'Correction feedback');
+
+    // Close session
+    session.close();
+    await assert.rejects(
+      session.runPhase({ prompt: 'after close', schema: {}, systemPrompt: '', tools: indexTools }),
+      (err: unknown) =>
+        err instanceof Problem && err.status === 409 && err.code === 'gm_session_lost'
+    );
+
+    const events = await t.events();
+    const phaseCompletes = events.filter((e) => e.kind === 'session_phase_complete');
+    assert.equal(phaseCompletes.length, 3);
+  } finally {
+    await t.done();
+  }
+});
+
+test('OpenRouter session retains terminal output, nested metadata, replaces system instructions, and keeps fallback sticky', async () => {
+  const t = await traced();
+  try {
+    const fallbackModels = ['vendor/model-fallback'];
+    const toolCallWithMeta = {
+      ...routerCall('call_meta', 'campaign_knowledge_search', { query: 'crypt' }),
+      extra_content: { reason: 'metadata' },
+    };
+    const phase1Assistant = {
+      content: null,
+      reasoning_details: [{ type: 'reasoning.test', data: 'p1_reasoning' }],
+      tool_calls: [toolCallWithMeta],
+    };
+    const phase1Terminal = {
+      content: JSON.stringify({ narrative: 'P1 narrative' }),
+      reasoning_details: [{ type: 'reasoning.terminal', data: 'term_reasoning' }],
+    };
+    const phase2Terminal = {
+      content: JSON.stringify({ index: 'P2 index' }),
+      reasoning_details: [{ type: 'reasoning.p2', data: 'p2_reasoning' }],
+    };
+
+    // First request fails with 503 to trigger fallback to vendor/model-fallback
+    const http = scripted([
+      { httpStatus: 503 },
+      routerReply(phase1Assistant, 'tool_calls'),
+      routerReply(phase1Terminal, 'stop'),
+      routerReply(phase2Terminal, 'stop'),
+    ]);
+
+    const session = createOpenRouterSession(
+      { key: KEY, fetchImpl: http.fetchImpl, fallbackModels },
+      OWNED_SETTINGS.router,
+      undefined,
+      t.context
+    );
+
+    const tools = ownedTools();
+    const indexTools: GameplayToolDispatch = Object.assign(async () => ({ ok: true }), {
+      definitions: [
+        { name: 'rules_search', description: 'search', inputSchema: { type: 'object' as const } },
+      ],
+      assertActive: tools.call.assertActive,
+    });
+
+    // Phase 1
+    const p1 = await session.runPhase({
+      prompt: 'Phase 1 action',
+      schema: { type: 'object' },
+      systemPrompt: 'Phase 1 system prompt',
+      tools: tools.call,
+      trace: t.context,
+    });
+    assert.deepEqual(p1, { narrative: 'P1 narrative' });
+
+    // Call 0 was 503 on 'vendor/router-test'
+    // Call 1 was on fallback model 'vendor/model-fallback'
+    // Call 2 was terminal on 'vendor/model-fallback'
+    assert.equal(http.calls[0]!.body.model, 'vendor/router-test');
+    assert.equal(http.calls[1]!.body.model, 'vendor/model-fallback');
+    assert.equal(http.calls[2]!.body.model, 'vendor/model-fallback');
+
+    // Verify nested metadata was preserved in Call 2 history
+    const historyCall2 = http.calls[2]!.body.messages;
+    const assistantMsgInCall2 = historyCall2[2];
+    assert.equal(assistantMsgInCall2.tool_calls[0].extra_content.reason, 'metadata');
+
+    // Phase 2
+    const p2 = await session.runPhase({
+      prompt: 'Phase 2 edited packet',
+      schema: { type: 'object' },
+      systemPrompt: 'Phase 2 system prompt',
+      tools: indexTools,
+      trace: t.context,
+    });
+    assert.deepEqual(p2, { index: 'P2 index' });
+
+    // Verify Call 3 (Phase 2):
+    // 1. Model is STILL sticky fallback model ('vendor/model-fallback')
+    assert.equal(http.calls[3]!.body.model, 'vendor/model-fallback');
+    // 2. Tools only contain indexTools (length 1)
+    assert.equal(http.calls[3]!.body.tools.length, 1);
+    assert.equal(http.calls[3]!.body.tools[0].function.name, 'rules_search');
+    // 3. Single leading system message replaced (not accumulated!)
+    const historyCall3 = http.calls[3]!.body.messages;
+    const systemMessages = historyCall3.filter((m: WireJson) => m.role === 'system');
+    assert.equal(systemMessages.length, 1);
+    assert.match(systemMessages[0].content, /Phase 2 system prompt/);
+    // 4. Terminal message from Phase 1 is preserved in history with its reasoning_details
+    const termMsg = historyCall3[4];
+    assert.equal(termMsg.role, 'assistant');
+    assert.equal(termMsg.reasoning_details[0].data, 'term_reasoning');
+    // 5. User prompt for Phase 2 appended
+    const p2UserMsg = historyCall3[5];
+    assert.equal(p2UserMsg.role, 'user');
+    assert.equal(p2UserMsg.content, 'Phase 2 edited packet');
+
+    // Close session
+    session.close();
+    await assert.rejects(
+      session.runPhase({ prompt: 'after close', schema: {}, systemPrompt: '', tools: indexTools }),
+      (err: unknown) =>
+        err instanceof Problem && err.status === 409 && err.code === 'gm_session_lost'
+    );
+
+    const events = await t.events();
+    const phaseCompletes = events.filter((e) => e.kind === 'session_phase_complete');
+    assert.equal(phaseCompletes.length, 2);
+  } finally {
+    await t.done();
+  }
 });

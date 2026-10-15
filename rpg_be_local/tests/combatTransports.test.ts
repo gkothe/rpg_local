@@ -16,15 +16,16 @@ const response = `{narrative:'Two soldiers step forward.',operations:[],rollInte
 const batch = `JSON.parse(process.env.RPG_COMBAT_BATCH)`;
 const claude = `
 const args=process.argv.slice(2);
+const sessionId=args[args.indexOf('--session-id')+1];
 if(args.includes('--version'))console.log('9.9.9 (Claude Code)');
 else { process.stdin.resume();process.stdin.on('end',async()=>{
 const tools=args[args.indexOf('--allowedTools')+1].split(',');
 if(!tools.some(t=>t.endsWith('combat_prepare')))throw Error('Missing combat_prepare');
-console.log(JSON.stringify({type:'system',subtype:'init',tools,mcp_servers:[{name:'dice',status:'connected'}]}));
+console.log(JSON.stringify({type:'system',subtype:'init',session_id:sessionId,tools,mcp_servers:[{name:'dice',status:'connected'}]}));
 const server=JSON.parse(args[args.indexOf('--mcp-config')+1]).mcpServers.dice;
 const reply=await fetch(server.url,{method:'POST',headers:{...server.headers,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:10,method:'tools/call',params:{name:'combat_prepare',arguments:${batch}}})});
 const payload=await reply.json();if(payload.result.isError)throw Error('Prepare rejected '+payload.result.content[0].text);
-console.log(JSON.stringify({type:'result',subtype:'success',is_error:false,num_turns:1,result:JSON.stringify(${response}),modelUsage:{fixture:{contextWindow:128000,outputTokens:100}}}));
+console.log(JSON.stringify({type:'result',subtype:'success',session_id:sessionId,uuid:'res-1',is_error:false,num_turns:1,result:JSON.stringify(${response}),modelUsage:{fixture:{contextWindow:128000,outputTokens:100}}}));
 });}`;
 const codex = `
 import readline from 'node:readline';

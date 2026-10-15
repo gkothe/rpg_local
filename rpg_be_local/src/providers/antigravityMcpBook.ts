@@ -1,4 +1,8 @@
-import type { GameplaySessionBridge } from './gameplaySession.js';
+import {
+  type GameplaySessionBridge,
+  assertPhaseToolsCompatible,
+  assertPhaseToolAuthority,
+} from './gameplaySession.js';
 import { cliResultFailure } from '../processingErrors.js';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -131,10 +135,7 @@ export async function generateAntigravityMcpBook(
           'dice_isolation',
           'Antigravity requested a tool before initialization'
         );
-      if (!active.definitions.some((definition) => definition.name === tool))
-        throw new Problem(422, 'gm_index_tool', 'This tool is unavailable in the index phase');
-      if (completed)
-        throw new Problem(409, 'gameplay_phase', 'Gameplay tools are closed between phases');
+      assertPhaseToolAuthority(tool, active.definitions, completed);
       invocation.claimed = true;
       // Native clients may reuse JSON-RPC IDs across independent tool calls.
       // Stream step identity owns the application's persisted replay identity.
@@ -195,19 +196,7 @@ export async function generateAntigravityMcpBook(
               (phase) => {
                 if (!completed)
                   throw new Problem(409, 'gameplay_phase', 'Previous GM phase is incomplete');
-                for (const definition of phase.tools.definitions ?? []) {
-                  const registered = definitions.find((item) => item.name === definition.name);
-                  if (
-                    !registered ||
-                    canonicalRuleJson(registered.inputSchema) !==
-                      canonicalRuleJson(definition.inputSchema)
-                  )
-                    throw new Problem(
-                      503,
-                      'gm_session_tools',
-                      'Continuation tool schema is incompatible with the owned GM registry'
-                    );
-                }
+                assertPhaseToolsCompatible(definitions, phase.tools.definitions);
                 active = {
                   dispatch: phase.tools,
                   definitions: phase.tools.definitions ?? [],
@@ -443,14 +432,7 @@ export async function generateAntigravityMcpBook(
                       : 'Antigravity attempted a tool outside its private MCP'
                   );
                 }
-                if (
-                  !active.definitions.some((definition) => definition.name === parameters.ToolName)
-                )
-                  throw new Problem(
-                    422,
-                    'gm_index_tool',
-                    'This tool is unavailable in the index phase'
-                  );
+                assertPhaseToolAuthority(parameters?.ToolName ?? '', active.definitions, completed);
                 let input: unknown;
                 try {
                   input =

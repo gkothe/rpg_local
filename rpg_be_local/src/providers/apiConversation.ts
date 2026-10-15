@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Problem } from '../errors.js';
+import { assertPhaseToolAuthority } from './gameplaySession.js';
 import { nativeGameplaySchema } from './gameplayContract.js';
 import type { GameplayAdapter, GameplayToolDefinition } from './gameplayTools.js';
 
@@ -44,6 +45,12 @@ export class ApiConversation {
     const outcomes: ApiToolOutcome[] = [];
     for (const call of calls) {
       await this.beforeRequest();
+      if (
+        this.adapter.dispatch.definitions?.some((def) => def.name === call.name) &&
+        !this.adapter.definitions.some((def) => def.name === call.name)
+      ) {
+        assertPhaseToolAuthority(call.name, this.adapter.definitions, false);
+      }
       try {
         const result = await this.adapter.dispatch(
           call.name,

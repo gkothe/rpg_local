@@ -143,7 +143,7 @@ for (const mode of ['incomplete', 'quota', 'auth'] as const) {
             };
       await writeFile(
         file,
-        `process.stdin.resume();process.stdin.on('end',()=>{console.log(JSON.stringify({type:'system',subtype:'init',tools:['mcp__dice__roll_dice'],mcp_servers:[{name:'dice',status:'connected'}]}));console.log(JSON.stringify({type:'result',...${JSON.stringify(result)}}));});`
+        `const args=process.argv.slice(2);const sessionId=args[args.indexOf('--session-id')+1];process.stdin.resume();process.stdin.on('end',()=>{console.log(JSON.stringify({type:'system',subtype:'init',session_id:sessionId,tools:['mcp__dice__roll_dice'],mcp_servers:[{name:'dice',status:'connected'}]}));console.log(JSON.stringify({type:'result',session_id:sessionId,uuid:'res-1',...${JSON.stringify(result)}}));});`
       );
       try {
         await generateClaudeDice(

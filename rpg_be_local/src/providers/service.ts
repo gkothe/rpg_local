@@ -45,8 +45,8 @@ import {
 } from './options.js';
 import { API_MODEL_INPUT_TOKENS, readApiConfiguration } from './apiConfig.js';
 import type { ApiFetch } from './apiHttp.js';
-import { generateGemini } from './geminiApi.js';
-import { generateOpenRouter } from './openrouterApi.js';
+import { generateGemini, createGeminiSession } from './geminiApi.js';
+import { generateOpenRouter, createOpenRouterSession } from './openrouterApi.js';
 import type { GameplayAdapter } from './gameplayTools.js';
 export type RulesCapability = {
   supported: boolean;
@@ -162,7 +162,16 @@ export class ProviderService implements Generator {
   /** Injection points for tests; production uses global fetch and process.env. */
   constructor(private readonly api: { fetch?: ApiFetch; env?: NodeJS.ProcessEnv } = {}) {}
   private cache: Provider[] | null = null;
-  private locations = new Map<string, { binary: string; prefix: string[] }>();
+  protected locations = new Map<string, { binary: string; prefix: string[] }>();
+  protected async resolveProvider(id: string): Promise<Provider | undefined> {
+    if (this.cache) {
+      return this.cache.find((p) => p.id === id);
+    }
+    if (isApiProvider(id)) {
+      return this.apiProvider(id);
+    }
+    return (await this.list()).find((p) => p.id === id);
+  }
   async list(refresh = false): Promise<Provider[]> {
     if (this.cache && !refresh) return this.cache;
     const result = await this.discoverCli();
@@ -384,11 +393,11 @@ export class ProviderService implements Generator {
             : null,
         models: diceModels,
         gmConversation: {
-          supported: id === PROVIDER_ID.Antigravity && isolated && models.length > 0,
+          supported: isolated && models.length > 0,
           reason:
-            id === PROVIDER_ID.Antigravity
-              ? reason
-              : 'Same-conversation index updates are currently supported only by Antigravity',
+            isolated && models.length > 0
+              ? null
+              : (reason ?? 'Same-conversation index updates require a supported isolated CLI'),
         },
         rules: {
           supported: rulesSupported,
@@ -421,7 +430,7 @@ export class ProviderService implements Generator {
     return result;
   }
   /** Local inspection only: no request is made to the remote service. */
-  private apiProvider(id: ApiProviderId): Provider {
+  protected apiProvider(id: ApiProviderId): Provider {
     const config = readApiConfiguration(id, this.api.env);
     const ready = config.reason === null;
     const capability = { supported: ready, reason: config.reason };
@@ -444,6 +453,7 @@ export class ProviderService implements Generator {
       })),
       dice: capability,
       rules: capability,
+      gmConversation: capability,
       catalogProvenance:
         'Administrator model list from the backend environment; runs remotely, so the API key and model access are checked only when a request is made' +
         (id === API_PROVIDER_ID.OpenRouter
@@ -546,14 +556,13 @@ export class ProviderService implements Generator {
   async narrativeEditorSettings(settings: ProviderSettings): Promise<ProviderSettings> {
     const defaults = { ...settings, effort: null };
     await this.capacity(defaults);
-    const model = (await this.list())
-      .find((provider) => provider.id === settings.provider)!
-      .models.find((model) => model.id === settings.model)!;
+    const provider = (await this.resolveProvider(settings.provider))!;
+    const model = provider.models.find((model) => model.id === settings.model)!;
     const effort = MODEL_EFFORTS.find((level) => model.efforts.includes(level)) ?? null;
     return { ...settings, effort };
   }
   async capacity(settings: ProviderSettings, ceiling = MAX_PROVIDER_INPUT_TOKENS): Promise<number> {
-    const provider = (await this.list()).find((p) => p.id === settings.provider);
+    const provider = await this.resolveProvider(settings.provider);
     if (!provider?.supported)
       throw new Problem(
         503,
@@ -619,9 +628,9 @@ export class ProviderService implements Generator {
                 ...settings,
                 model: modelSlug(
                   settings,
-                  (await this.list())
-                    .find((provider) => provider.id === PROVIDER_ID.Antigravity)!
-                    .models.find((model) => model.id === settings.model)!.efforts
+                  (await this.resolveProvider(PROVIDER_ID.Antigravity))!.models.find(
+                    (model) => model.id === settings.model
+                  )!.efforts
                 ),
               },
               prompt,
@@ -666,7 +675,7 @@ export class ProviderService implements Generator {
     ceiling = MAX_PROVIDER_INPUT_TOKENS
   ): Promise<number> {
     const capacity = await this.capacity(settings, ceiling);
-    const provider = (await this.list()).find((option) => option.id === settings.provider)!;
+    const provider = (await this.resolveProvider(settings.provider))!;
     if (!provider.dice?.supported)
       throw new Problem(
         503,
@@ -687,7 +696,7 @@ export class ProviderService implements Generator {
     ceiling = MAX_PROVIDER_INPUT_TOKENS
   ): Promise<number> {
     await this.capacity(settings, ceiling);
-    const provider = (await this.list()).find((option) => option.id === settings.provider)!;
+    const provider = (await this.resolveProvider(settings.provider))!;
     const model = provider.models.find((option) => option.id === settings.model)!;
     if (!provider.rules?.supported || !model.rules?.supported)
       throw new Problem(
@@ -701,11 +710,13 @@ export class ProviderService implements Generator {
   }
   async gmConversationCapacity(settings: ProviderSettings): Promise<void> {
     await this.gameplayCapacity(settings);
-    if (settings.provider !== PROVIDER_ID.Antigravity)
+    const provider = (await this.resolveProvider(settings.provider))!;
+    if (!provider.gmConversation?.supported)
       throw new Problem(
         503,
         'gm_conversation_unavailable',
-        'Select Antigravity or the separate index agent mode'
+        provider.gmConversation?.reason ??
+          'Same-conversation index updates are not supported by this provider'
       );
   }
   async withOwnedGameplaySession<T>(
@@ -715,6 +726,28 @@ export class ProviderService implements Generator {
     trace?: PromptTraceContext
   ): Promise<T> {
     await this.gmConversationCapacity(settings);
+    if (isApiProvider(settings.provider)) {
+      const id = settings.provider as ApiProviderId;
+      const context = { key: this.apiKey(id), fetchImpl: this.api.fetch };
+      const session =
+        id === API_PROVIDER_ID.Gemini
+          ? createGeminiSession(context, settings, signal, trace)
+          : (() => {
+              const listed = readApiConfiguration(id, this.api.env).models;
+              const fallbackModels = listed.slice(listed.indexOf(settings.model) + 1);
+              return createOpenRouterSession(
+                { ...context, fallbackModels },
+                settings,
+                signal,
+                trace
+              );
+            })();
+      try {
+        return await use(session);
+      } finally {
+        session.close();
+      }
+    }
     const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-owned-session-'));
     const bridge = new GameplaySessionBridge();
     const work = Promise.resolve().then(() => use(bridge));
@@ -726,25 +759,58 @@ export class ProviderService implements Generator {
     let failure: unknown;
     try {
       const first = await bridge.first;
-      const model = (await this.list())
-        .find((provider) => provider.id === settings.provider)!
-        .models.find((model) => model.id === settings.model)!;
-      driver = generateAntigravityMcpBook(
-        this.locations.get(settings.provider)!,
-        { ...settings, model: modelSlug(settings, model.efforts) },
-        first.prompt,
-        dir,
-        process.env,
-        {
-          dispatch: first.tools,
-          definitions: first.tools.definitions ?? [],
-          schema: first.schema,
-          systemPrompt: first.systemPrompt,
-        },
-        signal,
-        first.trace ?? trace,
-        bridge
-      ).then(
+      const provider = (await this.resolveProvider(settings.provider))!;
+      const model = provider.models.find((model) => model.id === settings.model)!;
+      const adapter = {
+        dispatch: first.tools,
+        definitions: first.tools.definitions ?? [],
+        schema: first.schema,
+        systemPrompt: first.systemPrompt,
+      };
+      const executable = this.locations.get(settings.provider);
+      if (!executable)
+        throw new Problem(
+          503,
+          'provider_unavailable',
+          'Installed CLI location is missing for ' + settings.provider
+        );
+      const driverPromise =
+        settings.provider === PROVIDER_ID.Codex
+          ? generateCodexDice(
+              executable,
+              settings,
+              first.prompt,
+              dir,
+              process.env,
+              adapter,
+              signal,
+              first.trace ?? trace,
+              bridge
+            )
+          : settings.provider === PROVIDER_ID.Claude
+            ? generateClaudeDice(
+                executable,
+                settings,
+                first.prompt,
+                dir,
+                process.env,
+                adapter,
+                signal,
+                first.trace ?? trace,
+                bridge
+              )
+            : generateAntigravityMcpBook(
+                executable,
+                { ...settings, model: modelSlug(settings, model.efforts) },
+                first.prompt,
+                dir,
+                process.env,
+                adapter,
+                signal,
+                first.trace ?? trace,
+                bridge
+              );
+      driver = driverPromise.then(
         () => {
           bridge.fail(new Problem(409, 'gm_session_lost', 'The GM conversation ended'));
         },
@@ -819,9 +885,9 @@ export class ProviderService implements Generator {
           signal,
           trace
         );
-      const model = (await this.list())
-        .find((provider) => provider.id === settings.provider)!
-        .models.find((model) => model.id === settings.model)!;
+      const model = (await this.resolveProvider(settings.provider))!.models.find(
+        (model) => model.id === settings.model
+      )!;
       return await generateAntigravityDice(
         executable,
         { ...settings, model: modelSlug(settings, model.efforts) },

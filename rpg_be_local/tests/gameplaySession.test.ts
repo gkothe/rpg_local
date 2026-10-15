@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, access, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { GameplaySessionBridge } from '../src/providers/gameplaySession.js';
+import {
+  GameplaySessionBridge,
+  assertPhaseToolsCompatible,
+  assertPhaseToolAuthority,
+} from '../src/providers/gameplaySession.js';
+import { Problem } from '../src/errors.js';
 import { generateAntigravityMcpBook } from '../src/providers/antigravityMcpBook.js';
 import type { GameplayToolDispatch } from '../src/providers/gameplayTools.js';
 import { GmIndexUpdateMode, gmIndexUpdateModeOf } from '../src/domain/gmIndexExecution.js';
@@ -17,6 +22,98 @@ test('mode defaults to separate, validates closed values and survives public pro
   const c = newCampaign({ name: 'Synthetic', description: '', instructions: '' });
   c.gmIndexUpdateMode = GmIndexUpdateMode.SameConversation;
   assert.equal(publicCampaign(c).gmIndexUpdateMode, 'same_gm_conversation');
+});
+
+test('shared phase schema compatibility validates subsets and rejects unknown or mismatched tool definitions', () => {
+  const registered = [
+    {
+      name: 'roll_dice',
+      inputSchema: { type: 'object', properties: { count: { type: 'number' } } },
+    },
+    {
+      name: 'rules_get',
+      inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
+    },
+  ];
+  assert.doesNotThrow(() => assertPhaseToolsCompatible(registered, undefined));
+  assert.doesNotThrow(() => assertPhaseToolsCompatible(registered, []));
+  assert.doesNotThrow(() =>
+    assertPhaseToolsCompatible(registered, [
+      {
+        name: 'rules_get',
+        inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
+      },
+    ])
+  );
+  assert.throws(
+    () =>
+      assertPhaseToolsCompatible(registered, [
+        { name: 'invented_tool', inputSchema: { type: 'object' } },
+      ]),
+    (err: unknown) =>
+      err instanceof Problem && err.status === 503 && err.code === 'gm_session_tools'
+  );
+  assert.throws(
+    () =>
+      assertPhaseToolsCompatible(registered, [
+        {
+          name: 'rules_get',
+          inputSchema: { type: 'object', properties: { different: { type: 'string' } } },
+        },
+      ]),
+    (err: unknown) =>
+      err instanceof Problem && err.status === 503 && err.code === 'gm_session_tools'
+  );
+});
+
+test('shared phase tool authority revokes idle access and enforces phase allowlisting', () => {
+  const activeDefs = [{ name: 'rules_get' }, { name: 'rules_search' }];
+  assert.doesNotThrow(() => assertPhaseToolAuthority('rules_get', activeDefs, false));
+  assert.throws(
+    () => assertPhaseToolAuthority('roll_dice', activeDefs, false),
+    (err: unknown) => err instanceof Problem && err.status === 422 && err.code === 'gm_index_tool'
+  );
+  assert.throws(
+    () => assertPhaseToolAuthority('rules_get', activeDefs, true),
+    (err: unknown) => err instanceof Problem && err.status === 409 && err.code === 'gameplay_phase'
+  );
+  assert.throws(
+    () => assertPhaseToolAuthority('roll_dice', activeDefs, true),
+    (err: unknown) => err instanceof Problem && err.status === 409 && err.code === 'gameplay_phase'
+  );
+});
+
+test('gameplay session bridge enforces serial execution, rejection on close, and unexpected complete', async () => {
+  const bridge = new GameplaySessionBridge();
+  const dummyTools: GameplayToolDispatch = Object.assign(async () => ({}), { definitions: [] });
+  const dummyPhase = { prompt: 'P1', schema: {}, systemPrompt: 'S', tools: dummyTools };
+
+  assert.throws(
+    () => bridge.complete({ ok: true }),
+    (err: unknown) => err instanceof Problem && err.status === 502 && err.code === 'gameplay_phase'
+  );
+
+  const p1 = bridge.runPhase(dummyPhase);
+
+  await assert.rejects(
+    bridge.runPhase({ ...dummyPhase, prompt: 'P2' }),
+    (err: unknown) => err instanceof Problem && err.status === 409 && err.code === 'gameplay_phase'
+  );
+
+  bridge.complete({ result: 1 });
+  assert.deepEqual(await p1, { result: 1 });
+
+  await assert.rejects(
+    bridge.runPhase({ ...dummyPhase, prompt: 'P2' }),
+    (err: unknown) => err instanceof Problem && err.status === 409 && err.code === 'gm_session_lost'
+  );
+
+  bridge.close();
+
+  await assert.rejects(
+    bridge.runPhase({ ...dummyPhase, prompt: 'P3' }),
+    (err: unknown) => err instanceof Problem && err.status === 409 && err.code === 'gm_session_lost'
+  );
 });
 
 const fixture = `

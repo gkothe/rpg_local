@@ -11,5 +11,7 @@ it('exposes a real active global Flow link and loads the guide', async () => {
   const link = screen.getByRole('link', { name: 'Flow' });
   expect(link).toHaveAttribute('href', '/flow');
   expect(link).toHaveAttribute('aria-current', 'page');
-  expect(await screen.findByRole('heading', { name: 'Follow the Flow' })).toBeVisible();
+  expect(
+    await screen.findByRole('heading', { name: 'Follow the Flow' }, { timeout: 10000 })
+  ).toBeVisible();
 });

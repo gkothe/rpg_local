@@ -1620,25 +1620,62 @@ Antigravity response parsing repairs trailing structural commas only, outside qu
 GM options can choose a fresh separate index agent or continuation of the turn GM
 following the narrative editor. The default and legacy behavior is separate agent.
 The preference belongs to Campaign, not ProviderSettings, and its execution value
-is frozen in frozenGmIndex. Antigravity's stream-json protocol accepts multiple user
-messages with cumulative result num_turns; one isolated process/profile/MCP endpoint
-remains owned through gameplay, editing and index corrections, then closes. The
-small GameplaySession interface publishes phase results outside serialized protocol
-handlers so the editor and next phase cannot deadlock the stream reader.
+is frozen in frozenGmIndex. Five providers support continuing an owned GM session:
+Antigravity CLI, OpenAI Codex CLI, Claude Code CLI, Gemini API, and OpenRouter.
+
+### Per-provider session lifecycles
+
+- **Antigravity CLI**: Uses duplex `stream-json` over an isolated CLI profile/MCP bridge.
+  Multiple user messages are accepted on the running process with cumulative result `num_turns`.
+  One isolated process, profile directory, and MCP endpoint remain owned through gameplay,
+  editing, and index corrections, then close cleanly.
+- **OpenAI Codex CLI**: Runs an isolated child process with a dedicated temporary `CODEX_HOME`.
+  Initializes a thread via `thread/start` and initiates turn phases via `turn/start` on the same
+  thread ID without requiring `thread/resume`. Dynamic tool declarations and schema-scoped execution
+  are managed per phase on the persistent thread.
+- **Claude Code CLI**: Launches a single nonpersistent process with `--input-format stream-json` and
+  `--output-format stream-json` (application schemas and prompt instructions delivered over stdin
+  rather than `--json-schema`), keeping stdin open for duplex multi-turn interaction. Phase outputs
+  are correlated with stream events (`session_id` and result `uuid`), and the child process is
+  terminated when the session completes.
+- **Gemini API**: Manages an in-memory conversation transcript across turn phases through the
+  shared `ApiConversation` wire engine. Preserves all model parts, including thought signatures,
+  in their original positions and order. Phase transitions re-declare phase-scoped function
+  declarations without leaking gameplay tools into the index phase.
+- **OpenRouter API**: Retains the complete message transcript across turn phases through the
+  shared `ApiConversation` wire engine, preserving assistant tool calls and reasoning tokens.
+  Model fallback is sticky across the entire session: the model successfully resolved during
+  initial gameplay remains active for index finalization, and remaining fallback candidates
+  are preserved across phases (stripping model-specific reasoning metadata whenever switching to
+  a different fallback model candidate).
+
+The small `GameplaySession` interface publishes phase results outside serialized protocol
+handlers so the editor and next phase cannot deadlock stream readers or event loops.
+
+### Authority checks, traces and recovery
 
 GmIndexUpdater remains the single context/schema/retry owner; turns.ts retains the
 single provenance/application/atomic-commit boundary. Same-conversation corrections
 receive feedback in that conversation, preserving only its index-phase read evidence.
-Each phase rechecks tool schemas against the original registered set and revokes
-non-index tool dispatch after gameplay output. No remembered gameplay prose is
-implicitly promoted to index evidence. The initial continuation currently sends the
-same complete finalization context as separate mode; context and latency savings
-are not guaranteed. Traces identify selected and actual modes and phase durations.
+Each phase rechecks tool schemas against the registered set and revokes non-index tool
+dispatch after gameplay output. In native CLI modes, any unapproved activity, dice
+execution, or preparation invocation during the index phase is rejected at the dispatch
+boundary. No remembered gameplay prose is implicitly promoted to index evidence. The
+initial continuation sends the same complete finalization context as separate mode;
+context and latency savings are not guaranteed.
+
+Trace events record native `usage` (token counts and model breakdown), `final` (validated phase response),
+and `failure` (sanitized diagnostics) through provider `observe` callbacks and prompt tracing.
+Transports with cumulative usage metrics compute per-phase deltas so tokens are not counted
+twice, while distinguishing missing usage data from zero tokens. Native thread/session IDs
+and API credentials remain private and never enter public errors or player DTOs.
 
 Live handles are ephemeral, never archived. Saved candidates and index checkpoints
-support explicitly labelled separate-agent recovery when a process is lost, including
-loss during editing before the first index checkpoint. A validated saved index can
-commit without a new generation. Durable resume intent in narrative_edit_requests
-prevents changing recovery behavior under the same request UUID. Snapshots/undo and
-player-output withholding are shared across modes. Native cancellation and owned
-resource cleanup are retained, without an app-imposed AI deadline.
+support explicitly labelled separate-agent recovery (`separate_index_recovery`) when
+a process or transport session is lost, including loss during editing before the first
+index checkpoint. A validated saved index can commit without a new generation. Durable
+resume intent in narrative_edit_requests prevents changing recovery behavior under the
+same request UUID. Snapshots/undo and player-output withholding are shared across modes.
+Native cancellation and owned resource cleanup are retained, without an app-imposed AI
+deadline. Correctable schema/JSON validation errors receive retry feedback within the alive
+conversation, whereas transport corruption or child exit triggers explicit recovery.
