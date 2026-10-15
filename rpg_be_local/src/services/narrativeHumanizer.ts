@@ -1,3 +1,4 @@
+import { FinalizationResumeIntent } from '../domain/gmIndexExecution.js';
 import type { Pool, PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { Problem } from '../errors.js';
@@ -134,16 +135,17 @@ export class NarrativeCandidateRepository {
     owner: string,
     digest: string,
     requestId: string,
-    client?: PoolClient
+    client?: PoolClient,
+    resumeIntent = FinalizationResumeIntent.Continue
   ): Promise<void> {
     const result = await (client ?? this.pool).query(
       `WITH candidate AS (UPDATE narrative_edit_candidates SET owner=$2,updated_at=now()
        WHERE turn_id=$1 AND candidate_digest=$3 AND status<>'abandoned'
        AND EXISTS(SELECT 1 FROM turns WHERE id=$1 AND owner=$2 AND status='running') RETURNING turn_id)
-       INSERT INTO narrative_edit_requests(turn_id,request_id,candidate_digest) SELECT turn_id,$4,$3 FROM candidate
+       INSERT INTO narrative_edit_requests(turn_id,request_id,candidate_digest,resume_intent) SELECT turn_id,$4,$3,$5 FROM candidate
        ON CONFLICT(turn_id,request_id) DO UPDATE SET candidate_digest=narrative_edit_requests.candidate_digest
-       WHERE narrative_edit_requests.candidate_digest=EXCLUDED.candidate_digest RETURNING turn_id`,
-      [turnId, owner, digest, requestId]
+       WHERE narrative_edit_requests.candidate_digest=EXCLUDED.candidate_digest AND narrative_edit_requests.resume_intent=EXCLUDED.resume_intent RETURNING turn_id`,
+      [turnId, owner, digest, requestId, resumeIntent]
     );
     if (!result.rows.length)
       throw new Problem(

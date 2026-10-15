@@ -60,3 +60,54 @@ test(
     }
   }
 );
+
+test(
+  'recovery intent migration preserves existing requests and validates its closed values',
+  { skip: !dbEnabled },
+  async () => {
+    const isolated = await openIsolatedStore('gm_resume_intent_migration');
+    try {
+      const { store } = isolated;
+      // Recreate the pre-0032 column shape inside this disposable test schema only.
+      await store.pool.query('ALTER TABLE narrative_edit_requests DROP COLUMN resume_intent');
+      const { campaign, turns } = await seedCampaign(store, [
+        { action: 'Wait', narrative: 'A quiet room.' },
+      ]);
+      const turnId = turns[0]!.id;
+      await store.pool.query(
+        "INSERT INTO narrative_edit_candidates(turn_id,campaign_id,candidate_digest,campaign_revision,rule_context,settings,raw_response,raw_narrative,owner) VALUES($1,$2,'synthetic',0,'{}','{}','{}','Synthetic',$3)",
+        [turnId, campaign.id, randomUUID()]
+      );
+      const requestId = randomUUID();
+      await store.pool.query(
+        "INSERT INTO narrative_edit_requests(turn_id,request_id,candidate_digest) VALUES($1,$2,'synthetic')",
+        [turnId, requestId]
+      );
+      const { readFile } = await import('node:fs/promises');
+      await store.pool.query(
+        await readFile(
+          new URL('../migrationssql/0032_finalization_resume_intent.sql', import.meta.url),
+          'utf8'
+        )
+      );
+      const legacy = await store.pool.query(
+        'SELECT resume_intent FROM narrative_edit_requests WHERE request_id=$1',
+        [requestId]
+      );
+      assert.equal(legacy.rows[0].resume_intent, 'continue');
+      await assert.rejects(
+        store.pool.query(
+          "UPDATE narrative_edit_requests SET resume_intent='invented' WHERE request_id=$1",
+          [requestId]
+        ),
+        /narrative_edit_requests_resume_intent_check/
+      );
+      await store.pool.query(
+        "UPDATE narrative_edit_requests SET resume_intent='separate_index_recovery' WHERE request_id=$1",
+        [requestId]
+      );
+    } finally {
+      await isolated.close();
+    }
+  }
+);

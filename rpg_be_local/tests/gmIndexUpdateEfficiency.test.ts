@@ -316,3 +316,79 @@ test('updater verifies manifest before generation and seeds delivered sources on
   assert.equal(checkpoint.invocations.length, 2);
   assert.equal(checkpoint.invocations[0]!.reads.length, 1);
 });
+
+test('same-conversation correction retains delivered index evidence and sends only feedback', async () => {
+  const { c, doc, turn } = fixture();
+  const ctx = buildGmIndexUpdateContext(c, doc, turn, []);
+  const checkpoint = {
+    contractVersion: 1,
+    campaign: c,
+    history: {
+      campaignId: c.id,
+      mode: 'compact',
+      turnVersions: [],
+      fragments: [],
+      correctionGuidance: [],
+      protectedLocators: [],
+      selectionDiagnostics: {
+        targetBytes: 1,
+        suppliedBytes: 0,
+        mandatoryBytes: 0,
+        overflowBytes: 0,
+        included: [],
+        omitted: { count: 0, reasonCounts: {} },
+      },
+    },
+    currentOriginal: { turnId: turn.id },
+    prompt: ctx.prompt,
+    deliveredOriginals: ctx.deliveredOriginals,
+    invocations: [],
+  } as unknown as GmIndexCheckpoint;
+  const generator = {
+    capacity: async () => 16000,
+    gameplayCapacity: async () => 16000,
+    generate: async () => {
+      throw new Error('Unexpected');
+    },
+    generateOwnedGameplay: async () => {
+      throw new Error('Unexpected separate agent');
+    },
+  } as Generator;
+  const updater = new GmIndexUpdater(
+    { pool: { query: async () => ({ rows: [{ id: turn.id }] }) } } as unknown as Store,
+    generator
+  );
+  updater.save = async () => {};
+  let calls = 0;
+  await updater.generate(
+    turn.id,
+    checkpoint,
+    new AbortController().signal,
+    undefined,
+    async () => {
+      assert.equal(checkpoint.invocations.at(-1)?.reads.length, 1);
+    },
+    {
+      runPhase: async (phase) => {
+        calls++;
+        if (calls === 1) {
+          assert.equal(phase.prompt, ctx.prompt);
+          await phase.tools(
+            'campaign_knowledge_get',
+            { id: c.knowledge![0]!.id },
+            'index-original'
+          );
+          throw new SyntaxError('Synthetic malformed index');
+        }
+        assert.match(phase.prompt, /Validation feedback/);
+        assert.ok(phase.prompt.length < ctx.prompt.length);
+        return {
+          checked: { notes: true, foundation: true, direction: true },
+          gmIndexChanges: [],
+          gmFoundationChanges: [],
+        };
+      },
+    }
+  );
+  assert.equal(calls, 2);
+});

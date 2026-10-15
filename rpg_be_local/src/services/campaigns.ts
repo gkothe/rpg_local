@@ -79,7 +79,8 @@ export class CampaignService {
     patch: Omit<z.infer<typeof campaignPatchSchema>, 'revision'>
   ) {
     if (patch.settings?.provider) await this.generator.capacity(patch.settings);
-    return this.store.edit(id, revision, (c) => {
+    return this.store.edit(id, revision, async (c, client) => {
+      if (patch.gmIndexUpdateMode !== undefined) await this.store.assertIdle(id, client);
       if (
         patch.pinnedSourceIds?.some(
           (id) => !c.sources.some((s) => s.id === id && s.status === SourceStatus.Confirmed)

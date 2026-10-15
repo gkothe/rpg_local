@@ -1,3 +1,9 @@
+import {
+  GmIndexUpdateMode,
+  gmIndexUpdateModeOf,
+  FinalizationResumeIntent,
+} from '../domain/gmIndexExecution.js';
+import type { GameplaySession } from '../providers/gameplaySession.js';
 import { atlasObservations } from '../domain/atlasRecall.js';
 import { assertAtlasSessionEnabled, requireAtlasFeature } from '../domain/features.js';
 import { NPC_SHEET_VERSION } from '../domain/npcSheet.js';
@@ -142,6 +148,18 @@ export class TurnService {
       return this.store.turn(campaignId, prior.rows[0].document.id);
     }
     const initialCampaign = await this.store.campaign(campaignId);
+    if (
+      initialCampaign.gmIndex?.settings.enabled &&
+      gmIndexUpdateModeOf(initialCampaign) === GmIndexUpdateMode.SameConversation
+    ) {
+      if (!this.generator.withOwnedGameplaySession || !this.generator.gmConversationCapacity)
+        throw new Problem(
+          503,
+          'gm_conversation_unavailable',
+          'Same-conversation GM finalization is unavailable; select separate index agent'
+        );
+      await this.generator.gmConversationCapacity(input.settings ?? initialCampaign.settings);
+    }
     await this.selectedCapacity(
       initialCampaign,
       input.settings ?? initialCampaign.settings,
@@ -367,24 +385,36 @@ export class TurnService {
   async resumeEditing(
     campaignId: string,
     turnId: string,
-    input: { revision: number; requestId: string }
+    input: { revision: number; requestId: string; resumeIntent?: FinalizationResumeIntent }
   ): Promise<Turn> {
+    const intent = input.resumeIntent ?? FinalizationResumeIntent.Continue;
     let launch = false;
     const turn = await this.store.transaction(async (client) => {
       const campaign = await this.store.campaign(campaignId, client, true);
       const t = await this.store.turn(campaignId, turnId, client, true);
       const existing = await client.query(
-        'SELECT candidate_digest FROM narrative_edit_requests WHERE turn_id=$1 AND request_id=$2',
+        'SELECT candidate_digest,resume_intent FROM narrative_edit_requests WHERE turn_id=$1 AND request_id=$2',
         [turnId, input.requestId]
       );
-      if (existing.rows.length) return t;
-      if (!t.editingPending || !t.editingResume?.available)
+      if (existing.rows.length) {
+        if (existing.rows[0].resume_intent !== intent)
+          throw conflict('Resume request identity reused with changed intent');
+        return t;
+      }
+      if ([TurnStatus.Pending, TurnStatus.Running].includes(t.status as TurnStatus))
+        throw conflict('Turn finalization is already running');
+      const recovering = intent === FinalizationResumeIntent.SeparateIndexRecovery;
+      if (
+        !t.editingPending ||
+        !(recovering ? t.finalization?.recovery?.available : t.editingResume?.available)
+      )
         throw conflict(t.editingResume?.reason ?? 'No pending narrative editing is available');
       const repository = new NarrativeCandidateRepository(this.store.pool);
       const candidate = await repository.load(turnId, client);
       if (!candidate) throw conflict('Saved narrative context changed');
       if (t.ruleContext) await new RuleStore(this.store).guard(t.ruleContext, client);
       t.status = TurnStatus.Running;
+      if (t.finalization) delete t.finalization.recovery;
       t.error = null;
       t.completedAt = null;
       const saved = await client.query(
@@ -414,19 +444,26 @@ export class TurnService {
         [turnId, ownerId, TURN_LEASE_SECONDS]
       );
       await this.store.saveTurn(t, client);
-      await repository.claim(turnId, ownerId, candidate.candidateDigest, input.requestId, client);
+      await repository.claim(
+        turnId,
+        ownerId,
+        candidate.candidateDigest,
+        input.requestId,
+        client,
+        intent
+      );
       launch = true;
       return t;
     });
     if (launch)
       queueMicrotask(() => {
-        void this.run(turn).catch((error) =>
-          reportProcessingFailure('narrative_resume', error, turn.id)
+        void this.run(turn, intent === FinalizationResumeIntent.SeparateIndexRecovery).catch(
+          (error) => reportProcessingFailure('narrative_resume', error, turn.id)
         );
       });
     return turn;
   }
-  private async run(t: Turn): Promise<void> {
+  private async run(t: Turn, separateRecovery = false): Promise<void> {
     const ctl = new AbortController();
     this.aborts.set(t.id, ctl);
     let trace: PromptTraceContext | undefined;
@@ -463,7 +500,7 @@ export class TurnService {
       trace.trace = await createPromptTrace('gameplay', trace);
       t.traceId = executionId;
       if (t.editingPending) {
-        await this.finishEditing(t, ctl.signal, trace);
+        await this.finishEditing(t, ctl.signal, trace, undefined, separateRecovery);
         return;
       }
       await this.store.transaction(async (client) => {
@@ -582,307 +619,337 @@ export class TurnService {
           t.context = turn.context;
           await this.store.saveTurn(turn, client);
         });
-      await withResponseRetries(
-        async (attempt, feedback) => {
-          if (trace) {
-            trace.correctionAttempt = attempt;
-            trace.runId ??= trace.executionId;
-            trace.executionId = randomUUID();
-          }
-          await traceEvent(trace, 'execution_attempt', { attempt });
-          const dice = new DiceService(this.store);
-          const combat = new CombatPreparationService(this.store);
-          const npcPreparation = new NpcPreparationService(this.store, this.generator);
-          const atlasPreparation = new AtlasPreparationService(this.store, this.generator);
-          let frozenDefinitions: GameplayToolDefinition[] | undefined;
-          let npcSheetVersion = NPC_SHEET_VERSION;
-          if (t.diceSessionId) {
-            const saved = await this.store.pool.query(
-              'SELECT * FROM dice_sessions WHERE id=$1 AND campaign_id=$2',
-              [t.diceSessionId, t.campaignId]
-            );
-            const root = saved.rows[0];
-            if (root) assertAtlasSessionEnabled(root);
-            npcSheetVersion = root?.npc_sheet_version ?? 0;
-            if (!root?.system_prompt)
-              throw new Problem(409, 'dice_context', 'Frozen session metadata is missing');
-            t.context!.systemPrompt = root.system_prompt;
-            t.context!.frozenKnowledge = root.frozen_knowledge;
-            t.context!.frozenContinuity = root.frozen_continuity ?? undefined;
-            t.context!.frozenGmIndex = root.frozen_gm_index ?? undefined;
-            t.context!.frozenAtlas = root.frozen_atlas ?? undefined;
-            t.context!.frozenSources = root.frozen_sources ?? undefined;
-            t.context!.frozenHistory = root.frozen_history ?? undefined;
-            frozenDefinitions = root.tool_definitions;
-          }
-          if (!this.generator.generateOwnedGameplay)
-            throw new Problem(
-              503,
-              'gameplay_unavailable',
-              'Owned gameplay is not available for this provider'
-            );
-          c = await this.store.campaign(t.campaignId);
-          const rules = new RuleStore(this.store);
-          const lookup = new RuleLookup();
-          const sourceLookup = new CampaignSourceLookup(this.store);
-          const registry = new GameplayTools({
-            npcSheetVersion,
-            book: t.ruleContext?.kind === RuleSystemKind.Library,
-            knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c, true),
-            ...(t.context!.frozenAtlas
-              ? {
-                  atlas: t.context!.frozenAtlas,
-                  prepareAtlas: (input: unknown) =>
-                    atlasPreparation.prepare(t, input, ctl.signal, trace),
-                }
-              : {}),
-            readCampaignSource: (tool, input, requestId) =>
-              sourceLookup.read(t, tool, input, `repair:${attempt}:${requestId}`, ctl.signal),
-            signal: ctl.signal,
-            roll: (input) => dice.roll(t.diceSessionId!, t, input),
-            read: async (tool, input, requestId, evidence) =>
-              (
-                await rules.read(
-                  t,
-                  tool,
-                  input,
-                  `repair:${attempt}:${requestId}`,
-                  lookup,
-                  ctl.signal,
-                  evidence ? { ...evidence, scope: `repair:${attempt}:` } : undefined
-                )
-              ).payload,
-            assertActive: async () => {
-              await this.store.transaction(async (client) => {
-                await this.lockedOwned(t, client);
-              });
-            },
-            ...(t.context!.frozenContinuity &&
-            (!frozenDefinitions || frozenDefinitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME))
-              ? {
-                  prepareNpc: (input: unknown) =>
-                    npcPreparation.prepare(t, input, ctl.signal, trace),
-                }
-              : {}),
-            ...(t.context!.frozenContinuity
-              ? {
-                  npcReader: async () => {
-                    const frozen = t.context!.frozenKnowledge ?? freezeKnowledge(c, true);
-                    const snapshots = (frozen.npcCharacters ?? []).map((npc) => ({
-                      ...npc,
-                      ...(t.context!.frozenContinuity?.npcProfiles.find(
-                        (p) => p.characterId === npc.id
-                      )
-                        ? {
-                            privateCore: npcCore(
-                              t.context!.frozenContinuity!.npcProfiles.find(
-                                (p) => p.characterId === npc.id
-                              )!
-                            ),
-                          }
-                        : {}),
-                    }));
-                    const drafts =
-                      t.diceSessionId &&
-                      (!frozenDefinitions ||
-                        frozenDefinitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME))
-                        ? await npcPreparation.ready(t.diceSessionId)
-                        : [];
-                    return createNpcRecall(
-                      c.id,
-                      [...snapshots, ...stagedNpcSnapshots(drafts)] as Parameters<
-                        typeof createNpcRecall
-                      >[1],
-                      frozen.records
-                    );
-                  },
-                }
-              : {}),
-            prepareCombat: (input) => combat.prepare(t, input),
-            ...(t.context!.frozenHistory
-              ? {
-                  history: new HistoryReader(this.store, t.context!.frozenHistory),
-                  historyOriginals: !!t.context!.frozenGmIndex,
-                }
-              : {}),
-          });
-          if (!t.diceSessionId) {
-            c = await this.store.campaign(t.campaignId);
-            history = await this.store.activeTurns(c.id);
-            const characters = JSON.parse(t.context!.prompt).mandatory.characters as {
-              id: string;
-            }[];
-            t.diceSessionId = await dice.createSession(
-              t,
-              gameplayDigest(c, history, t.ruleContext),
-              [
-                ...new Set([
-                  ...characters.map((character) => character.id),
-                  ...(t.context!.frozenKnowledge?.npcCharacters ?? []).map((npc) => npc.id),
-                ]),
-              ],
-              {
-                frozenContinuity: t.context!.frozenContinuity,
-                frozenGmIndex: t.context!.frozenGmIndex,
-                frozenAtlas: t.context!.frozenAtlas,
-                frozenSources: t.context!.frozenSources,
-                frozenHistory: t.context!.frozenHistory,
-                systemPrompt: t.context!.systemPrompt!,
-                knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c, true),
-                ...(t.context!.frozenAtlas
-                  ? {
-                      atlas: t.context!.frozenAtlas,
-                      prepareAtlas: (input: unknown) =>
-                        atlasPreparation.prepare(t, input, ctl.signal, trace),
-                    }
-                  : {}),
-                toolDefinitions: registry.definitions,
-              }
-            );
-          }
-          if (frozenDefinitions) {
-            if (!isDeepStrictEqual(registry.definitions, frozenDefinitions))
+      const generateAndFinalize = async (session?: GameplaySession) => {
+        await withResponseRetries(
+          async (attempt, feedback) => {
+            if (trace) {
+              trace.correctionAttempt = attempt;
+              trace.runId ??= trace.executionId;
+              trace.executionId = randomUUID();
+            }
+            await traceEvent(trace, 'execution_attempt', { attempt });
+            const dice = new DiceService(this.store);
+            const combat = new CombatPreparationService(this.store);
+            const npcPreparation = new NpcPreparationService(this.store, this.generator);
+            const atlasPreparation = new AtlasPreparationService(this.store, this.generator);
+            let frozenDefinitions: GameplayToolDefinition[] | undefined;
+            let npcSheetVersion = NPC_SHEET_VERSION;
+            if (t.diceSessionId) {
+              const saved = await this.store.pool.query(
+                'SELECT * FROM dice_sessions WHERE id=$1 AND campaign_id=$2',
+                [t.diceSessionId, t.campaignId]
+              );
+              const root = saved.rows[0];
+              if (root) assertAtlasSessionEnabled(root);
+              npcSheetVersion = root?.npc_sheet_version ?? 0;
+              if (!root?.system_prompt)
+                throw new Problem(409, 'dice_context', 'Frozen session metadata is missing');
+              t.context!.systemPrompt = root.system_prompt;
+              t.context!.frozenKnowledge = root.frozen_knowledge;
+              t.context!.frozenContinuity = root.frozen_continuity ?? undefined;
+              t.context!.frozenGmIndex = root.frozen_gm_index ?? undefined;
+              t.context!.frozenAtlas = root.frozen_atlas ?? undefined;
+              t.context!.frozenSources = root.frozen_sources ?? undefined;
+              t.context!.frozenHistory = root.frozen_history ?? undefined;
+              frozenDefinitions = root.tool_definitions;
+            }
+            if (!this.generator.generateOwnedGameplay)
               throw new Problem(
-                409,
-                'dice_context',
-                'Frozen gameplay tool definitions changed; start a new action'
+                503,
+                'gameplay_unavailable',
+                'Owned gameplay is not available for this provider'
               );
-            registry.call.definitions = frozenDefinitions;
-          }
-          const existing = await dice.records(t.diceSessionId);
-          const specifications = existing.map(
-            ({
-              id: _id,
-              sessionId: _sessionId,
-              campaignId: _campaignId,
-              createdAt: _createdAt,
-              groups,
-              ...input
-            }) => ({
-              ...input,
-              groups: groups.map((group) => ({
-                label: group.label,
-                sides: group.sides,
-                count: group.faces.length,
-              })),
-            })
-          );
-          // Preparation receipts belong to the logical session; retries reuse their identities.
-          const preparations = (await combat.authorization(t.diceSessionId)).preparations.map(
-            ({ preparationKey, payload }) => ({
-              localKey: preparationKey,
-              encounterId: payload.encounterId,
-              participants: payload.participants.map(({ characterId, label }) => ({
-                characterId,
-                label,
-              })),
-              createOperations: payload.createOperations,
-            })
-          );
-          const npcDrafts = registry.definitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME)
-            ? await npcPreparation.ready(t.diceSessionId)
-            : [];
-          const prompt =
-            t.context!.prompt +
-            (npcDrafts.length
-              ? '\nNPC preparations already recorded; reuse exact operations and private profiles: ' +
-                JSON.stringify(npcDrafts.map(preparationOperations))
-              : '') +
-            (feedback ? `\nResponse correction: ${feedback}` : '') +
-            (specifications.length
-              ? '\nReplay the original requests in order with exactly these specifications before appending any dice: ' +
-                JSON.stringify(specifications)
-              : '') +
-            (preparations.length
-              ? '\nCombat preparations already recorded for this action; reuse these IDs and repeat combat_prepare only with identical arguments: ' +
-                JSON.stringify(preparations)
-              : '');
-          const raw = await this.generator.generateOwnedGameplay(
-            t.settings,
-            prompt,
-            t.context?.frozenGmIndex
-              ? gameplayResponseContract(t.context.frozenGmIndex.contractVersion).wireJsonSchema
-              : gameplayResponseWireJsonSchema,
-            t.context!.systemPrompt!,
-            this.tracedTools(registry, trace),
-            ctl.signal,
-            trace
-          );
-          let response = raw as GameplayResponse;
-          try {
-            await validateWithFieldRepair(
-              response,
-              async (candidate) => {
-                const parsed = (
-                  t.context?.frozenGmIndex
-                    ? gameplayResponseContract(t.context.frozenGmIndex.contractVersion).inputSchema
-                    : gameplayResponseInputSchema
-                ).parse(candidate);
-                await this.persistResponse(t, parsed, true);
-                response = parsed;
+            c = await this.store.campaign(t.campaignId);
+            const rules = new RuleStore(this.store);
+            const lookup = new RuleLookup();
+            const sourceLookup = new CampaignSourceLookup(this.store);
+            const registry = new GameplayTools({
+              npcSheetVersion,
+              book: t.ruleContext?.kind === RuleSystemKind.Library,
+              knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c, true),
+              ...(t.context!.frozenAtlas
+                ? {
+                    atlas: t.context!.frozenAtlas,
+                    prepareAtlas: (input: unknown) =>
+                      atlasPreparation.prepare(t, input, ctl.signal, trace),
+                  }
+                : {}),
+              readCampaignSource: (tool, input, requestId) =>
+                sourceLookup.read(t, tool, input, `repair:${attempt}:${requestId}`, ctl.signal),
+              signal: ctl.signal,
+              roll: (input) => dice.roll(t.diceSessionId!, t, input),
+              read: async (tool, input, requestId, evidence) =>
+                (
+                  await rules.read(
+                    t,
+                    tool,
+                    input,
+                    `repair:${attempt}:${requestId}`,
+                    lookup,
+                    ctl.signal,
+                    evidence ? { ...evidence, scope: `repair:${attempt}:` } : undefined
+                  )
+                ).payload,
+              assertActive: async () => {
+                await this.store.transaction(async (client) => {
+                  await this.lockedOwned(t, client);
+                });
               },
-              this.generator,
-              t.settings,
-              ctl.signal,
-              trace,
-              async () =>
-                this.store.transaction(async (client) => {
-                  const { campaign } = await this.lockedOwned(t, client);
-                  const sources = await new CampaignSourceLookup(this.store).records(
-                    t.campaignId,
-                    t.id,
-                    client
-                  );
-                  const rules = await client.query(
-                    'SELECT id,payload FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
-                    [t.id]
-                  );
-                  return {
-                    sourceSpans: [
-                      ...(t.context?.sourceSpans ?? []),
-                      ...sources.flatMap((read) =>
-                        read.payload.sourceSpan ? [read.payload.sourceSpan] : []
-                      ),
-                    ],
-                    ruleReads: rules.rows,
-                    characters: campaign.characters,
-                    knowledge: campaign.knowledge,
-                    state: campaign.state,
-                    continuity: campaign.continuity,
-                    ...(t.context?.frozenGmIndex
-                      ? { gmIndex: t.context.frozenGmIndex.document }
-                      : {}),
-                    atlas: t.context?.frozenAtlas,
-                    atlasPreparations: t.context?.frozenAtlas
-                      ? await atlasPreparation.ready(t.diceSessionId!, client)
-                      : [],
-                    npcPreparations: t.context?.frozenContinuity
-                      ? await npcPreparation.ready(t.diceSessionId!, client)
-                      : [],
-                    rolls: await new DiceService(this.store).records(t.diceSessionId!, client),
-                    combat: await combat.authorization(t.diceSessionId!, client),
-                  };
-                })
-            );
-            await traceEvent(trace, 'validated_candidate', { response, editingPending: true });
-          } catch (error) {
-            await traceEvent(trace, 'candidate_rejected', { code: operationalProblem(error).code });
-            throw error;
-          }
-        },
-        async () => {
-          await this.store.transaction(async (client) => {
-            await this.lockedOwned(t, client);
-            if (t.diceSessionId)
-              await client.query(
-                'UPDATE dice_attempts SET next_slot=0,requests=0 WHERE turn_id=$1',
-                [t.id]
+              ...(t.context!.frozenContinuity &&
+              (!frozenDefinitions ||
+                frozenDefinitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME))
+                ? {
+                    prepareNpc: (input: unknown) =>
+                      npcPreparation.prepare(t, input, ctl.signal, trace),
+                  }
+                : {}),
+              ...(t.context!.frozenContinuity
+                ? {
+                    npcReader: async () => {
+                      const frozen = t.context!.frozenKnowledge ?? freezeKnowledge(c, true);
+                      const snapshots = (frozen.npcCharacters ?? []).map((npc) => ({
+                        ...npc,
+                        ...(t.context!.frozenContinuity?.npcProfiles.find(
+                          (p) => p.characterId === npc.id
+                        )
+                          ? {
+                              privateCore: npcCore(
+                                t.context!.frozenContinuity!.npcProfiles.find(
+                                  (p) => p.characterId === npc.id
+                                )!
+                              ),
+                            }
+                          : {}),
+                      }));
+                      const drafts =
+                        t.diceSessionId &&
+                        (!frozenDefinitions ||
+                          frozenDefinitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME))
+                          ? await npcPreparation.ready(t.diceSessionId)
+                          : [];
+                      return createNpcRecall(
+                        c.id,
+                        [...snapshots, ...stagedNpcSnapshots(drafts)] as Parameters<
+                          typeof createNpcRecall
+                        >[1],
+                        frozen.records
+                      );
+                    },
+                  }
+                : {}),
+              prepareCombat: (input) => combat.prepare(t, input),
+              ...(t.context!.frozenHistory
+                ? {
+                    history: new HistoryReader(this.store, t.context!.frozenHistory),
+                    historyOriginals: !!t.context!.frozenGmIndex,
+                  }
+                : {}),
+            });
+            if (!t.diceSessionId) {
+              c = await this.store.campaign(t.campaignId);
+              history = await this.store.activeTurns(c.id);
+              const characters = JSON.parse(t.context!.prompt).mandatory.characters as {
+                id: string;
+              }[];
+              t.diceSessionId = await dice.createSession(
+                t,
+                gameplayDigest(c, history, t.ruleContext),
+                [
+                  ...new Set([
+                    ...characters.map((character) => character.id),
+                    ...(t.context!.frozenKnowledge?.npcCharacters ?? []).map((npc) => npc.id),
+                  ]),
+                ],
+                {
+                  frozenContinuity: t.context!.frozenContinuity,
+                  frozenGmIndex: t.context!.frozenGmIndex,
+                  frozenAtlas: t.context!.frozenAtlas,
+                  frozenSources: t.context!.frozenSources,
+                  frozenHistory: t.context!.frozenHistory,
+                  systemPrompt: t.context!.systemPrompt!,
+                  knowledge: t.context!.frozenKnowledge ?? freezeKnowledge(c, true),
+                  ...(t.context!.frozenAtlas
+                    ? {
+                        atlas: t.context!.frozenAtlas,
+                        prepareAtlas: (input: unknown) =>
+                          atlasPreparation.prepare(t, input, ctl.signal, trace),
+                      }
+                    : {}),
+                  toolDefinitions: registry.definitions,
+                }
               );
-          });
-        },
-        ctl.signal
-      );
-      await this.finishEditing(t, ctl.signal, trace);
+            }
+            if (frozenDefinitions) {
+              if (!isDeepStrictEqual(registry.definitions, frozenDefinitions))
+                throw new Problem(
+                  409,
+                  'dice_context',
+                  'Frozen gameplay tool definitions changed; start a new action'
+                );
+              registry.call.definitions = frozenDefinitions;
+            }
+            const existing = await dice.records(t.diceSessionId);
+            const specifications = existing.map(
+              ({
+                id: _id,
+                sessionId: _sessionId,
+                campaignId: _campaignId,
+                createdAt: _createdAt,
+                groups,
+                ...input
+              }) => ({
+                ...input,
+                groups: groups.map((group) => ({
+                  label: group.label,
+                  sides: group.sides,
+                  count: group.faces.length,
+                })),
+              })
+            );
+            // Preparation receipts belong to the logical session; retries reuse their identities.
+            const preparations = (await combat.authorization(t.diceSessionId)).preparations.map(
+              ({ preparationKey, payload }) => ({
+                localKey: preparationKey,
+                encounterId: payload.encounterId,
+                participants: payload.participants.map(({ characterId, label }) => ({
+                  characterId,
+                  label,
+                })),
+                createOperations: payload.createOperations,
+              })
+            );
+            const npcDrafts = registry.definitions.some((d) => d.name === NPC_PREPARE_TOOL_NAME)
+              ? await npcPreparation.ready(t.diceSessionId)
+              : [];
+            const prompt =
+              t.context!.prompt +
+              (npcDrafts.length
+                ? '\nNPC preparations already recorded; reuse exact operations and private profiles: ' +
+                  JSON.stringify(npcDrafts.map(preparationOperations))
+                : '') +
+              (feedback ? `\nResponse correction: ${feedback}` : '') +
+              (specifications.length
+                ? '\nReplay the original requests in order with exactly these specifications before appending any dice: ' +
+                  JSON.stringify(specifications)
+                : '') +
+              (preparations.length
+                ? '\nCombat preparations already recorded for this action; reuse these IDs and repeat combat_prepare only with identical arguments: ' +
+                  JSON.stringify(preparations)
+                : '');
+            const schema = t.context?.frozenGmIndex
+              ? gameplayResponseContract(t.context.frozenGmIndex.contractVersion).wireJsonSchema
+              : gameplayResponseWireJsonSchema;
+            const tools = this.tracedTools(registry, trace);
+            const raw = session
+              ? await session.runPhase({
+                  prompt,
+                  schema,
+                  systemPrompt: t.context!.systemPrompt!,
+                  tools,
+                  trace,
+                })
+              : await this.generator.generateOwnedGameplay(
+                  t.settings,
+                  prompt,
+                  schema,
+                  t.context!.systemPrompt!,
+                  tools,
+                  ctl.signal,
+                  trace
+                );
+            let response = raw as GameplayResponse;
+            try {
+              await validateWithFieldRepair(
+                response,
+                async (candidate) => {
+                  const parsed = (
+                    t.context?.frozenGmIndex
+                      ? gameplayResponseContract(t.context.frozenGmIndex.contractVersion)
+                          .inputSchema
+                      : gameplayResponseInputSchema
+                  ).parse(candidate);
+                  await this.persistResponse(t, parsed, true);
+                  response = parsed;
+                },
+                this.generator,
+                t.settings,
+                ctl.signal,
+                trace,
+                async () =>
+                  this.store.transaction(async (client) => {
+                    const { campaign } = await this.lockedOwned(t, client);
+                    const sources = await new CampaignSourceLookup(this.store).records(
+                      t.campaignId,
+                      t.id,
+                      client
+                    );
+                    const rules = await client.query(
+                      'SELECT id,payload FROM turn_rule_reads WHERE turn_id=$1 ORDER BY created_at,id',
+                      [t.id]
+                    );
+                    return {
+                      sourceSpans: [
+                        ...(t.context?.sourceSpans ?? []),
+                        ...sources.flatMap((read) =>
+                          read.payload.sourceSpan ? [read.payload.sourceSpan] : []
+                        ),
+                      ],
+                      ruleReads: rules.rows,
+                      characters: campaign.characters,
+                      knowledge: campaign.knowledge,
+                      state: campaign.state,
+                      continuity: campaign.continuity,
+                      ...(t.context?.frozenGmIndex
+                        ? { gmIndex: t.context.frozenGmIndex.document }
+                        : {}),
+                      atlas: t.context?.frozenAtlas,
+                      atlasPreparations: t.context?.frozenAtlas
+                        ? await atlasPreparation.ready(t.diceSessionId!, client)
+                        : [],
+                      npcPreparations: t.context?.frozenContinuity
+                        ? await npcPreparation.ready(t.diceSessionId!, client)
+                        : [],
+                      rolls: await new DiceService(this.store).records(t.diceSessionId!, client),
+                      combat: await combat.authorization(t.diceSessionId!, client),
+                    };
+                  })
+              );
+              await traceEvent(trace, 'validated_candidate', { response, editingPending: true });
+            } catch (error) {
+              await traceEvent(trace, 'candidate_rejected', {
+                code: operationalProblem(error).code,
+              });
+              throw error;
+            }
+          },
+          async () => {
+            await this.store.transaction(async (client) => {
+              await this.lockedOwned(t, client);
+              if (t.diceSessionId)
+                await client.query(
+                  'UPDATE dice_attempts SET next_slot=0,requests=0 WHERE turn_id=$1',
+                  [t.id]
+                );
+            });
+          },
+          ctl.signal
+        );
+        await this.finishEditing(t, ctl.signal, trace, session);
+      };
+      if (t.context?.frozenGmIndex?.updateMode === GmIndexUpdateMode.SameConversation) {
+        if (!this.generator.withOwnedGameplaySession)
+          throw new Problem(
+            503,
+            'gm_conversation_unavailable',
+            'Same GM conversation is unavailable'
+          );
+        await this.generator.withOwnedGameplaySession(
+          t.settings,
+          generateAndFinalize,
+          ctl.signal,
+          trace
+        );
+      } else await generateAndFinalize();
     } catch (e) {
       await traceEvent(trace, 'execution_failed', {
         code: operationalProblem(heartbeatFailure ?? e).code,
@@ -928,7 +995,9 @@ export class TurnService {
   private async finishEditing(
     t: Turn,
     signal: AbortSignal,
-    trace?: PromptTraceContext
+    trace?: PromptTraceContext,
+    session?: GameplaySession,
+    separateRecovery = false
   ): Promise<void> {
     const repository = new NarrativeCandidateRepository(this.store.pool);
     const candidate = await repository.load(t.id);
@@ -958,7 +1027,16 @@ export class TurnService {
       await this.lockedOwned(t, client);
       await repository.complete(t.id, ownerId, candidate.candidateDigest, narrative, client);
     });
-    await this.persistResponse(t, savedResponse, false, narrative, signal, trace);
+    await this.persistResponse(
+      t,
+      savedResponse,
+      false,
+      narrative,
+      signal,
+      trace,
+      session,
+      separateRecovery
+    );
     await traceEvent(trace, 'committed', { narrative, turnId: t.id });
     if (trace?.trace?.incomplete)
       await this.store.pool.query(
@@ -976,7 +1054,9 @@ export class TurnService {
     prepare = false,
     editedNarrative?: string,
     signal?: AbortSignal,
-    trace?: PromptTraceContext
+    trace?: PromptTraceContext,
+    session?: GameplaySession,
+    separateRecovery = false
   ): Promise<void> {
     if (wireResponse.atlasChanges) requireAtlasFeature();
     const dice = new DiceService(this.store);
@@ -1194,6 +1274,7 @@ export class TurnService {
                 response.gmIndexHandoff
               );
           pendingIndex = checkpoint ?? {
+            selectedMode: t.context.frozenGmIndex.updateMode ?? GmIndexUpdateMode.SeparateAgent,
             contractVersion: 1,
             candidateDigest: narrativeCandidate.candidateDigest,
             narrativeDigest: narrativeIdentity,
@@ -1263,6 +1344,19 @@ export class TurnService {
         );
       const updater = new GmIndexUpdater(this.store, this.generator);
       const checkpoint = pendingIndex;
+      const selectedMode =
+        checkpoint.selectedMode ??
+        t.context?.frozenGmIndex?.updateMode ??
+        GmIndexUpdateMode.SeparateAgent;
+      if (selectedMode === GmIndexUpdateMode.SameConversation && !session && !separateRecovery)
+        throw new Problem(
+          409,
+          'gm_session_lost',
+          'GM conversation was lost. Choose Finish with separate index agent to recover the saved turn.'
+        );
+      checkpoint.actualMode = session
+        ? GmIndexUpdateMode.SameConversation
+        : GmIndexUpdateMode.SeparateAgent;
       const capture = {
         campaign: pendingIndex.campaign,
         turns: pendingIndex.history.turnVersions,
@@ -1273,27 +1367,43 @@ export class TurnService {
           introductions: new Map(pendingIndex.reservations.introductions),
         },
       };
-      await updater.generate(t.id, checkpoint, signal, trace, async (update) => {
-        const document = applyGmIndexChanges(
-          checkpoint.campaign.gmIndex!.document,
-          update.gmIndexChanges,
-          update.gmFoundationChanges,
-          capture
-        );
-        validateGmIndexProvenance(
-          document,
-          checkpoint.campaign.gmIndex!.document,
-          checkpoint.campaign,
-          checkpoint.invocations.at(-1)?.reads ?? [],
-          t.id,
-          checkpoint.deliveredOriginals
-        );
-        document.dependencyState.sourceCoverage = gmIndexSourceCoverage(checkpoint.campaign);
-        document.dependencyState.turnCoverage = checkpoint.history.turnVersions;
-        checkpoint.result = refreshGmIndexDependencies(document, capture);
-        await updater.save(t.id, checkpoint);
-      });
-      await this.persistResponse(t, wireResponse, false, editedNarrative, signal, trace);
+      await updater.generate(
+        t.id,
+        checkpoint,
+        signal,
+        trace,
+        async (update) => {
+          const document = applyGmIndexChanges(
+            checkpoint.campaign.gmIndex!.document,
+            update.gmIndexChanges,
+            update.gmFoundationChanges,
+            capture
+          );
+          validateGmIndexProvenance(
+            document,
+            checkpoint.campaign.gmIndex!.document,
+            checkpoint.campaign,
+            checkpoint.invocations.at(-1)?.reads ?? [],
+            t.id,
+            checkpoint.deliveredOriginals
+          );
+          document.dependencyState.sourceCoverage = gmIndexSourceCoverage(checkpoint.campaign);
+          document.dependencyState.turnCoverage = checkpoint.history.turnVersions;
+          checkpoint.result = refreshGmIndexDependencies(document, capture);
+          await updater.save(t.id, checkpoint);
+        },
+        session
+      );
+      await this.persistResponse(
+        t,
+        wireResponse,
+        false,
+        editedNarrative,
+        signal,
+        trace,
+        session,
+        separateRecovery
+      );
     }
   }
   async cancel(campaignId: string, id: string): Promise<Turn> {

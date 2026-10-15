@@ -1,3 +1,4 @@
+import type { GameplaySessionBridge } from './gameplaySession.js';
 import { cliResultFailure } from '../processingErrors.js';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -76,8 +77,12 @@ export async function generateAntigravityMcpBook(
   sourceEnv: NodeJS.ProcessEnv,
   book: GameplayAdapter,
   signal?: AbortSignal,
-  trace?: PromptTraceContext
+  trace?: PromptTraceContext,
+  session?: GameplaySessionBridge
 ): Promise<unknown> {
+  let active = book;
+  let phaseNumber = 1;
+  let phaseStartedAt = Date.now();
   const profile = await mkdtemp(path.join(os.tmpdir(), PROFILE_PREFIX));
   const deadline = Infinity;
   const controller = new AbortController();
@@ -126,10 +131,18 @@ export async function generateAntigravityMcpBook(
           'dice_isolation',
           'Antigravity requested a tool before initialization'
         );
+      if (!active.definitions.some((definition) => definition.name === tool))
+        throw new Problem(422, 'gm_index_tool', 'This tool is unavailable in the index phase');
+      if (completed)
+        throw new Problem(409, 'gameplay_phase', 'Gameplay tools are closed between phases');
       invocation.claimed = true;
       // Native clients may reuse JSON-RPC IDs across independent tool calls.
       // Stream step identity owns the application's persisted replay identity.
-      return book.dispatch(tool, input, `agy:mcp:${invocation.index}`);
+      return active.dispatch(
+        tool,
+        input,
+        session ? `agy:phase:${phaseNumber}:mcp:${invocation.index}` : `agy:mcp:${invocation.index}`
+      );
     },
     boundedSignal
   ).catch(async (error: unknown) => {
@@ -173,8 +186,52 @@ export async function generateAntigravityMcpBook(
         deadlineMs: deadline,
         maxOutputBytes: Infinity,
         protocol: (agentName) => ({
-          start(_send, end) {
-            end(JSON.stringify({ event: 'user', message: { content: phasePrompt } }) + '\n');
+          start(send, end) {
+            if (!session) {
+              end(JSON.stringify({ event: 'user', message: { content: phasePrompt } }) + '\n');
+              return;
+            }
+            session.attach(
+              (phase) => {
+                if (!completed)
+                  throw new Problem(409, 'gameplay_phase', 'Previous GM phase is incomplete');
+                for (const definition of phase.tools.definitions ?? []) {
+                  const registered = definitions.find((item) => item.name === definition.name);
+                  if (
+                    !registered ||
+                    canonicalRuleJson(registered.inputSchema) !==
+                      canonicalRuleJson(definition.inputSchema)
+                  )
+                    throw new Problem(
+                      503,
+                      'gm_session_tools',
+                      'Continuation tool schema is incompatible with the owned GM registry'
+                    );
+                }
+                active = {
+                  dispatch: phase.tools,
+                  definitions: phase.tools.definitions ?? [],
+                  schema: phase.schema,
+                  systemPrompt: phase.systemPrompt,
+                };
+                trace = phase.trace;
+                completed = false;
+                phaseNumber++;
+                phaseStartedAt = Date.now();
+                pending.length = 0;
+                discoverySteps.clear();
+                nativeTasks.clear();
+                inferences.clear();
+                send({
+                  event: 'user',
+                  message: {
+                    content: `${phase.systemPrompt}\n${phase.prompt}\nReturn only the current phase JSON schema: ${JSON.stringify(phase.schema)}`,
+                  },
+                });
+              },
+              () => end()
+            );
+            send({ event: 'user', message: { content: phasePrompt } });
           },
           async line(value) {
             check();
@@ -386,6 +443,14 @@ export async function generateAntigravityMcpBook(
                       : 'Antigravity attempted a tool outside its private MCP'
                   );
                 }
+                if (
+                  !active.definitions.some((definition) => definition.name === parameters.ToolName)
+                )
+                  throw new Problem(
+                    422,
+                    'gm_index_tool',
+                    'This tool is unavailable in the index phase'
+                  );
                 let input: unknown;
                 try {
                   input =
@@ -505,7 +570,7 @@ export async function generateAntigravityMcpBook(
                 incompleteNativeTasks,
               });
               if (initialized && !completed && result.status !== 'SUCCESS') {
-                if (typeof result.num_turns === 'number' && result.num_turns > 1)
+                if (typeof result.num_turns === 'number' && result.num_turns > phaseNumber)
                   throw new Problem(
                     502,
                     'dice_isolation',
@@ -527,7 +592,7 @@ export async function generateAntigravityMcpBook(
                 !initialized ||
                 completed ||
                 result.status !== 'SUCCESS' ||
-                result.num_turns !== 1 ||
+                result.num_turns !== phaseNumber ||
                 typeof result.response !== 'string' ||
                 unclaimedCalls > 0 ||
                 incompleteNativeTasks > 0
@@ -536,7 +601,7 @@ export async function generateAntigravityMcpBook(
                   ? 'its private agent was not initialized'
                   : completed
                     ? 'it sent a duplicate completion'
-                    : result.num_turns !== 1
+                    : result.num_turns !== phaseNumber
                       ? `it reported ${Number.isInteger(result.num_turns) ? result.num_turns : 'no'} completed turns instead of one`
                       : typeof result.response !== 'string'
                         ? 'its final response was missing'
@@ -572,6 +637,12 @@ export async function generateAntigravityMcpBook(
                 );
               }
               completed = true;
+              if (session)
+                await traceEvent(trace, 'session_phase_complete', {
+                  phase: phaseNumber,
+                  durationMs: Date.now() - phaseStartedAt,
+                });
+              session?.complete(final);
             } else
               throw new Problem(
                 502,
@@ -592,6 +663,7 @@ export async function generateAntigravityMcpBook(
   } catch (error) {
     await traceEvent(trace, 'failure', safeTraceFailure(error));
     generationFailure = error;
+    session?.fail(error);
   } finally {
     controller.abort();
     notify();

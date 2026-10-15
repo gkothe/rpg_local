@@ -130,6 +130,7 @@ export interface RuleImportPreview {
   columns: string[];
 }
 export interface Provider {
+  gmConversation?: { supported: boolean; reason: string | null };
   images?: { supported: boolean; reason: string | null };
   /** Backend-served: CLI rows are installed executables, API rows are configured remote services. */
   transport: 'cli' | 'api';
@@ -179,7 +180,11 @@ export interface Source {
   originalAvailable?: boolean;
 }
 export interface Turn {
-  finalization?: { stage: string; resume: { available: boolean; reason: string | null } };
+  finalization?: {
+    stage: string;
+    resume: { available: boolean; reason: string | null };
+    recovery?: { available: boolean; reason: string | null; action: string };
+  };
   ruleContext?: RuleContext;
   ruleReads?: RuleRead[];
   ruleCitations?: RuleCitation[];
@@ -257,6 +262,7 @@ export interface CampaignKnowledge {
   attributions: KnowledgeAttribution[];
 }
 export interface Campaign {
+  gmIndexUpdateMode?: string;
   knowledge?: CampaignKnowledge[];
   ruleSystemId?: string | null;
   ruleReference?: RuleReference;
@@ -511,6 +517,7 @@ export interface Settings {
     purposeOptions?: { id: string; label: string }[];
   };
   gmIndex?: {
+    updateModes?: { id: string; label: string; default: boolean; requiresConversation?: boolean }[];
     purposeId: string;
     modes: { id: string; label: string }[];
     finalizationStages: { id: string; label: string }[];

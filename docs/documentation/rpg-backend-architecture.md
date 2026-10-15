@@ -1614,3 +1614,31 @@ Correctable model MCP routing/argument errors (`gameplay_tool_unavailable`, `gam
 Preparation accepts one observed top-level naming variant: `workingEntries` is renamed to `entries` only when `entries` is absent. The entire result still passes the canonical strict schema and owned-reference checks; conflicting aliases, unknown fields and invalid values are rejected. Missing turn-reference hashes can be completed only from the exact turn ID/version map frozen for that job. Explicit hashes are never overwritten; unknown turns, mismatched hashes and extra fields remain rejected. Merge responses are checkpointed privately before schema validation. Resume can reuse a saved merge that passes all current capture checks without another provider call; invalid saved output is rejected and the merge regenerated. These operational raw outputs never enter player DTOs or campaign archives.
 
 Antigravity response parsing repairs trailing structural commas only, outside quoted strings and after an existing value. Missing values, comments and other malformed syntax remain rejected; parsed outputs still pass the complete schema and ownership checks. Non-success native result responses are retained only in the private local trace as native_failure_response, allowing diagnosis without adding raw output to HTTP errors or server error logs. Generated JSON in a failed result is not account diagnostics: login/quota words in its prose cannot classify that result as an account failure. Plain CLI diagnostic matching uses word boundaries to avoid substring matches in ordinary words.
+
+### GM conversation choice for index finalization
+
+GM options can choose a fresh separate index agent or continuation of the turn GM
+following the narrative editor. The default and legacy behavior is separate agent.
+The preference belongs to Campaign, not ProviderSettings, and its execution value
+is frozen in frozenGmIndex. Antigravity's stream-json protocol accepts multiple user
+messages with cumulative result num_turns; one isolated process/profile/MCP endpoint
+remains owned through gameplay, editing and index corrections, then closes. The
+small GameplaySession interface publishes phase results outside serialized protocol
+handlers so the editor and next phase cannot deadlock the stream reader.
+
+GmIndexUpdater remains the single context/schema/retry owner; turns.ts retains the
+single provenance/application/atomic-commit boundary. Same-conversation corrections
+receive feedback in that conversation, preserving only its index-phase read evidence.
+Each phase rechecks tool schemas against the original registered set and revokes
+non-index tool dispatch after gameplay output. No remembered gameplay prose is
+implicitly promoted to index evidence. The initial continuation currently sends the
+same complete finalization context as separate mode; context and latency savings
+are not guaranteed. Traces identify selected and actual modes and phase durations.
+
+Live handles are ephemeral, never archived. Saved candidates and index checkpoints
+support explicitly labelled separate-agent recovery when a process is lost, including
+loss during editing before the first index checkpoint. A validated saved index can
+commit without a new generation. Durable resume intent in narrative_edit_requests
+prevents changing recovery behavior under the same request UUID. Snapshots/undo and
+player-output withholding are shared across modes. Native cancellation and owned
+resource cleanup are retained, without an app-imposed AI deadline.

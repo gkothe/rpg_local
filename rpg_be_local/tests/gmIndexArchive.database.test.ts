@@ -1,3 +1,4 @@
+import { GmIndexUpdateMode } from '../src/domain/gmIndexExecution.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -170,11 +171,14 @@ test(
       const { store } = isolated;
       const { campaign, completed, generator } = await playedCampaign(store);
       const library = new LibraryService(store);
+      campaign.gmIndexUpdateMode = GmIndexUpdateMode.SameConversation;
+      await store.transaction(async (client) => store.save(campaign, client));
       const original = await library.export(campaign.id);
       assert.equal(original.historyTurnVersions?.length, 2);
       assert.match(JSON.stringify(original), /ARCHIVE_PRIVATE_INDEX_MARKER/);
       const imported = await library.import(original);
       const archive = await library.export(imported.id);
+      assert.equal(archive.campaign.gmIndexUpdateMode, 'same_gm_conversation');
       assert.notEqual(archive.campaign.id, campaign.id);
       const document = archive.campaign.gmIndex!.document;
       assert.notEqual(document.generationId, campaign.gmIndex!.document.generationId);

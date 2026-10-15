@@ -289,6 +289,70 @@ export default function PlayPage() {
               }
             }}
           />
+          {!!settings.data?.gmIndex?.updateModes?.length && (
+            <label className="stack">
+              GM index updater
+              <select
+                aria-label="GM index updater"
+                disabled={game.busy || saving || game.editingBlocked}
+                value={
+                  campaign.gmIndexUpdateMode ??
+                  settings.data.gmIndex.updateModes.find((mode) => mode.default)?.id ??
+                  ''
+                }
+                onChange={async (event) => {
+                  if (savingGuard.current) return;
+                  savingGuard.current = true;
+                  setSaving(true);
+                  try {
+                    await request(
+                      `/campaigns/${id}`,
+                      json('PATCH', {
+                        revision: campaign.revision,
+                        gmIndexUpdateMode: event.target.value,
+                      })
+                    );
+                    await resource.reload();
+                    setError('');
+                    setFeedback('GM index updater saved. Applies to the next indexed turn.');
+                  } catch (error) {
+                    setError(errorMessage(error));
+                  } finally {
+                    savingGuard.current = false;
+                    setSaving(false);
+                  }
+                }}
+              >
+                {settings.data.gmIndex.updateModes.map((mode) => (
+                  <option
+                    key={mode.id}
+                    value={mode.id}
+                    disabled={
+                      mode.requiresConversation &&
+                      !providers.data?.find(
+                        (provider) => provider.id === campaign.settings.provider
+                      )?.gmConversation?.supported
+                    }
+                  >
+                    {mode.label}
+                  </option>
+                ))}
+              </select>
+              <small>
+                The turn GM can continue after editing to maintain the index. Both modes finish
+                before your answer is shown.
+              </small>
+              {!providers.data?.find((provider) => provider.id === campaign.settings.provider)
+                ?.gmConversation?.supported && (
+                <small>
+                  {
+                    providers.data?.find((provider) => provider.id === campaign.settings.provider)
+                      ?.gmConversation?.reason
+                  }
+                </small>
+              )}
+            </label>
+          )}
         </div>
         <CampaignContextSettings
           campaign={campaign}
@@ -422,6 +486,16 @@ export default function PlayPage() {
                           </button>
                         ) : (
                           <p className="muted">{t.editingResume?.reason}</p>
+                        )}
+                        {t.finalization?.recovery?.available && (
+                          <button
+                            disabled={game.busy || game.uncertainEditingResume}
+                            onClick={() =>
+                              void game.resumeEditing(t, t.finalization?.recovery?.action)
+                            }
+                          >
+                            Finish with separate index agent
+                          </button>
                         )}
                         <button disabled={game.busy} onClick={() => void game.cancel(t)}>
                           Cancel pending turn

@@ -271,3 +271,43 @@ test(
     }
   }
 );
+
+test(
+  'campaign HTTP persists the mode and rejects invalid or in-flight mode changes',
+  { skip: !dbEnabled },
+  async () => {
+    const f = await fixture();
+    try {
+      await request(f.app)
+        .patch(f.base)
+        .set(headers)
+        .send({ revision: 0, gmIndexUpdateMode: 'invented' })
+        .expect(422);
+      const saved = await request(f.app)
+        .patch(f.base)
+        .set(headers)
+        .send({ revision: 0, gmIndexUpdateMode: 'same_gm_conversation' })
+        .expect(200);
+      assert.equal(saved.body.data.gmIndexUpdateMode, 'same_gm_conversation');
+      const fetched = await request(f.app).get(f.base).set(headers).expect(200);
+      assert.equal(fetched.body.data.gmIndexUpdateMode, 'same_gm_conversation');
+      const id = randomUUID();
+      await f.store.pool.query(
+        "INSERT INTO turns(id,campaign_id,request_id,payload_hash,status,document) VALUES($1,$2,$3,'synthetic','pending',$4)",
+        [
+          id,
+          f.campaign.id,
+          randomUUID(),
+          JSON.stringify({ id, campaignId: f.campaign.id, status: 'pending' }),
+        ]
+      );
+      await request(f.app)
+        .patch(f.base)
+        .set(headers)
+        .send({ revision: 0, gmIndexUpdateMode: 'separate_agent' })
+        .expect(409);
+    } finally {
+      await f.close();
+    }
+  }
+);

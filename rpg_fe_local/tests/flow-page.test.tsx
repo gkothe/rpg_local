@@ -22,3 +22,18 @@ it('opens a linked step, selects evidence and safely falls back from unknown sel
   );
   expect(screen.getByRole('heading', { name: '1. Submit an action' })).toBeVisible();
 });
+
+it('explains both updater modes after editing and explicit separate-agent recovery', () => {
+  render(
+    <MemoryRouter initialEntries={['/flow?node=commit&step=commit']}>
+      <Flow />
+    </MemoryRouter>
+  );
+  expect(screen.getByRole('heading', { name: '9. Commit and refresh' })).toBeVisible();
+  expect(
+    screen.getByText(/same Antigravity GM conversation continuing after narrative editing/)
+  ).toBeVisible();
+  expect(
+    screen.getByText(/explicit separate-agent recovery without repeating gameplay/)
+  ).toBeVisible();
+});

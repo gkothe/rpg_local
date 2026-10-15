@@ -313,3 +313,218 @@ test(
     }
   }
 );
+
+test(
+  'same GM session runs gameplay, editor and index in order without a separate updater',
+  { skip: !dbEnabled },
+  async () => {
+    const isolated = await openIsolatedStore('gm_same_session');
+    try {
+      const { store } = isolated;
+      const campaign = await indexedCampaign(store);
+      campaign.gmIndexUpdateMode = (
+        await import('../src/domain/gmIndexExecution.js')
+      ).GmIndexUpdateMode.SameConversation;
+      await store.transaction(async (client) => store.save(campaign, client));
+      const ai = syntheticIndexedGenerator(campaign, async () => {});
+      const native = ai.generator.generateOwnedGameplay!;
+      let sessions = 0;
+      ai.generator.gmConversationCapacity = async () => {};
+      ai.generator.withOwnedGameplaySession = async (_settings, use) => {
+        sessions++;
+        let definitions:
+          import('../src/providers/gameplayTools.js').GameplayToolDefinition[] | undefined;
+        return use({
+          runPhase: (phase) => {
+            if (!definitions) definitions = phase.tools.definitions;
+            else
+              for (const tool of phase.tools.definitions ?? [])
+                assert.deepEqual(
+                  tool.inputSchema,
+                  definitions?.find((item) => item.name === tool.name)?.inputSchema,
+                  tool.name
+                );
+            return native(
+              campaign.settings,
+              phase.prompt,
+              phase.schema,
+              phase.systemPrompt,
+              phase.tools,
+              undefined,
+              phase.trace
+            );
+          },
+        });
+      };
+      ai.generator.generateOwnedGameplay = async () => {
+        throw new Error('Separate agent was unexpectedly used');
+      };
+      const service = new TurnService(store, ai.generator);
+      const submitted = await service.submit(campaign.id, {
+        revision: campaign.revision,
+        requestId: randomUUID(),
+        action: 'Return to the shelter.',
+      });
+      const completed = await terminal(store, campaign.id, submitted.id);
+      assert.equal(completed.status, TurnStatus.Completed, completed.error ?? 'Turn failed');
+      assert.equal(sessions, 1);
+      assert.deepEqual(ai.stages, ['gameplay', 'humanizer', 'updater']);
+      const after = await store.campaign(campaign.id);
+      assert.deepEqual(after.state, { scene: 'Shelter' });
+      const restored = await service.undo(campaign.id, after.revision);
+      assert.deepEqual(restored.state, campaign.state);
+    } finally {
+      await isolated.close();
+    }
+  }
+);
+
+test(
+  'lost same-GM session requires explicit recovery and binds request intent',
+  { skip: !dbEnabled },
+  async () => {
+    const { GmIndexUpdateMode, FinalizationResumeIntent } =
+      await import('../src/domain/gmIndexExecution.js');
+    const isolated = await openIsolatedStore('gm_same_recovery');
+    try {
+      const { store } = isolated;
+      const campaign = await indexedCampaign(store);
+      campaign.gmIndexUpdateMode = GmIndexUpdateMode.SameConversation;
+      await store.transaction(async (client) => store.save(campaign, client));
+      let release!: () => void;
+      const recoveryGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const ai = syntheticIndexedGenerator(campaign, async () => recoveryGate);
+      const native = ai.generator.generateOwnedGameplay!;
+      ai.generator.gmConversationCapacity = async () => {};
+      ai.generator.withOwnedGameplaySession = async (_settings, use) =>
+        use({
+          runPhase: async (phase) => {
+            if ((phase.schema as { properties: Record<string, unknown> }).properties.checked)
+              throw new Problem(409, 'gm_session_lost', 'Synthetic session lost');
+            return native(
+              campaign.settings,
+              phase.prompt,
+              phase.schema,
+              phase.systemPrompt,
+              phase.tools,
+              undefined,
+              phase.trace
+            );
+          },
+        });
+      const service = new TurnService(store, ai.generator);
+      const submitted = await service.submit(campaign.id, {
+        revision: campaign.revision,
+        requestId: randomUUID(),
+        action: 'Return to the shelter.',
+      });
+      const failed = await terminal(store, campaign.id, submitted.id);
+      assert.equal(failed.status, TurnStatus.Failed);
+      assert.equal(failed.editingResume?.available, false);
+      assert.equal(failed.finalization?.recovery?.available, true);
+      await assert.rejects(
+        service.resumeEditing(campaign.id, failed.id, { revision: 0, requestId: randomUUID() }),
+        /conversation ended/
+      );
+      const requestId = randomUUID();
+      await service.resumeEditing(campaign.id, failed.id, {
+        revision: 0,
+        requestId,
+        resumeIntent: FinalizationResumeIntent.SeparateIndexRecovery,
+      });
+      await assert.rejects(
+        service.resumeEditing(campaign.id, failed.id, {
+          revision: 0,
+          requestId: randomUUID(),
+          resumeIntent: FinalizationResumeIntent.SeparateIndexRecovery,
+        }),
+        /already running|No pending/
+      );
+      release();
+      const completed = await terminal(store, campaign.id, failed.id);
+      assert.equal(completed.status, TurnStatus.Completed, completed.error ?? 'Recovery failed');
+      await assert.rejects(
+        service.resumeEditing(campaign.id, failed.id, { revision: 0, requestId }),
+        /changed intent/
+      );
+      assert.deepEqual(ai.counts(), {
+        gameplayCalls: 1,
+        rollCalls: 1,
+        editorCalls: 1,
+        updaterCalls: 1,
+      });
+    } finally {
+      await isolated.close();
+    }
+  }
+);
+
+test(
+  'same-conversation recovery works when editing fails before an index checkpoint exists',
+  { skip: !dbEnabled },
+  async () => {
+    const { GmIndexUpdateMode, FinalizationResumeIntent } =
+      await import('../src/domain/gmIndexExecution.js');
+    const isolated = await openIsolatedStore('gm_same_editor_recovery');
+    try {
+      const { store } = isolated;
+      const campaign = await indexedCampaign(store);
+      campaign.gmIndexUpdateMode = GmIndexUpdateMode.SameConversation;
+      await store.transaction(async (client) => store.save(campaign, client));
+      const ai = syntheticIndexedGenerator(campaign, async () => {});
+      const native = ai.generator.generateOwnedGameplay!;
+      const editor = ai.generator.generate;
+      let failEditor = true;
+      ai.generator.generate = async (...args) => {
+        if (failEditor) throw new Problem(429, 'provider_quota', 'Synthetic editor failure');
+        return editor(...args);
+      };
+      ai.generator.gmConversationCapacity = async () => {};
+      ai.generator.withOwnedGameplaySession = async (_settings, use) =>
+        use({
+          runPhase: (phase) =>
+            native(
+              campaign.settings,
+              phase.prompt,
+              phase.schema,
+              phase.systemPrompt,
+              phase.tools,
+              undefined,
+              phase.trace
+            ),
+        });
+      const service = new TurnService(store, ai.generator);
+      const submitted = await service.submit(campaign.id, {
+        revision: 0,
+        requestId: randomUUID(),
+        action: 'Return to the shelter.',
+      });
+      const failed = await terminal(store, campaign.id, submitted.id);
+      const saved = await store.pool.query(
+        'SELECT gm_index_checkpoint,edited_narrative FROM narrative_edit_candidates WHERE turn_id=$1',
+        [failed.id]
+      );
+      assert.equal(saved.rows[0].gm_index_checkpoint, null);
+      assert.equal(saved.rows[0].edited_narrative, null);
+      assert.equal(failed.finalization?.recovery?.available, true);
+      failEditor = false;
+      await service.resumeEditing(campaign.id, failed.id, {
+        revision: 0,
+        requestId: randomUUID(),
+        resumeIntent: FinalizationResumeIntent.SeparateIndexRecovery,
+      });
+      const completed = await terminal(store, campaign.id, failed.id);
+      assert.equal(completed.status, TurnStatus.Completed, completed.error ?? 'Recovery failed');
+      assert.deepEqual(ai.counts(), {
+        gameplayCalls: 1,
+        rollCalls: 1,
+        editorCalls: 1,
+        updaterCalls: 1,
+      });
+    } finally {
+      await isolated.close();
+    }
+  }
+);

@@ -1,4 +1,5 @@
 import { atlasSchema, validateAtlas, atlasExpected } from '../domain/atlas.js';
+import { GmIndexUpdateMode } from '../domain/gmIndexExecution.js';
 import { gmIndexSchema, gmIndexDocumentSchema, frozenGmIndexSchema } from '../domain/gmIndex.js';
 import { turnFinalizationSchema } from '../domain/turnFinalization.js';
 import { gmIndexDocuments, remapGmIndexDocuments } from './gmIndexArchive.js';
@@ -157,6 +158,7 @@ const campaign = z
   .object({
     continuity: continuitySchema.optional(),
     gmIndex: gmIndexSchema.optional(),
+    gmIndexUpdateMode: z.enum(GmIndexUpdateMode).optional(),
     atlas: atlasSchema.optional(),
     ruleSystemId: uuid.nullable().optional(),
     ruleReference: ruleReferenceSchema.optional(),

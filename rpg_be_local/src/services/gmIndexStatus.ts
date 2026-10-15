@@ -9,7 +9,9 @@ import { HistorySettingsAction, historySettingsOf } from '../domain/historyRecal
 import { MemoryRebuildPurpose } from '../domain/memoryRebuild.js';
 import { TURN_FINALIZATION_STAGE_OPTIONS } from '../domain/turnFinalization.js';
 
+import { GM_INDEX_UPDATE_MODE_OPTIONS } from '../domain/gmIndexExecution.js';
 export const GM_INDEX_OPTIONS = {
+  updateModes: GM_INDEX_UPDATE_MODE_OPTIONS,
   purposeId: MemoryRebuildPurpose.GmIndex,
   modes: GM_INDEX_MODE_OPTIONS,
   finalizationStages: TURN_FINALIZATION_STAGE_OPTIONS,

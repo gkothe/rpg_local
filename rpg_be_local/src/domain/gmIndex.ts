@@ -1,3 +1,4 @@
+import { GmIndexUpdateMode } from './gmIndexExecution.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -141,6 +142,7 @@ export type GmIndex = z.infer<typeof gmIndexSchema>;
 export const frozenGmIndexSchema = z
   .object({
     enabled: z.literal(true),
+    updateMode: z.enum(GmIndexUpdateMode).optional(),
     contractVersion: z.literal(GmIndexContractVersion.V1),
     document: gmIndexDocumentSchema,
   })

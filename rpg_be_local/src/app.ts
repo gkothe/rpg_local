@@ -1,3 +1,4 @@
+import { FinalizationResumeIntent } from './domain/gmIndexExecution.js';
 import { AtlasImportService } from './services/atlasImport.js';
 import {
   GmIndexStatusService,
@@ -1131,7 +1132,11 @@ export function createApp(options: AppOptions) {
     ],
     wrap(async (req, res) => {
       const input = z
-        .object({ revision: z.number().int().nonnegative(), requestId: z.uuid() })
+        .object({
+          revision: z.number().int().nonnegative(),
+          requestId: z.uuid(),
+          resumeIntent: z.enum(FinalizationResumeIntent).optional(),
+        })
         .strict()
         .parse(req.body);
       res.status(202).json({

@@ -1,3 +1,5 @@
+import type { GameplaySession } from '../providers/gameplaySession.js';
+import type { GmIndexUpdateMode } from '../domain/gmIndexExecution.js';
 import { randomUUID } from 'node:crypto';
 
 import { Problem } from '../errors.js';
@@ -28,6 +30,8 @@ import { gmIndexDocumentSchema, type GmIndexDocument } from '../domain/gmIndex.j
 import type { Campaign } from '../domain/types.js';
 
 export type GmIndexCheckpoint = {
+  selectedMode?: GmIndexUpdateMode;
+  actualMode?: GmIndexUpdateMode;
   contractVersion: 1;
   candidateDigest: string;
   narrativeDigest: string;
@@ -96,7 +100,8 @@ export class GmIndexUpdater {
     checkpoint: GmIndexCheckpoint,
     signal: AbortSignal,
     trace?: PromptTraceContext,
-    validate?: (update: GmIndexUpdate) => Promise<void>
+    validate?: (update: GmIndexUpdate) => Promise<void>,
+    session?: GameplaySession
   ): Promise<GmIndexUpdate> {
     await requireGmIndexTransport(this.generator, checkpoint.campaign.settings);
     const delivered = checkpoint.deliveredOriginals
@@ -109,10 +114,13 @@ export class GmIndexUpdater {
     for (const invocation of checkpoint.invocations)
       restoreGmIndexSourceReads(checkpoint.campaign, invocation.reads);
     let feedback = '';
+    const conversationReads: GmIndexCheckpoint['invocations'][number]['reads'] = [];
     for (let attempt = 0; ; attempt++) {
       const invocation = {
         id: randomUUID(),
-        reads: [] as GmIndexCheckpoint['invocations'][number]['reads'],
+        reads: (session
+          ? conversationReads
+          : []) as GmIndexCheckpoint['invocations'][number]['reads'],
       };
       checkpoint.invocations.push(invocation);
       await this.save(turnId, checkpoint);
@@ -140,7 +148,7 @@ export class GmIndexUpdater {
           await this.save(turnId, checkpoint);
         },
         [checkpoint.currentOriginal],
-        [],
+        session ? conversationReads : [],
         {
           omitKnowledgeSearch: true,
           suppliedSourceSections: delivered?.sources.map(({ sourceId, version, sectionIndex }) => ({
@@ -158,6 +166,12 @@ export class GmIndexUpdater {
       const stageStartedAt = Date.now();
       await traceEvent(trace, 'gm_index_stage_start', {
         purpose: GM_INDEX_UPDATE_PURPOSE,
+        selectedMode: checkpoint.selectedMode,
+        actualMode: checkpoint.actualMode,
+        recoveryReason:
+          checkpoint.selectedMode && checkpoint.actualMode !== checkpoint.selectedMode
+            ? 'session_lost'
+            : undefined,
         attempt,
         promptBytes: Buffer.byteLength(checkpoint.prompt, 'utf8'),
         suppliedKnowledgeCount: delivered?.knowledge.length ?? 0,
@@ -172,22 +186,31 @@ export class GmIndexUpdater {
           : undefined,
       });
       try {
-        const output = await this.generator.generateOwnedGameplay!(
-          checkpoint.campaign.settings,
-          checkpoint.prompt + feedback,
-          gmIndexUpdateJsonSchema,
-          GM_INDEX_UPDATER_INSTRUCTIONS,
-          dispatch,
-          signal,
-          trace
-            ? {
-                ...trace,
-                executionId: invocation.id,
-                purpose: GM_INDEX_UPDATE_PURPOSE,
-                correctionAttempt: attempt,
-              }
-            : undefined
-        );
+        const phaseTrace = trace
+          ? {
+              ...trace,
+              executionId: invocation.id,
+              purpose: GM_INDEX_UPDATE_PURPOSE,
+              correctionAttempt: attempt,
+            }
+          : undefined;
+        const output = session
+          ? await session.runPhase({
+              prompt: attempt === 0 ? checkpoint.prompt : feedback,
+              schema: gmIndexUpdateJsonSchema,
+              systemPrompt: GM_INDEX_UPDATER_INSTRUCTIONS,
+              tools: dispatch,
+              trace: phaseTrace,
+            })
+          : await this.generator.generateOwnedGameplay!(
+              checkpoint.campaign.settings,
+              checkpoint.prompt + feedback,
+              gmIndexUpdateJsonSchema,
+              GM_INDEX_UPDATER_INSTRUCTIONS,
+              dispatch,
+              signal,
+              phaseTrace
+            );
         await assertActive();
         const update = gmIndexUpdateSchema.parse(output);
         if (validate) await validate(update);
@@ -231,6 +254,7 @@ export const gmIndexCheckpointDigest = (checkpoint: GmIndexCheckpoint) =>
       index: checkpoint.indexIdentity,
       reservations: checkpoint.reservations,
       prompt: checkpoint.prompt,
+      ...(checkpoint.selectedMode ? { selectedMode: checkpoint.selectedMode } : {}),
       ...(checkpoint.deliveredOriginals
         ? { deliveredOriginals: checkpoint.deliveredOriginals }
         : {}),

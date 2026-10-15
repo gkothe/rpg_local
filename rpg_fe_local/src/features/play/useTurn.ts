@@ -15,7 +15,7 @@ export function useTurn(
   const pendingEditingResume = useRef<{
     endpoint: 'resume-finalization' | 'resume-editing';
     turnId: string;
-    input: { revision: number; requestId: string };
+    input: { revision: number; requestId: string; resumeIntent?: string };
   } | null>(null);
   const [uncertainEditingResume, setUncertainEditingResume] = useState(false);
   const pendingDiceRetry = useRef<{
@@ -168,14 +168,25 @@ export function useTurn(
       guard.current = false;
     }
   }
-  async function resumeEditing(attempt?: Turn) {
+  async function resumeEditing(attempt?: Turn, resumeIntent?: string) {
     if (!campaign || guard.current || (turn && activeTurn(turn, options))) return false;
     if (!pendingEditingResume.current) {
-      if (!attempt?.editingResume?.available) return false;
+      if (!attempt) return false;
+      if (
+        resumeIntent
+          ? !attempt?.finalization?.recovery?.available ||
+            attempt.finalization.recovery.action !== resumeIntent
+          : !attempt?.editingResume?.available
+      )
+        return false;
       pendingEditingResume.current = {
         endpoint: attempt.finalization ? 'resume-finalization' : 'resume-editing',
         turnId: attempt.id,
-        input: { revision: campaign.revision, requestId: crypto.randomUUID() },
+        input: {
+          revision: campaign.revision,
+          requestId: crypto.randomUUID(),
+          ...(resumeIntent ? { resumeIntent } : {}),
+        },
       };
     }
     const pending = pendingEditingResume.current;

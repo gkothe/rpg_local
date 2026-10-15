@@ -70,6 +70,7 @@ export type Memory = {
   createdAt: string;
 };
 export type Campaign = {
+  gmIndexUpdateMode?: import('./gmIndexExecution.js').GmIndexUpdateMode;
   /** Private derived working notes; public projections exclude this entire field. */
   gmIndex?: import('./gmIndex.js').GmIndex;
   atlas?: import('./atlas.js').Atlas;

@@ -17,7 +17,7 @@ import {
 import type { Turn } from '../src/domain/types.js';
 import { knowledgeRecord } from './journalFixture.js';
 
-test('indexed context removes archival bulk while keeping five final pairs, action, state and retrieval contracts', (t) => {
+test('indexed context removes archival bulk while keeping five final pairs, action, state and retrieval contracts', async (t) => {
   const c = newCampaign({
     name: 'Large indexed campaign',
     instructions: 'Honor the current action.',
@@ -131,6 +131,13 @@ test('indexed context removes archival bulk while keeping five final pairs, acti
     turnVersions: versions,
     protectedMemories: [],
   });
+  assert.equal(indexed.frozenGmIndex?.updateMode, 'separate_agent');
+  c.gmIndexUpdateMode = (
+    await import('../src/domain/gmIndexExecution.js')
+  ).GmIndexUpdateMode.SameConversation;
+  const continued = buildContext(c, turns, action, []);
+  assert.equal(continued.frozenGmIndex?.updateMode, 'same_gm_conversation');
+  assert.match(continued.systemPrompt!, /same conversation will continue/);
   const full = JSON.parse(baseline.prompt),
     small = JSON.parse(indexed.prompt);
   const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');

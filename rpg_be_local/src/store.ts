@@ -1,3 +1,5 @@
+import { GmIndexUpdateMode, FinalizationResumeIntent } from './domain/gmIndexExecution.js';
+import { TurnFinalizationStage } from './domain/turnFinalization.js';
 import { atlasConflict } from './domain/atlasCompatibility.js';
 import { validateAtlas } from './domain/atlas.js';
 import { sourceSections } from './domain/sourceSections.js';
@@ -210,7 +212,35 @@ export class Store {
                   ? 'Rule library changed or is unresolved; start a new action after selecting current rules'
                   : null));
       if (turn.editingPending) {
-        turn.editingResume = { available: reason === null, reason };
+        const same = session?.frozen_gm_index?.updateMode === GmIndexUpdateMode.SameConversation;
+        let savedIndex = false;
+        if (same) {
+          const saved = await db.query(
+            'SELECT gm_index_checkpoint FROM narrative_edit_candidates WHERE turn_id=$1',
+            [turn.id]
+          );
+          savedIndex = !!saved.rows[0]?.gm_index_checkpoint?.result;
+        }
+        const needsRecovery = same && !savedIndex;
+        turn.editingResume = {
+          available: reason === null && !needsRecovery,
+          reason:
+            reason ??
+            (needsRecovery
+              ? 'The GM conversation ended. Finish with a separate index agent.'
+              : null),
+        };
+        if (needsRecovery)
+          turn.finalization = {
+            ...turn.finalization,
+            stage: turn.finalization?.stage ?? TurnFinalizationStage.NarrativeEditing,
+            resume: turn.editingResume,
+            recovery: {
+              available: reason === null,
+              reason,
+              action: FinalizationResumeIntent.SeparateIndexRecovery,
+            },
+          };
         delete turn.diceRetry;
       } else turn.diceRetry = { available: reason === null, reason };
     }

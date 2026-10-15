@@ -516,3 +516,34 @@ GM-index jobs additionally provide optional `gmIndex.progress:{label,completedSt
 GM-index preparation and historical summary stages retry malformed JSON/schema outputs automatically (up to two corrections per step). A job stays running during those corrections; completed checkpoint steps remain saved. Invalid UUID feedback explicitly instructs exact copying from owned inputs without exposing the rejected value; malformed references remain rejected. Exhaustion exposes the existing failed/Resume controls. Generic provider failures use the same bounded retry policy. Quota, login, cancellation, ownership loss and isolation failures are not automatically repeated.
 
 Per-turn updater contexts carry the complete index once with freshness IDs/diagnostics, selected complete knowledge originals and navigation for other records. Selection includes indexed knowledge references, changed records, accepted correction targets and explicit handoff references, plus relevant facts under the existing soft target. Explicitly referenced inactive records remain supplied in full. The updater still reviews all foundation and directions every turn and returns only necessary patches. It receives five read-only tools: source/history search and get, plus knowledge get; knowledge IDs are selected directly from the supplied catalogue. Preparation/rebuild retains all six tools, including knowledge search. New private checkpoints bind delivered-original identities to the exact frozen prompt; supplied originals need no duplicate get calls. Missing provenance produces private retry instructions listing required originals, while public errors remain generic. Legacy checkpoints without a delivery manifest retain their frozen prompt and original provenance policy. Source delivery seeds are restored independently for each native invocation; previous invocation reads do not imply delivery in a new conversation.
+
+## GM index execution choice
+
+Campaign PATCH accepts optional `gmIndexUpdateMode`, with backend-owned values
+`separate_agent` (default for missing legacy values) and `same_gm_conversation`.
+The public campaign DTO and archives/templates preserve this preference. It is
+independent of provider/model settings and inert while the GM index is disabled.
+Changing it is rejected while a campaign has an active or unfinished turn.
+GET `/settings` advertises `gmIndex.updateModes` (id, label, default,
+requiresConversation when applicable). GET `/providers` advertises optional
+`gmConversation:{supported,reason}`. Initially Antigravity supports continuing an
+owned stream conversation; other transports keep separate-agent support. An indexed
+turn selecting an unsupported continuation provider fails before generation.
+
+The chosen mode is frozen for each indexed turn. Both execute GM gameplay,
+narrative editor, index maintenance, then atomic turn/index commit. Continuation
+means the same live GM conversation, not another generation with the same model.
+The index phase has only the five read-only index capabilities; earlier gameplay
+schemas do not authorize dice or preparation during that phase.
+
+If a same-GM conversation is lost, the saved outcome stays hidden and ordinary
+resume is unavailable unless a validated index result is already saved. Public
+`finalization.recovery` can advertise `{available,reason,action}`. Its action is
+`separate_index_recovery`, labelled Finish with separate index agent. Explicit
+POST `/campaigns/:id/turns/:turnId/resume-finalization` accepts optional
+`resumeIntent:'continue'|'separate_index_recovery'` beside revision/requestId;
+omission retains ordinary resume. Request identity binds the resolved intent:
+reusing an ID with changed intent returns 409. Recovery never repeats saved
+GM gameplay, dice or an already completed narrative edit. Private session handles
+and checkpoints never appear in player DTOs. Migration 0032 must be applied before
+running this version; startup does not apply migrations automatically.

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FinalizationResumeIntent } from './gmIndexExecution.js';
 
 export enum TurnFinalizationStage {
   NarrativeEditing = 'narrative_editing',
@@ -13,6 +14,14 @@ export const TURN_FINALIZATION_STAGE_OPTIONS = [
 export const turnFinalizationSchema = z
   .object({
     stage: z.enum(TurnFinalizationStage),
+    recovery: z
+      .object({
+        available: z.boolean(),
+        reason: z.string().nullable(),
+        action: z.literal(FinalizationResumeIntent.SeparateIndexRecovery),
+      })
+      .strict()
+      .optional(),
     resume: z.object({ available: z.boolean(), reason: z.string().nullable() }).strict(),
   })
   .strict();

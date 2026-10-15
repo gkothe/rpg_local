@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { GmIndexUpdateMode } from './gmIndexExecution.js';
 import {
   CHARACTER_MUTABLE_FIELDS,
   CharacterType,
@@ -89,6 +90,7 @@ export const campaignRuleBindingSchema = z
   .strict();
 export const campaignPatchSchema = z
   .object({
+    gmIndexUpdateMode: z.enum(GmIndexUpdateMode).optional(),
     revision: z.number().int().nonnegative(),
     name: z.string().trim().min(1).max(MAX_ENTITY_NAME_CHARS).optional(),
     description: z.string().max(MAX_LONG_TEXT_CHARS).optional(),

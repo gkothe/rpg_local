@@ -1,3 +1,5 @@
+import { GameplaySessionBridge, type GameplaySession } from './gameplaySession.js';
+import { generateAntigravityMcpBook } from './antigravityMcpBook.js';
 import { atlasImageInfo } from './atlasVision.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -63,6 +65,7 @@ const CLAUDE_CLI_INPUT_TOKENS = 8000;
 const API_SYSTEM_PROMPT =
   'You are a tabletop RPG narrator. The supplied JSON is the entire campaign context. No tools or outside context.';
 export type Provider = {
+  gmConversation?: { supported: boolean; reason: string | null };
   images?: { supported: boolean; reason: string | null };
   id: AnyProviderId;
   /** Backend-owned: CLI rows are installed executables, API rows are configured remote services. */
@@ -79,6 +82,13 @@ export type Provider = {
   rules?: RulesCapability;
 };
 export interface Generator {
+  withOwnedGameplaySession?<T>(
+    settings: ProviderSettings,
+    use: (session: GameplaySession) => Promise<T>,
+    signal?: AbortSignal,
+    trace?: PromptTraceContext
+  ): Promise<T>;
+  gmConversationCapacity?(settings: ProviderSettings): Promise<void>;
   imageCapacity?(settings: ProviderSettings): Promise<void>;
   generateImage?(
     settings: ProviderSettings,
@@ -157,7 +167,11 @@ export class ProviderService implements Generator {
     if (this.cache && !refresh) return this.cache;
     const result = await this.discoverCli();
     for (const id of API_PROVIDER_IDS) result.push(this.apiProvider(id));
-    for (const p of result)
+    for (const p of result) {
+      p.gmConversation ??= {
+        supported: false,
+        reason: 'This provider does not support continuing the turn GM for index updates.',
+      };
       p.images = {
         supported: p.id === PROVIDER_ID.Codex && p.available && p.supported,
         reason:
@@ -165,6 +179,7 @@ export class ProviderService implements Generator {
             ? null
             : 'Map images require the isolated Codex CLI image adapter.',
       };
+    }
     this.cache = result;
     return result;
   }
@@ -368,6 +383,13 @@ export class ProviderService implements Generator {
             ? `${name} ${version ?? '(version unknown)'} differs from tested version ${testedVersion}. Gameplay is allowed, but CLI compatibility is unverified. If a turn fails, its error will appear here; try a tested CLI version.`
             : null,
         models: diceModels,
+        gmConversation: {
+          supported: id === PROVIDER_ID.Antigravity && isolated && models.length > 0,
+          reason:
+            id === PROVIDER_ID.Antigravity
+              ? reason
+              : 'Same-conversation index updates are currently supported only by Antigravity',
+        },
         rules: {
           supported: rulesSupported,
           reason: rulesSupported
@@ -676,6 +698,72 @@ export class ProviderService implements Generator {
     await this.gameplayCapacity(settings, ceiling);
     // Capacity is a context-selection target; native continuations use CLI capacity.
     return ceiling;
+  }
+  async gmConversationCapacity(settings: ProviderSettings): Promise<void> {
+    await this.gameplayCapacity(settings);
+    if (settings.provider !== PROVIDER_ID.Antigravity)
+      throw new Problem(
+        503,
+        'gm_conversation_unavailable',
+        'Select Antigravity or the separate index agent mode'
+      );
+  }
+  async withOwnedGameplaySession<T>(
+    settings: ProviderSettings,
+    use: (session: GameplaySession) => Promise<T>,
+    signal?: AbortSignal,
+    trace?: PromptTraceContext
+  ): Promise<T> {
+    await this.gmConversationCapacity(settings);
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'rpg-owned-session-'));
+    const bridge = new GameplaySessionBridge();
+    const work = Promise.resolve().then(() => use(bridge));
+    // Observe early errors even before the first phase is requested.
+    void work.catch((error: unknown) => bridge.fail(error));
+    let driver: Promise<void> | undefined;
+    let driverFailure: unknown;
+    let result!: T;
+    let failure: unknown;
+    try {
+      const first = await bridge.first;
+      const model = (await this.list())
+        .find((provider) => provider.id === settings.provider)!
+        .models.find((model) => model.id === settings.model)!;
+      driver = generateAntigravityMcpBook(
+        this.locations.get(settings.provider)!,
+        { ...settings, model: modelSlug(settings, model.efforts) },
+        first.prompt,
+        dir,
+        process.env,
+        {
+          dispatch: first.tools,
+          definitions: first.tools.definitions ?? [],
+          schema: first.schema,
+          systemPrompt: first.systemPrompt,
+        },
+        signal,
+        first.trace ?? trace,
+        bridge
+      ).then(
+        () => {
+          bridge.fail(new Problem(409, 'gm_session_lost', 'The GM conversation ended'));
+        },
+        (error: unknown) => {
+          driverFailure = error;
+          bridge.fail(error);
+        }
+      );
+      result = await work;
+    } catch (error) {
+      failure = error;
+    } finally {
+      bridge.close();
+      if (driver) await driver;
+      await rm(dir, { recursive: true, force: true });
+    }
+    if (failure) throw failure;
+    if (driverFailure) throw driverFailure;
+    return result;
   }
   async generateOwnedGameplay(
     settings: ProviderSettings,
